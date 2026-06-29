@@ -27,7 +27,9 @@ import java.awt.RenderingHints;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.io.IOException;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.function.Consumer;
 
 /**
@@ -41,7 +43,7 @@ public class ConnectionsPanel extends JPanel {
     private final Consumer<ConnectionProfile> connectAction;
     private final DefaultListModel<ConnectionProfile> model = new DefaultListModel<>();
     private final JList<ConnectionProfile> list = new JList<>(model);
-    private String connectedName;
+    private final Set<String> connectedNames = new HashSet<>();
     private String connectingName;
 
     public ConnectionsPanel(ConnectionStore store, Consumer<ConnectionProfile> connectAction) {
@@ -190,17 +192,19 @@ public class ConnectionsPanel extends JPanel {
         }
     }
 
-    /** Marca qual conexao esta ativa (para o indicador de status). */
-    public void setConnected(ConnectionProfile profile) {
-        this.connectedName = (profile == null) ? null : profile.name();
-        this.connectingName = null;
+    /** Define o conjunto de conexoes atualmente conectadas (bolinha verde). */
+    public void setConnectedNames(Set<String> names) {
+        connectedNames.clear();
+        if (names != null) {
+            connectedNames.addAll(names);
+        }
+        connectingName = null;
         list.repaint();
     }
 
     /** Marca qual conexao esta conectando (bolinha ambar). */
     public void setConnecting(ConnectionProfile profile) {
         this.connectingName = (profile == null) ? null : profile.name();
-        this.connectedName = null;
         list.repaint();
     }
 
@@ -243,7 +247,7 @@ public class ConnectionsPanel extends JPanel {
             setIconTextGap(10);
             if (value instanceof ConnectionProfile p) {
                 Color dotColor;
-                if (p.name().equals(connectedName)) {
+                if (connectedNames.contains(p.name())) {
                     dotColor = new Color(0x059669);
                 } else if (p.name().equals(connectingName)) {
                     dotColor = new Color(0xF59E0B);

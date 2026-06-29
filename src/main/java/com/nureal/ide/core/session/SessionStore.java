@@ -7,24 +7,26 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
- * Persiste a sessao do editor (as abas de SQL abertas e seu conteudo) em:
- *   ~/.nureal-ide/session.conf
+ * Persiste a sessao do editor por CONEXAO (workspace): cada conexao guarda suas
+ * proprias abas de SQL. Arquivo:  ~/.nureal-ide/session.conf
  *
  * Objetivo: o usuario NUNCA perde o trabalho. As abas e os SQLs sao gravados
- * continuamente (a cada digitacao, com debounce) e tambem ao fechar o app, de
- * modo que mesmo um desligamento abrupto do computador preserve as queries.
+ * continuamente (a cada digitacao, com debounce) e ao fechar o app.
  *
- * O SQL de cada aba e gravado em Base64 (uma unica linha), entao quebras de
- * linha e caracteres especiais sao mantidos sem precisar de um parser.
+ * O SQL de cada aba e gravado em Base64 (uma unica linha), preservando quebras
+ * de linha e caracteres especiais sem precisar de um parser.
  */
 public class SessionStore {
 
     private static final String DIR_NAME = ".nureal-ide";
     private static final String FILE_NAME = "session.conf";
-    private static final String RECORD_HEADER = "[tab]";
+    private static final String CONN_HEADER = "[conn]";
+    private static final String TAB_HEADER = "[tab]";
 
     private final Path file;
 
@@ -44,30 +46,40 @@ public class SessionStore {
     public record Tab(String title, String sql) {
     }
 
-    /** A sessao inteira: abas + indice da aba selecionada. */
+    /** A sessao de uma conexao: abas + indice da aba selecionada. */
     public record Session(List<Tab> tabs, int selectedIndex) {
     }
 
-    /** Le a sessao salva. Retorna sessao vazia se nao existir. */
-    public Session load() throws IOException {
-        List<Tab> tabs = new ArrayList<>();
-        int selected = 0;
+    /** Le todas as sessoes (por nome de conexao). Vazio se nao existir. */
+    public Map<String, Session> load() throws IOException {
+        Map<String, Session> result = new LinkedHashMap<>();
         if (!Files.exists(file)) {
-            return new Session(tabs, 0);
+            return result;
         }
 
         List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);
+        String connName = null;
+        int selected = 0;
+        List<Tab> tabs = new ArrayList<>();
         String title = null;
         String sql = null;
+
         for (String raw : lines) {
             String line = raw.strip();
             if (line.isEmpty() || line.startsWith("#")) {
                 continue;
             }
-            if (line.equals(RECORD_HEADER)) {
-                if (title != null) {
-                    tabs.add(new Tab(title, sql == null ? "" : sql));
-                }
+            if (line.equals(CONN_HEADER)) {
+                flush(result, connName, tabs, title, sql, selected);
+                connName = "";
+                selected = 0;
+                tabs = new ArrayList<>();
+                title = null;
+                sql = null;
+                continue;
+            }
+            if (line.equals(TAB_HEADER)) {
+                addTab(tabs, title, sql);
                 title = "SQL Query";
                 sql = "";
                 continue;
@@ -79,7 +91,8 @@ public class SessionStore {
             String key = line.substring(0, eq).trim();
             String value = line.substring(eq + 1);
             switch (key) {
-                case "selectedIndex" -> selected = parseInt(value.trim());
+                case "name" -> connName = value;
+                case "selected" -> selected = parseInt(value.trim());
                 case "title" -> title = value.trim();
                 case "sql" -> sql = decode(value.trim());
                 default -> {
@@ -87,31 +100,47 @@ public class SessionStore {
                 }
             }
         }
+        flush(result, connName, tabs, title, sql, selected);
+        return result;
+    }
+
+    private static void flush(Map<String, Session> result, String connName,
+            List<Tab> tabs, String title, String sql, int selected) {
+        if (connName == null) {
+            return;
+        }
+        addTab(tabs, title, sql);
+        int sel = (selected < 0 || selected >= tabs.size()) ? 0 : selected;
+        result.put(connName, new Session(new ArrayList<>(tabs), sel));
+    }
+
+    private static void addTab(List<Tab> tabs, String title, String sql) {
         if (title != null) {
             tabs.add(new Tab(title, sql == null ? "" : sql));
         }
-        if (selected < 0 || selected >= tabs.size()) {
-            selected = 0;
-        }
-        return new Session(tabs, selected);
     }
 
-    /** Grava a sessao, criando a pasta se necessario. */
-    public void save(Session session) throws IOException {
+    /** Grava todas as sessoes, criando a pasta se necessario. */
+    public void save(Map<String, Session> sessions) throws IOException {
         Path parent = file.getParent();
         if (parent != null) {
             Files.createDirectories(parent);
         }
 
         StringBuilder sb = new StringBuilder();
-        sb.append("# Nureal Database IDE - sessao do editor (abas e SQLs)\n");
+        sb.append("# Nureal Database IDE - sessao do editor por conexao\n");
         sb.append("# O SQL esta em Base64 para preservar quebras de linha.\n\n");
-        sb.append("selectedIndex=").append(session.selectedIndex()).append("\n\n");
 
-        for (Tab t : session.tabs()) {
-            sb.append(RECORD_HEADER).append('\n');
-            sb.append("title=").append(nullToEmpty(t.title())).append('\n');
-            sb.append("sql=").append(encode(nullToEmpty(t.sql()))).append('\n');
+        for (Map.Entry<String, Session> e : sessions.entrySet()) {
+            Session s = e.getValue();
+            sb.append(CONN_HEADER).append('\n');
+            sb.append("name=").append(nullToEmpty(e.getKey())).append('\n');
+            sb.append("selected=").append(s.selectedIndex()).append('\n');
+            for (Tab t : s.tabs()) {
+                sb.append(TAB_HEADER).append('\n');
+                sb.append("title=").append(nullToEmpty(t.title())).append('\n');
+                sb.append("sql=").append(encode(nullToEmpty(t.sql()))).append('\n');
+            }
             sb.append('\n');
         }
 

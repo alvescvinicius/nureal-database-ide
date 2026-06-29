@@ -94,8 +94,12 @@ import java.util.ArrayList;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.Vector;
 import java.util.concurrent.CancellationException;
 import java.util.function.BiConsumer;
@@ -115,8 +119,14 @@ public class MainWindow extends JFrame {
     private static final int PAGE_SIZE = 200;
     private static final int MAX_TABS = 15;
 
+    private static final String SCRATCH = "(sem conexao)";
+
     private final DatabaseDialect dialect = new MySqlDialect();
-    private final ConnectionManager connectionManager = new ConnectionManager(dialect);
+    /** Aponta SEMPRE para a conexao do workspace ativo (trocada ao alternar). */
+    private ConnectionManager connectionManager = new ConnectionManager(dialect);
+    private final Map<String, Workspace> workspaces = new LinkedHashMap<>();
+    private Workspace activeWorkspace;
+    private Map<String, SessionStore.Session> savedSessions = new LinkedHashMap<>();
     private final MetadataService metadataService = new MetadataService(dialect);
     private final MetadataCache metadataCache = new MetadataCache();
     private final SqlCompletionProvider completionProvider =
@@ -454,10 +464,8 @@ public class MainWindow extends JFrame {
             }
         });
 
-        // Restaura a sessao salva (abas com SQL); se nao houver, abre uma aba vazia.
-        restoreSession();
-        // A aba "+" (pequena, nao fechavel) fica sempre como ultima aba.
-        addPlusTab();
+        // Inicializa o workspace "sem conexao" com as abas salvas (+ aba "+").
+        initWorkspaces();
 
         JPanel panel = new JPanel(new BorderLayout());
         panel.setBorder(BorderFactory.createEmptyBorder(0, 8, 4, 8));
@@ -639,26 +647,107 @@ public class MainWindow extends JFrame {
 
     // ---------- Persistencia da sessao (nunca perder trabalho) ----------
 
-    /** Restaura as abas/SQLs salvos; se nao houver, abre uma aba vazia. */
-    private void restoreSession() {
-        SessionStore.Session session = null;
+    /** Inicializa o workspace "sem conexao" com as abas salvas e monta o editor. */
+    private void initWorkspaces() {
         try {
-            session = sessionStore.load();
+            savedSessions = sessionStore.load();
         } catch (Exception ex) {
-            session = null;
+            savedSessions = new LinkedHashMap<>();
         }
-        if (session == null || session.tabs().isEmpty()) {
+        Workspace scratch = new Workspace(SCRATCH, null, connectionManager);
+        SessionStore.Session sc = savedSessions.get(SCRATCH);
+        if (sc != null) {
+            scratch.tabs = new ArrayList<>(sc.tabs());
+            scratch.selectedTab = sc.selectedIndex();
+        }
+        workspaces.put(SCRATCH, scratch);
+        activeWorkspace = scratch;
+        rebuildEditorTabs(scratch.tabs, scratch.selectedTab);
+    }
+
+    /** Reconstroi as abas do editor a partir do conteudo salvo (titulo + SQL). */
+    private void rebuildEditorTabs(List<SessionStore.Tab> tabs, int selected) {
+        editorTabs.removeAll();
+        plusTab = null;
+        if (tabs == null || tabs.isEmpty()) {
             addQueryTab();
-            return;
+        } else {
+            for (SessionStore.Tab t : tabs) {
+                String title = (t.title() == null || t.title().isBlank())
+                        ? nextQueryTitle() : t.title();
+                addQueryTab(title, t.sql());
+            }
         }
-        for (SessionStore.Tab t : session.tabs()) {
-            String title = (t.title() == null || t.title().isBlank())
-                    ? "SQL Query " + (editorTabs.getTabCount() + 1) : t.title();
-            addQueryTab(title, t.sql());
+        addPlusTab();
+        if (selected >= 0 && selected < editorTabs.getTabCount()
+                && editorTabs.getComponentAt(selected) != plusTab) {
+            editorTabs.setSelectedIndex(selected);
         }
-        int sel = session.selectedIndex();
-        if (sel >= 0 && sel < editorTabs.getTabCount()) {
-            editorTabs.setSelectedIndex(sel);
+    }
+
+    /** Captura o conteudo atual das abas do editor (titulo + SQL). */
+    private List<SessionStore.Tab> collectTabs() {
+        List<SessionStore.Tab> list = new ArrayList<>();
+        for (int i = 0; i < editorTabs.getTabCount(); i++) {
+            Component c = editorTabs.getComponentAt(i);
+            if (c instanceof SqlEditorPane sep) {
+                list.add(new SessionStore.Tab(
+                        editorTabs.getTitleAt(i), sep.textArea().getText()));
+            }
+        }
+        return list;
+    }
+
+    /** Salva as abas atuais do editor no workspace ativo. */
+    private void saveActiveTabs() {
+        if (activeWorkspace != null && editorTabs != null) {
+            activeWorkspace.tabs = collectTabs();
+            activeWorkspace.selectedTab = Math.max(editorTabs.getSelectedIndex(), 0);
+        }
+    }
+
+    /**
+     * Ativa um workspace: guarda as abas do ativo, troca a conexao corrente,
+     * reconstroi as abas do alvo e atualiza navegador/autocomplete/indicadores.
+     */
+    private void activateWorkspace(Workspace w) {
+        saveActiveTabs();
+        activeWorkspace = w;
+        connectionManager = w.mgr;
+        rebuildEditorTabs(w.tabs, w.selectedTab);
+        if (w.schema != null) {
+            metadataCache.set(w.schema);
+            completionProvider.refresh(w.schema);
+            populateTree(w.schema);
+        } else if (w.schemaList != null) {
+            completionProvider.refresh(null);
+            buildSchemaPicker(w.schemaList);
+        } else {
+            currentSchema = null;
+            completionProvider.refresh(null);
+            objectSearch.setEnabled(false);
+            objectTree.setModel(new DefaultTreeModel(new DefaultMutableTreeNode(
+                    w.profile == null ? "Sem conexao" : "Selecione um esquema")));
+        }
+        refreshConnectionIndicators();
+        runButton.setEnabled(w.mgr.isConnected());
+        focusEditor();
+    }
+
+    /** Atualiza as bolinhas (conectados) e o indicador de status do rodape. */
+    private void refreshConnectionIndicators() {
+        Set<String> connected = new HashSet<>();
+        for (Workspace w : workspaces.values()) {
+            if (w.profile != null && w.mgr.isConnected()) {
+                connected.add(w.name);
+            }
+        }
+        connectionsPanel.setConnectedNames(connected);
+        if (activeWorkspace != null && activeWorkspace.profile != null
+                && activeWorkspace.mgr.isConnected()) {
+            setConnectedState(activeWorkspace.profile.label());
+        } else {
+            setDisconnectedState();
         }
     }
 
@@ -671,22 +760,19 @@ public class MainWindow extends JFrame {
         autosaveTimer.restart();
     }
 
-    /** Grava agora as abas e seus SQLs no disco. */
+    /** Grava agora as abas de TODAS as conexoes (workspaces) no disco. */
     private void saveSession() {
         if (editorTabs == null) {
             return;
         }
-        List<SessionStore.Tab> tabs = new ArrayList<>();
-        for (int i = 0; i < editorTabs.getTabCount(); i++) {
-            Component c = editorTabs.getComponentAt(i);
-            if (c instanceof SqlEditorPane sep) {
-                tabs.add(new SessionStore.Tab(
-                        editorTabs.getTitleAt(i), sep.textArea().getText()));
-            }
+        saveActiveTabs();
+        Map<String, SessionStore.Session> sessions = new LinkedHashMap<>();
+        for (Workspace w : workspaces.values()) {
+            sessions.put(w.name,
+                    new SessionStore.Session(new ArrayList<>(w.tabs), w.selectedTab));
         }
-        int sel = Math.max(editorTabs.getSelectedIndex(), 0);
         try {
-            sessionStore.save(new SessionStore.Session(tabs, sel));
+            sessionStore.save(sessions);
         } catch (Exception ex) {
             if (statusBar != null) {
                 statusBar.setText(" Aviso: nao foi possivel salvar a sessao: "
@@ -888,20 +974,29 @@ public class MainWindow extends JFrame {
             effective = profile.withPassword(pw);
         }
         final ConnectionProfile target = effective;
+
+        // Ja conectado a essa conexao? Apenas ativa o workspace dela.
+        Workspace existing = workspaces.get(target.name());
+        if (existing != null && existing.mgr.isConnected()) {
+            activateWorkspace(existing);
+            statusBar.setText(" Workspace: " + target.name());
+            return;
+        }
+
         setConnectingState(target.name());
         connectionsPanel.setConnecting(target);
-        objectTree.setModel(new DefaultTreeModel(
-                new DefaultMutableTreeNode("Conectando...")));
         runButton.setEnabled(false);
         statusBar.setText(" Conectando a " + target.host() + "...");
 
         final boolean pickSchema = target.schema() == null || target.schema().isBlank();
+        final Workspace ws = (existing != null) ? existing
+                : new Workspace(target.name(), target, new ConnectionManager(dialect));
 
         new SwingWorker<Object, Void>() {
             @Override
             protected Object doInBackground() throws Exception {
-                connectionManager.open(target);
-                Connection conn = connectionManager.getConnection();
+                ws.mgr.open(target);
+                Connection conn = ws.mgr.getConnection();
                 if (pickSchema) {
                     return metadataService.listSchemas(conn); // List<String>
                 }
@@ -912,28 +1007,35 @@ public class MainWindow extends JFrame {
             protected void done() {
                 try {
                     Object result = get();
-                    runButton.setEnabled(true);
-                    connectionsPanel.setConnected(target);
-                    setConnectedState(target.label());
-                    setTitle("Nureal Database IDE - " + target.name());
+                    if (existing == null) {
+                        SessionStore.Session saved = savedSessions.get(target.name());
+                        if (saved != null) {
+                            ws.tabs = new ArrayList<>(saved.tabs());
+                            ws.selectedTab = saved.selectedIndex();
+                        }
+                        workspaces.put(target.name(), ws);
+                    }
                     if (pickSchema) {
                         @SuppressWarnings("unchecked")
                         List<String> schemas = (List<String>) result;
-                        buildSchemaPicker(schemas);
-                        statusBar.setText(" Conectado  (" + schemas.size()
+                        ws.schemaList = schemas;
+                        ws.schema = null;
+                    } else {
+                        ws.schema = (SchemaInfo) result;
+                        ws.schemaList = null;
+                    }
+                    activateWorkspace(ws);
+                    setTitle("Nureal Database IDE - " + target.name());
+                    if (pickSchema) {
+                        statusBar.setText(" Conectado  (" + ((List<?>) result).size()
                                 + " esquema(s) - duplo-clique para abrir)");
                     } else {
-                        SchemaInfo schema = (SchemaInfo) result;
-                        metadataCache.set(schema);
-                        completionProvider.refresh(schema);
-                        populateTree(schema);
-                        statusBar.setText(" Conectado  (" + schema.tables().size() + " tabelas)");
+                        statusBar.setText(" Conectado  ("
+                                + ws.schema.tables().size() + " tabelas)");
                     }
                 } catch (Exception ex) {
-                    connectionsPanel.setConnected(null);
-                    setDisconnectedState();
-                    objectTree.setModel(new DefaultTreeModel(
-                            new DefaultMutableTreeNode("Sem conexao")));
+                    connectionsPanel.setConnecting(null);
+                    refreshConnectionIndicators();
                     showError("Falha ao conectar", ex);
                     statusBar.setText(" Falha ao conectar");
                 }
@@ -971,6 +1073,10 @@ public class MainWindow extends JFrame {
             protected void done() {
                 try {
                     SchemaInfo schema = get();
+                    if (activeWorkspace != null) {
+                        activeWorkspace.schema = schema;
+                        activeWorkspace.schemaList = null;
+                    }
                     metadataCache.set(schema);
                     completionProvider.refresh(schema);
                     populateTree(schema);
@@ -2351,6 +2457,23 @@ public class MainWindow extends JFrame {
         Throwable cause = (ex.getCause() != null) ? ex.getCause() : ex;
         JOptionPane.showMessageDialog(
                 this, cause.getMessage(), title, JOptionPane.ERROR_MESSAGE);
+    }
+
+    /** Workspace de uma conexao: sua sessao JDBC, esquema e abas de SQL proprias. */
+    private static final class Workspace {
+        final String name;                 // nome da conexao (ou SCRATCH)
+        final ConnectionProfile profile;   // null para o workspace sem conexao
+        final ConnectionManager mgr;        // gerenciador JDBC proprio
+        SchemaInfo schema;                  // esquema carregado (ou null)
+        List<String> schemaList;            // lista de esquemas (schema em branco)
+        List<SessionStore.Tab> tabs = new ArrayList<>();
+        int selectedTab = 0;
+
+        Workspace(String name, ConnectionProfile profile, ConnectionManager mgr) {
+            this.name = name;
+            this.profile = profile;
+            this.mgr = mgr;
+        }
     }
 
     /** Resultado de um statement: grade (model != null) ou mensagem (update/erro). */
