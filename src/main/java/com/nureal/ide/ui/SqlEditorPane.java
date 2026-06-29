@@ -61,7 +61,7 @@ public class SqlEditorPane extends JPanel {
         textArea.setCodeFoldingEnabled(true);
         textArea.setTabSize(2);
         textArea.setText("");
-        textArea.setFont(pickEditorFont(16));
+        textArea.setFont(pickEditorFont(14));
         textArea.setAntiAliasingEnabled(true);
         textArea.setFractionalFontMetricsEnabled(true);
         textArea.setPaintTabLines(true);

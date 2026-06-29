@@ -30,6 +30,7 @@ import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JList;
+import javax.swing.JProgressBar;
 import javax.swing.ListCellRenderer;
 import javax.swing.RowFilter;
 import javax.swing.JComponent;
@@ -72,6 +73,7 @@ import java.awt.Desktop;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
+import java.awt.Graphics;
 import java.awt.GridBagLayout;
 import java.awt.Toolkit;
 import java.awt.datatransfer.StringSelection;
@@ -89,6 +91,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Vector;
+import java.util.concurrent.CancellationException;
 import java.util.function.BiConsumer;
 import java.util.regex.Pattern;
 
@@ -126,8 +129,13 @@ public class MainWindow extends JFrame {
     private JTextField objectSearch;
     private SchemaInfo currentSchema;
     private JLabel statusBar;
+    private JLabel connStatusLabel;
+    private JProgressBar connProgress;
     private JButton runButton;
     private JButton themeButton;
+    private JComponent resultsOverlay;
+    private SwingWorker<List<QueryResult>, Void> runWorker;
+    private volatile Statement runningStatement;
 
     private boolean dark = false;
     private List<QueryResult> lastResults = new ArrayList<>();
@@ -211,18 +219,62 @@ public class MainWindow extends JFrame {
     }
 
     private JComponent buildFooter() {
-        statusBar = new JLabel(" Pronto - conexoes salvas em: " + connectionStore.location());
+        connStatusLabel = new JLabel();
+        connStatusLabel.setIconTextGap(6);
+        connStatusLabel.setFont(connStatusLabel.getFont().deriveFont(Font.BOLD));
+
+        statusBar = new JLabel(" Pronto");
         statusBar.setForeground(MUTED);
+
+        connProgress = new JProgressBar();
+        connProgress.setIndeterminate(true);
+        connProgress.setPreferredSize(new Dimension(120, 6));
+        connProgress.setVisible(false);
 
         JLabel brand = new JLabel("Nureal");
         brand.setFont(brand.getFont().deriveFont(Font.BOLD));
         brand.setForeground(ACCENT);
 
+        JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 12, 0));
+        left.setOpaque(false);
+        left.add(connStatusLabel);
+        left.add(statusBar);
+
+        JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 12, 0));
+        right.setOpaque(false);
+        right.add(connProgress);
+        right.add(brand);
+
         JPanel footer = new JPanel(new BorderLayout());
-        footer.setBorder(BorderFactory.createEmptyBorder(6, 12, 6, 12));
-        footer.add(statusBar, BorderLayout.WEST);
-        footer.add(brand, BorderLayout.EAST);
+        footer.setBorder(BorderFactory.createEmptyBorder(5, 12, 5, 12));
+        footer.add(left, BorderLayout.WEST);
+        footer.add(right, BorderLayout.EAST);
+
+        setDisconnectedState();
         return footer;
+    }
+
+    // ---------- Estado da conexao (rodape) ----------
+
+    private void setDisconnectedState() {
+        connStatusLabel.setIcon(Icons.dot(10, new Color(0xDC2626)));
+        connStatusLabel.setText("Desconectado");
+        connStatusLabel.setForeground(new Color(0xB91C1C));
+        connProgress.setVisible(false);
+    }
+
+    private void setConnectingState(String name) {
+        connStatusLabel.setIcon(Icons.dot(10, new Color(0xF59E0B)));
+        connStatusLabel.setText("Conectando a " + name + "...");
+        connStatusLabel.setForeground(new Color(0xB45309));
+        connProgress.setVisible(true);
+    }
+
+    private void setConnectedState(String label) {
+        connStatusLabel.setIcon(Icons.dot(10, ACCENT));
+        connStatusLabel.setText("Conectado: " + label);
+        connStatusLabel.setForeground(new Color(0x047857));
+        connProgress.setVisible(false);
     }
 
     // ---------- Lado esquerdo ----------
@@ -233,7 +285,7 @@ public class MainWindow extends JFrame {
                 JSplitPane.VERTICAL_SPLIT, connectionsPanel, buildObjectBrowser());
         split.setResizeWeight(0.5);
         split.setBorder(BorderFactory.createEmptyBorder());
-        split.setPreferredSize(new Dimension(280, 100));
+        split.setPreferredSize(new Dimension(248, 100));
         return split;
     }
 
@@ -272,7 +324,7 @@ public class MainWindow extends JFrame {
         top.add(objectSearch, BorderLayout.SOUTH);
 
         JPanel panel = new JPanel(new BorderLayout(0, 8));
-        panel.setBorder(BorderFactory.createEmptyBorder(12, 12, 12, 12));
+        panel.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
         panel.add(top, BorderLayout.NORTH);
         panel.add(sp, BorderLayout.CENTER);
         return panel;
@@ -585,8 +637,97 @@ public class MainWindow extends JFrame {
         JPanel panel = new JPanel(new BorderLayout(0, 8));
         panel.setBorder(BorderFactory.createEmptyBorder(4, 8, 8, 8));
         panel.add(sectionHeader("RESULTADOS"), BorderLayout.NORTH);
-        panel.add(resultsCards, BorderLayout.CENTER);
+        panel.add(overlayStack(resultsCards), BorderLayout.CENTER);
         return panel;
+    }
+
+    /** Empilha o conteudo dos resultados e um overlay de "carregando" por cima. */
+    private JComponent overlayStack(JComponent content) {
+        resultsOverlay = buildResultsOverlay();
+        JPanel stack = new JPanel(null) {
+            private static final long serialVersionUID = 1L;
+            @Override
+            public void doLayout() {
+                for (Component c : getComponents()) {
+                    c.setBounds(0, 0, getWidth(), getHeight());
+                }
+            }
+        };
+        stack.add(resultsOverlay);
+        stack.add(content);
+        stack.setComponentZOrder(resultsOverlay, 0); // overlay no topo
+        return stack;
+    }
+
+    /** Camada translucida com spinner e botao Cancelar, escondida por padrao. */
+    private JComponent buildResultsOverlay() {
+        JLabel label = new JLabel("Executando consulta...");
+        label.setAlignmentX(Component.CENTER_ALIGNMENT);
+        label.setFont(label.getFont().deriveFont(Font.BOLD, 13f));
+
+        JProgressBar spinner = new JProgressBar();
+        spinner.setIndeterminate(true);
+        spinner.setPreferredSize(new Dimension(200, 6));
+        spinner.setMaximumSize(new Dimension(200, 6));
+        spinner.setAlignmentX(Component.CENTER_ALIGNMENT);
+
+        JButton cancel = new JButton("Cancelar");
+        cancel.setAlignmentX(Component.CENTER_ALIGNMENT);
+        cancel.addActionListener(e -> cancelExecution());
+
+        JPanel card = new JPanel();
+        card.setLayout(new BoxLayout(card, BoxLayout.Y_AXIS));
+        card.setBackground(new Color(0xFFFFFF));
+        card.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(new Color(0xE0E3E7)),
+                BorderFactory.createEmptyBorder(18, 28, 18, 28)));
+        card.add(label);
+        card.add(Box.createVerticalStrut(12));
+        card.add(spinner);
+        card.add(Box.createVerticalStrut(14));
+        card.add(cancel);
+
+        JPanel overlay = new JPanel(new GridBagLayout()) {
+            private static final long serialVersionUID = 1L;
+            @Override
+            protected void paintComponent(Graphics g) {
+                g.setColor(new Color(244, 245, 247, 205)); // dim translucido
+                g.fillRect(0, 0, getWidth(), getHeight());
+                super.paintComponent(g);
+            }
+        };
+        overlay.setOpaque(false);
+        overlay.add(card);
+        // bloqueia interacao com os resultados por tras
+        overlay.addMouseListener(new MouseAdapter() { });
+        overlay.setVisible(false);
+        return overlay;
+    }
+
+    private void showExecuting(boolean executing) {
+        if (resultsOverlay != null) {
+            resultsOverlay.setVisible(executing);
+            resultsOverlay.repaint();
+        }
+    }
+
+    /** Cancela de fato a instrucao em execucao (Statement.cancel) e o worker. */
+    private void cancelExecution() {
+        statusBar.setText(" Cancelando execucao...");
+        Statement st = runningStatement;
+        if (st != null) {
+            // roda em outra thread: nao pode bloquear a EDT esperando o KILL QUERY
+            new Thread(() -> {
+                try {
+                    st.cancel();
+                } catch (SQLException ignore) {
+                    // ignora
+                }
+            }, "cancel-query").start();
+        }
+        if (runWorker != null) {
+            runWorker.cancel(true);
+        }
     }
 
     private JComponent buildEmptyState() {
@@ -656,6 +797,11 @@ public class MainWindow extends JFrame {
             effective = profile.withPassword(pw);
         }
         final ConnectionProfile target = effective;
+        setConnectingState(target.name());
+        connectionsPanel.setConnecting(target);
+        objectTree.setModel(new DefaultTreeModel(
+                new DefaultMutableTreeNode("Conectando...")));
+        runButton.setEnabled(false);
         statusBar.setText(" Conectando a " + target.host() + "...");
 
         new SwingWorker<SchemaInfo, Void>() {
@@ -675,12 +821,16 @@ public class MainWindow extends JFrame {
                     populateTree(schema);
                     runButton.setEnabled(true);
                     connectionsPanel.setConnected(target);
+                    setConnectedState(target.label());
                     setTitle("Nureal Database IDE - " + target.name());
-                    statusBar.setText(" Conectado: " + target.label()
-                            + "  (" + schema.tables().size() + " tabelas)");
+                    statusBar.setText(" Conectado  (" + schema.tables().size() + " tabelas)");
                 } catch (Exception ex) {
+                    connectionsPanel.setConnected(null);
+                    setDisconnectedState();
+                    objectTree.setModel(new DefaultTreeModel(
+                            new DefaultMutableTreeNode("Sem conexao")));
                     showError("Falha ao conectar", ex);
-                    statusBar.setText(" Desconectado");
+                    statusBar.setText(" Falha ao conectar");
                 }
             }
         }.execute();
@@ -742,26 +892,35 @@ public class MainWindow extends JFrame {
         }
         closeOpenCursors();
         runButton.setEnabled(false);
+        showExecuting(true);
         statusBar.setText(" Executando " + statements.size() + " instrucao(oes)...");
 
-        new SwingWorker<List<QueryResult>, Void>() {
+        SwingWorker<List<QueryResult>, Void> worker = new SwingWorker<>() {
             @Override
             protected List<QueryResult> doInBackground() {
                 List<QueryResult> results = new ArrayList<>();
                 Connection conn = connectionManager.getConnection();
                 for (int i = 0; i < statements.size(); i++) {
+                    if (isCancelled()) {
+                        break;
+                    }
                     String sql = statements.get(i);
                     int n = i + 1;
                     long t0 = System.nanoTime();
                     Statement st = null;
                     try {
                         st = conn.createStatement();
+                        // cursor do servidor: busca em lotes do tamanho da pagina
+                        st.setFetchSize(PAGE_SIZE);
+                        runningStatement = st;
                         boolean hasResultSet = st.execute(sql);
-                        long elapsed = (System.nanoTime() - t0) / 1_000_000L;
+                        long execMs = (System.nanoTime() - t0) / 1_000_000L;
                         if (hasResultSet) {
                             ResultSet rs = st.getResultSet();
                             ResultTableModel model = createModel(rs);
+                            long t1 = System.nanoTime();
                             int read = appendPage(model, rs, PAGE_SIZE);
+                            long fetchMs = (System.nanoTime() - t1) / 1_000_000L;
                             boolean hasMore = read == PAGE_SIZE;
                             ResultCursor cursor = null;
                             if (hasMore) {
@@ -771,12 +930,12 @@ public class MainWindow extends JFrame {
                                 st.close();
                             }
                             results.add(QueryResult.grid(
-                                    "Resultado " + n, sql, model, elapsed, cursor));
+                                    "Resultado " + n, sql, model, execMs, fetchMs, cursor));
                         } else {
                             int updated = st.getUpdateCount();
                             st.close();
                             results.add(QueryResult.message("Comando " + n, sql,
-                                    updated + " linha(s) afetada(s)", false, elapsed));
+                                    updated + " linha(s) afetada(s)", false, execMs));
                         }
                     } catch (SQLException ex) {
                         if (st != null) {
@@ -786,10 +945,12 @@ public class MainWindow extends JFrame {
                                 // ignora
                             }
                         }
-                        long elapsed = (System.nanoTime() - t0) / 1_000_000L;
+                        long execMs = (System.nanoTime() - t0) / 1_000_000L;
                         results.add(QueryResult.message(
-                                "Erro " + n, sql, "Erro: " + ex.getMessage(), true, elapsed));
+                                "Erro " + n, sql, "Erro: " + ex.getMessage(), true, execMs));
                         break;
+                    } finally {
+                        runningStatement = null;
                     }
                 }
                 return results;
@@ -797,16 +958,22 @@ public class MainWindow extends JFrame {
 
             @Override
             protected void done() {
+                showExecuting(false);
+                runningStatement = null;
+                runWorker = null;
+                runButton.setEnabled(true);
                 try {
                     showResults(get());
+                } catch (CancellationException ce) {
+                    statusBar.setText(" Execucao cancelada.");
                 } catch (Exception ex) {
                     showError("Erro ao executar SQL", ex);
                     statusBar.setText(" Erro na execucao");
-                } finally {
-                    runButton.setEnabled(true);
                 }
             }
-        }.execute();
+        };
+        runWorker = worker;
+        worker.execute();
     }
 
     private void showResults(List<QueryResult> results) {
@@ -824,7 +991,7 @@ public class MainWindow extends JFrame {
                 grids++;
             } else {
                 JTextArea area = new JTextArea(
-                        r.message() + "\n\n(executado em " + r.elapsedMs() + " ms)");
+                        r.message() + "\n\n(executado em " + r.execMs() + " ms)");
                 area.setEditable(false);
                 content = new JScrollPane(area);
             }
@@ -926,8 +1093,9 @@ public class MainWindow extends JFrame {
         JButton all = new JButton("Carregar tudo");
         Runnable refresh = () -> {
             boolean hasMore = r.cursor() != null && !r.cursor().exhausted;
-            info.setText(r.model().getRowCount() + " linha(s)"
-                    + (hasMore ? "+" : "") + "   ·   " + r.elapsedMs() + " ms");
+            info.setText(r.model().getRowCount() + " linha(s)" + (hasMore ? "+" : "")
+                    + "   ·   execucao " + r.execMs() + " ms"
+                    + "   ·   busca " + r.fetchMs() + " ms");
             more.setVisible(hasMore);
             all.setVisible(hasMore);
         };
@@ -1900,16 +2068,16 @@ public class MainWindow extends JFrame {
 
     /** Resultado de um statement: grade (model != null) ou mensagem (update/erro). */
     private record QueryResult(String title, String sql, DefaultTableModel model,
-                               String message, boolean error, long elapsedMs,
+                               String message, boolean error, long execMs, long fetchMs,
                                ResultCursor cursor) {
         static QueryResult grid(String title, String sql, DefaultTableModel model,
-                long elapsedMs, ResultCursor cursor) {
-            return new QueryResult(title, sql, model, null, false, elapsedMs, cursor);
+                long execMs, long fetchMs, ResultCursor cursor) {
+            return new QueryResult(title, sql, model, null, false, execMs, fetchMs, cursor);
         }
 
         static QueryResult message(String title, String sql, String message,
-                boolean error, long elapsedMs) {
-            return new QueryResult(title, sql, null, message, error, elapsedMs, null);
+                boolean error, long execMs) {
+            return new QueryResult(title, sql, null, message, error, execMs, 0L, null);
         }
     }
 }

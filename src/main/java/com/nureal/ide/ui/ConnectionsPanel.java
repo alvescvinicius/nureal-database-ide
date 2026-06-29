@@ -42,12 +42,13 @@ public class ConnectionsPanel extends JPanel {
     private final DefaultListModel<ConnectionProfile> model = new DefaultListModel<>();
     private final JList<ConnectionProfile> list = new JList<>(model);
     private String connectedName;
+    private String connectingName;
 
     public ConnectionsPanel(ConnectionStore store, Consumer<ConnectionProfile> connectAction) {
         super(new BorderLayout(0, 8));
         this.store = store;
         this.connectAction = connectAction;
-        setBorder(BorderFactory.createEmptyBorder(12, 12, 12, 12));
+        setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
 
         add(buildHeader(), BorderLayout.NORTH);
         add(buildList(), BorderLayout.CENTER);
@@ -192,6 +193,14 @@ public class ConnectionsPanel extends JPanel {
     /** Marca qual conexao esta ativa (para o indicador de status). */
     public void setConnected(ConnectionProfile profile) {
         this.connectedName = (profile == null) ? null : profile.name();
+        this.connectingName = null;
+        list.repaint();
+    }
+
+    /** Marca qual conexao esta conectando (bolinha ambar). */
+    public void setConnecting(ConnectionProfile profile) {
+        this.connectingName = (profile == null) ? null : profile.name();
+        this.connectedName = null;
         list.repaint();
     }
 
@@ -233,8 +242,15 @@ public class ConnectionsPanel extends JPanel {
             setBorder(BorderFactory.createEmptyBorder(6, 12, 6, 12));
             setIconTextGap(10);
             if (value instanceof ConnectionProfile p) {
-                boolean connected = p.name().equals(connectedName);
-                setIcon(statusDot(connected ? new Color(0x059669) : new Color(0xC4C9D1)));
+                Color dotColor;
+                if (p.name().equals(connectedName)) {
+                    dotColor = new Color(0x059669);
+                } else if (p.name().equals(connectingName)) {
+                    dotColor = new Color(0xF59E0B);
+                } else {
+                    dotColor = new Color(0xC4C9D1);
+                }
+                setIcon(statusDot(dotColor));
                 String sub = p.user() + "@" + p.host() + ":" + p.port() + "/" + p.schema();
                 String subColor = isSelected ? "#E5F5EC" : "#6B7280";
                 String family = getFont().getFamily();

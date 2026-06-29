@@ -135,6 +135,17 @@ final class Icons {
         };
     }
 
+    /** Pequeno circulo cheio (indicador de status). */
+    static Icon dot(int size, Color color) {
+        return new BaseIcon(size, color) {
+            @Override
+            void paint(Graphics2D g2, int s) {
+                double m = s * 0.12;
+                g2.fill(new Ellipse2D.Double(m, m, s - 2 * m, s - 2 * m));
+            }
+        };
+    }
+
     /** Icone de grade/tabela usado no estado vazio dos resultados. */
     static Icon grid(int size, Color color) {
         return new BaseIcon(size, color) {

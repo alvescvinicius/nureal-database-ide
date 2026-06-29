@@ -22,8 +22,11 @@ public class MySqlDialect implements DatabaseDialect {
 
     @Override
     public String buildJdbcUrl(ConnectionProfile p) {
+        // useCursorFetch=true + Statement.setFetchSize(n) -> cursor no servidor,
+        // buscando as linhas em lotes (streaming), sem carregar tudo na memoria.
         return String.format(
-                "jdbc:mysql://%s:%d/%s?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC",
+                "jdbc:mysql://%s:%d/%s?useSSL=false&allowPublicKeyRetrieval=true"
+                + "&serverTimezone=UTC&useCursorFetch=true",
                 p.host(), p.port(), p.schema());
     }
 

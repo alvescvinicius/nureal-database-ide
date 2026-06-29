@@ -24,7 +24,7 @@ public class App {
         FlatLaf.registerCustomDefaultsSource("com.nureal.ide.theme");
 
         // Fonte de interface moderna (definida ANTES do setup para ser aplicada)
-        UIManager.put("defaultFont", pickUiFont(13));
+        UIManager.put("defaultFont", pickUiFont(12));
         FlatLightLaf.setup();
 
         SwingUtilities.invokeLater(() -> new MainWindow().setVisible(true));
