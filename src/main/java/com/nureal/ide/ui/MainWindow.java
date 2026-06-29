@@ -19,6 +19,7 @@ import com.nureal.ide.core.metadata.model.IndexInfo;
 import com.nureal.ide.core.metadata.model.SchemaInfo;
 import com.nureal.ide.core.metadata.model.TableDetails;
 import com.nureal.ide.core.metadata.model.TableInfo;
+import com.nureal.ide.core.safety.SqlRiskAnalyzer;
 import com.nureal.ide.core.session.SessionStore;
 import com.nureal.ide.core.sql.SqlStatementSplitter;
 
@@ -27,8 +28,10 @@ import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
+import javax.swing.JComboBox;
 import javax.swing.JList;
 import javax.swing.ListCellRenderer;
+import javax.swing.RowFilter;
 import javax.swing.JComponent;
 import javax.swing.JDialog;
 import javax.swing.JFileChooser;
@@ -48,6 +51,7 @@ import javax.swing.JTree;
 import javax.swing.SwingConstants;
 import javax.swing.SwingWorker;
 import javax.swing.Timer;
+import javax.swing.UIManager;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import javax.swing.filechooser.FileNameExtensionFilter;
@@ -55,6 +59,8 @@ import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
 import javax.swing.table.JTableHeader;
 import javax.swing.table.TableCellRenderer;
+import javax.swing.table.TableModel;
+import javax.swing.table.TableRowSorter;
 import javax.swing.tree.DefaultMutableTreeNode;
 import javax.swing.tree.DefaultTreeModel;
 import javax.swing.tree.TreePath;
@@ -62,6 +68,7 @@ import java.awt.BorderLayout;
 import java.awt.CardLayout;
 import java.awt.Color;
 import java.awt.Component;
+import java.awt.Desktop;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
@@ -83,6 +90,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Vector;
 import java.util.function.BiConsumer;
+import java.util.regex.Pattern;
 
 /**
  * Janela principal no estilo de uma IDE moderna (FlatLaf): top bar com acao de
@@ -96,6 +104,7 @@ public class MainWindow extends JFrame {
     private static final Color MUTED = new Color(0x6B7280);
 
     private static final int PAGE_SIZE = 200;
+    private static final int MAX_TABS = 15;
 
     private final DatabaseDialect dialect = new MySqlDialect();
     private final ConnectionManager connectionManager = new ConnectionManager(dialect);
@@ -108,6 +117,8 @@ public class MainWindow extends JFrame {
     private Timer autosaveTimer;
 
     private JTabbedPane editorTabs;
+    private Component plusTab;
+    private boolean addingTab;
     private JTabbedPane resultTabs;
     private JPanel resultsCards;
     private JTree objectTree;
@@ -118,7 +129,6 @@ public class MainWindow extends JFrame {
     private JButton runButton;
     private JButton themeButton;
 
-    private int queryCounter = 0;
     private boolean dark = false;
     private List<QueryResult> lastResults = new ArrayList<>();
     private final List<ResultCursor> openCursors = new ArrayList<>();
@@ -274,15 +284,36 @@ public class MainWindow extends JFrame {
         editorTabs.putClientProperty("JTabbedPane.tabClosable", true);
         editorTabs.putClientProperty("JTabbedPane.tabCloseCallback",
                 (BiConsumer<JTabbedPane, Integer>) (pane, index) -> closeQueryTab(index));
-        editorTabs.addChangeListener(e -> scheduleSave());
+        // Selecionar a aba "+" abre uma nova query; qualquer outra troca salva a sessao.
+        editorTabs.addChangeListener(e -> {
+            if (addingTab) {
+                return; // evita reentrancia: insertTab desloca a selecao da aba "+"
+            }
+            if (plusTab != null && editorTabs.getSelectedComponent() == plusTab) {
+                if (!addQueryTab()) {
+                    selectLastRealTab();
+                }
+            } else {
+                scheduleSave();
+            }
+        });
+        // Botao direito no titulo da aba: fechar / fechar as outras.
+        editorTabs.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mousePressed(MouseEvent e) {
+                maybeTabMenu(e);
+            }
 
-        JButton plus = new JButton("+");
-        plus.setToolTipText("Nova query");
-        plus.addActionListener(e -> addQueryTab());
-        editorTabs.putClientProperty("JTabbedPane.trailingComponent", plus);
+            @Override
+            public void mouseReleased(MouseEvent e) {
+                maybeTabMenu(e);
+            }
+        });
 
         // Restaura a sessao salva (abas com SQL); se nao houver, abre uma aba vazia.
         restoreSession();
+        // A aba "+" (pequena, nao fechavel) fica sempre como ultima aba.
+        addPlusTab();
 
         JPanel panel = new JPanel(new BorderLayout());
         panel.setBorder(BorderFactory.createEmptyBorder(0, 8, 4, 8));
@@ -291,11 +322,36 @@ public class MainWindow extends JFrame {
         return panel;
     }
 
-    private void addQueryTab() {
-        addQueryTab("SQL Query " + (++queryCounter), "");
+    private boolean addQueryTab() {
+        return addQueryTab(nextQueryTitle(), "");
     }
 
-    private void addQueryTab(String title, String sql) {
+    /** Menor "SQL Query N" ainda nao usado pelas abas abertas (reaproveita gaps). */
+    private String nextQueryTitle() {
+        int n = 1;
+        while (titleExists("SQL Query " + n)) {
+            n++;
+        }
+        return "SQL Query " + n;
+    }
+
+    private boolean titleExists(String title) {
+        for (int i = 0; i < editorTabs.getTabCount(); i++) {
+            if (editorTabs.getComponentAt(i) != plusTab
+                    && title.equals(editorTabs.getTitleAt(i))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean addQueryTab(String title, String sql) {
+        if (realTabCount() >= MAX_TABS) {
+            if (statusBar != null) {
+                statusBar.setText(" Limite de " + MAX_TABS + " abas atingido.");
+            }
+            return false;
+        }
         SqlEditorPane pane = new SqlEditorPane(completionProvider, this::onRun);
         pane.textArea().setText(sql);
         pane.textArea().setCaretPosition(0);
@@ -304,16 +360,137 @@ public class MainWindow extends JFrame {
             @Override public void removeUpdate(DocumentEvent e) { scheduleSave(); }
             @Override public void changedUpdate(DocumentEvent e) { scheduleSave(); }
         });
-        editorTabs.addTab(title, pane);
-        editorTabs.setSelectedComponent(pane);
+        addingTab = true;
+        try {
+            // insere ANTES da aba "+", para que ela continue sendo a ultima
+            int at = (plusTab != null) ? editorTabs.indexOfComponent(plusTab)
+                    : editorTabs.getTabCount();
+            editorTabs.insertTab(title, null, pane, null, at);
+            editorTabs.setSelectedComponent(pane);
+        } finally {
+            addingTab = false;
+        }
+        scheduleSave();
+        return true;
+    }
+
+    /** Numero de abas reais (exclui a aba "+"). */
+    private int realTabCount() {
+        return editorTabs.getTabCount() - (plusTab != null ? 1 : 0);
+    }
+
+    private void selectLastRealTab() {
+        for (int i = editorTabs.getTabCount() - 1; i >= 0; i--) {
+            if (editorTabs.getComponentAt(i) != plusTab) {
+                editorTabs.setSelectedIndex(i);
+                return;
+            }
+        }
+    }
+
+    /** Menu de contexto do titulo da aba (botao direito). */
+    private void maybeTabMenu(MouseEvent e) {
+        if (!e.isPopupTrigger()) {
+            return;
+        }
+        int idx = editorTabs.indexAtLocation(e.getX(), e.getY());
+        if (idx < 0) {
+            return;
+        }
+        final Component target = editorTabs.getComponentAt(idx);
+        if (target == plusTab) {
+            return;
+        }
+        JPopupMenu menu = new JPopupMenu();
+        JMenuItem rename = new JMenuItem("Renomear...");
+        rename.addActionListener(a -> renameTab(target));
+        JMenuItem close = new JMenuItem("Fechar");
+        close.addActionListener(a -> closeTabComponent(target));
+        JMenuItem closeOthers = new JMenuItem("Fechar as outras");
+        closeOthers.addActionListener(a -> closeOtherTabs(target));
+        menu.add(rename);
+        menu.addSeparator();
+        menu.add(close);
+        menu.add(closeOthers);
+        menu.show(editorTabs, e.getX(), e.getY());
+    }
+
+    private void renameTab(Component target) {
+        int i = editorTabs.indexOfComponent(target);
+        if (i < 0) {
+            return;
+        }
+        String current = editorTabs.getTitleAt(i);
+        String name = JOptionPane.showInputDialog(this, "Novo nome da aba:", current);
+        if (name != null && !name.trim().isEmpty()) {
+            editorTabs.setTitleAt(i, name.trim());
+            scheduleSave();
+        }
+    }
+
+    private void closeTabComponent(Component c) {
+        int i = editorTabs.indexOfComponent(c);
+        if (i >= 0) {
+            closeQueryTab(i);
+        }
+    }
+
+    private void closeOtherTabs(Component keep) {
+        // Seleciona a aba a manter antes de remover as demais (evita cair na "+").
+        int keepIdx = editorTabs.indexOfComponent(keep);
+        if (keepIdx >= 0) {
+            editorTabs.setSelectedIndex(keepIdx);
+        }
+        for (int i = editorTabs.getTabCount() - 1; i >= 0; i--) {
+            Component c = editorTabs.getComponentAt(i);
+            if (c == plusTab || c == keep) {
+                continue;
+            }
+            editorTabs.removeTabAt(i);
+        }
         scheduleSave();
     }
 
+    /** Adiciona a aba "+" (conteudo vazio, pequena e nao fechavel) ao final. */
+    private void addPlusTab() {
+        JPanel dummy = new JPanel();
+        dummy.putClientProperty("JTabbedPane.tabClosable", false);
+        plusTab = dummy;
+        editorTabs.addTab("+", dummy);
+        editorTabs.setToolTipTextAt(editorTabs.indexOfComponent(dummy), "Nova query");
+    }
+
     private void closeQueryTab(int index) {
-        if (editorTabs.getTabCount() > 1) {
-            editorTabs.removeTabAt(index);
-            scheduleSave();
+        if (editorTabs.getComponentAt(index) == plusTab) {
+            return;
         }
+        if (realTabCount() <= 1) {
+            return;
+        }
+        // Se a aba a fechar e a selecionada, selecione antes uma aba real vizinha,
+        // para que a remocao nao caia na aba "+" (o que abriria uma nova query).
+        if (editorTabs.getSelectedIndex() == index) {
+            int neighbor = findAdjacentRealTab(index);
+            if (neighbor >= 0) {
+                editorTabs.setSelectedIndex(neighbor);
+            }
+        }
+        editorTabs.removeTabAt(index);
+        scheduleSave();
+    }
+
+    private int findAdjacentRealTab(int index) {
+        for (int i = index - 1; i >= 0; i--) {
+            if (editorTabs.getComponentAt(i) != plusTab) {
+                return i;
+            }
+        }
+        for (int i = index + 1; i < editorTabs.getTabCount(); i++) {
+            if (editorTabs.getComponentAt(i) != plusTab) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     // ---------- Persistencia da sessao (nunca perder trabalho) ----------
@@ -335,7 +512,6 @@ public class MainWindow extends JFrame {
                     ? "SQL Query " + (editorTabs.getTabCount() + 1) : t.title();
             addQueryTab(title, t.sql());
         }
-        queryCounter = editorTabs.getTabCount();
         int sel = session.selectedIndex();
         if (sel >= 0 && sel < editorTabs.getTabCount()) {
             editorTabs.setSelectedIndex(sel);
@@ -509,6 +685,43 @@ public class MainWindow extends JFrame {
         }.execute();
     }
 
+    /**
+     * Se houver instrucoes de risco (DELETE/UPDATE sem WHERE, DDL), pede
+     * confirmacao listando-as. Retorna true para prosseguir; false para cancelar.
+     * O botao padrao e "Cancelar" (mais seguro).
+     */
+    private boolean confirmRiskyStatements(List<String> statements) {
+        StringBuilder sb = new StringBuilder();
+        int count = 0;
+        for (String sql : statements) {
+            String reason = SqlRiskAnalyzer.riskReason(sql);
+            if (reason != null) {
+                count++;
+                sb.append("• ").append(reason).append('\n')
+                        .append("      ").append(snippet(sql)).append("\n\n");
+            }
+        }
+        if (count == 0) {
+            return true;
+        }
+
+        JTextArea area = new JTextArea(
+                "Atencao: " + count + " instrucao(oes) de risco detectada(s):\n\n" + sb
+                + "Tem certeza de que deseja executar?");
+        area.setEditable(false);
+        area.setOpaque(false);
+        area.setFont(UIManager.getFont("Label.font"));
+        JScrollPane scroll = new JScrollPane(area);
+        scroll.setPreferredSize(new Dimension(560, 240));
+        scroll.setBorder(BorderFactory.createEmptyBorder());
+
+        Object[] options = {"Executar mesmo assim", "Cancelar"};
+        int opt = JOptionPane.showOptionDialog(this, scroll,
+                "Confirmar execucao de risco", JOptionPane.YES_NO_OPTION,
+                JOptionPane.WARNING_MESSAGE, null, options, options[1]);
+        return opt == 0;
+    }
+
     private void onRun() {
         if (!connectionManager.isConnected()) {
             statusBar.setText(" Conecte-se a uma base antes de executar.");
@@ -520,6 +733,10 @@ public class MainWindow extends JFrame {
         }
         final List<String> statements = SqlStatementSplitter.split(editor.currentSql());
         if (statements.isEmpty()) {
+            return;
+        }
+        if (!confirmRiskyStatements(statements)) {
+            statusBar.setText(" Execucao cancelada.");
             return;
         }
         closeOpenCursors();
@@ -720,15 +937,104 @@ public class MainWindow extends JFrame {
         all.addActionListener(e -> loadAll(r, refresh));
         refresh.run();
 
-        JPanel bar = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 3));
-        bar.add(info);
-        bar.add(more);
-        bar.add(all);
+        JButton export = new JButton("Exportar");
+        export.setIcon(Icons.export(14, ACCENT));
+        export.setToolTipText("Exportar resultado para Excel");
+        JPopupMenu exportMenu = new JPopupMenu();
+        JMenuItem exportOne = new JMenuItem("Exportar este resultado...");
+        exportOne.addActionListener(a -> exportResult(r));
+        JMenuItem exportAll = new JMenuItem("Exportar todos (uma aba por resultado)...");
+        exportAll.addActionListener(a -> exportAll());
+        exportMenu.add(exportOne);
+        exportMenu.add(exportAll);
+        export.addActionListener(a -> exportMenu.show(export, 0, export.getHeight()));
+
+        JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 3));
+        left.add(info);
+        left.add(more);
+        left.add(all);
+        JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 3));
+        right.add(export);
+        JPanel bar = new JPanel(new BorderLayout());
+        bar.add(left, BorderLayout.WEST);
+        bar.add(right, BorderLayout.EAST);
 
         JPanel panel = new JPanel(new BorderLayout());
+        panel.add(buildFilterBar(table, r.model()), BorderLayout.NORTH);
         panel.add(scroll, BorderLayout.CENTER);
         panel.add(bar, BorderLayout.SOUTH);
         return panel;
+    }
+
+    /** Exporta um resultado especifico (este) para um arquivo Excel. */
+    private void exportResult(QueryResult r) {
+        if (r.model() == null) {
+            JOptionPane.showMessageDialog(this,
+                    "Este resultado nao possui dados tabulares para exportar.",
+                    "Exportar para Excel", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        File file = chooseSaveFile(r.title());
+        if (file != null) {
+            List<ExcelExporter.TableSheet> sheets = new ArrayList<>();
+            sheets.add(new ExcelExporter.TableSheet(r.title(), r.model()));
+            sheets.add(instructionsSheet(List.of(r)));
+            doExport(sheets, file);
+        }
+    }
+
+    /** Barra de filtro: escolhe a coluna (ou todas) e filtra as linhas ao digitar. */
+    private JComponent buildFilterBar(JTable table, DefaultTableModel model) {
+        JComboBox<String> column = new JComboBox<>();
+        column.addItem("Todas as colunas");
+        for (int c = 0; c < model.getColumnCount(); c++) {
+            column.addItem(model.getColumnName(c));
+        }
+
+        JTextField field = new JTextField(20);
+        field.putClientProperty("JTextField.placeholderText", "Filtrar resultados...");
+        field.putClientProperty("JTextField.showClearButton", true);
+
+        Runnable apply = () -> applyColumnFilter(table, field.getText(), column.getSelectedIndex());
+        field.getDocument().addDocumentListener(new DocumentListener() {
+            @Override public void insertUpdate(DocumentEvent e) { apply.run(); }
+            @Override public void removeUpdate(DocumentEvent e) { apply.run(); }
+            @Override public void changedUpdate(DocumentEvent e) { apply.run(); }
+        });
+        column.addActionListener(e -> apply.run());
+
+        JPanel filterBar = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 3));
+        JLabel icon = new JLabel("Filtro:");
+        icon.setForeground(MUTED);
+        filterBar.add(icon);
+        filterBar.add(column);
+        filterBar.add(field);
+        return filterBar;
+    }
+
+    /** Aplica um filtro "contem" (sem diferenciar caixa) na coluna escolhida. */
+    @SuppressWarnings("unchecked")
+    private void applyColumnFilter(JTable table, String text, int columnChoice) {
+        if (!(table.getRowSorter() instanceof TableRowSorter)) {
+            return;
+        }
+        TableRowSorter<TableModel> sorter =
+                (TableRowSorter<TableModel>) table.getRowSorter();
+        String t = text == null ? "" : text.trim();
+        if (t.isEmpty()) {
+            sorter.setRowFilter(null);
+            return;
+        }
+        String regex = "(?i)" + Pattern.quote(t);
+        try {
+            if (columnChoice <= 0) {
+                sorter.setRowFilter(RowFilter.regexFilter(regex));
+            } else {
+                sorter.setRowFilter(RowFilter.regexFilter(regex, columnChoice - 1));
+            }
+        } catch (RuntimeException ex) {
+            sorter.setRowFilter(null);
+        }
     }
 
     /** Le ate {@code max} linhas do cursor para o modelo (na EDT). */
@@ -844,6 +1150,35 @@ public class MainWindow extends JFrame {
             list.revalidate();
             list.repaint();
         });
+        // mantem a numeracao em sincronia com ordenacao/filtro
+        if (table.getRowSorter() != null) {
+            table.getRowSorter().addRowSorterListener(e -> {
+                list.revalidate();
+                list.repaint();
+            });
+        }
+        // clicar no numero seleciona a LINHA inteira (Shift = intervalo, Ctrl = adiciona)
+        list.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mousePressed(MouseEvent e) {
+                int row = list.locationToIndex(e.getPoint());
+                int lastCol = table.getColumnCount() - 1;
+                if (row < 0 || lastCol < 0) {
+                    return;
+                }
+                table.requestFocusInWindow();
+                table.setColumnSelectionInterval(0, lastCol);
+                if (e.isControlDown()) {
+                    table.addRowSelectionInterval(row, row);
+                } else if (e.isShiftDown()) {
+                    int anchor = table.getSelectionModel().getAnchorSelectionIndex();
+                    table.setRowSelectionInterval(anchor < 0 ? row : anchor, row);
+                } else {
+                    table.setRowSelectionInterval(row, row);
+                }
+                table.scrollRectToVisible(table.getCellRect(row, 0, true));
+            }
+        });
         return list;
     }
 
@@ -859,14 +1194,21 @@ public class MainWindow extends JFrame {
 
     private void installCopyMenu(JTable table) {
         JPopupMenu menu = new JPopupMenu();
+        JMenuItem selectRow = new JMenuItem("Selecionar linha");
+        JMenuItem selectAll = new JMenuItem("Selecionar tudo (Ctrl+A)");
         JMenuItem copyCell = new JMenuItem("Copiar celula");
         JMenuItem copyRow = new JMenuItem("Copiar linha");
         JMenuItem copyCol = new JMenuItem("Copiar coluna");
         JMenuItem copySel = new JMenuItem("Copiar selecao com cabecalho");
+        selectRow.addActionListener(e -> selectFullRow(table));
+        selectAll.addActionListener(e -> table.selectAll());
         copyCell.addActionListener(e -> copyCell(table));
         copyRow.addActionListener(e -> copyRows(table));
         copyCol.addActionListener(e -> copyColumn(table));
         copySel.addActionListener(e -> copySelectionWithHeader(table));
+        menu.add(selectRow);
+        menu.add(selectAll);
+        menu.addSeparator();
         menu.add(copyCell);
         menu.add(copyRow);
         menu.add(copyCol);
@@ -895,6 +1237,15 @@ public class MainWindow extends JFrame {
                 menu.show(table, e.getX(), e.getY());
             }
         });
+    }
+
+    private void selectFullRow(JTable t) {
+        int row = t.getSelectedRow();
+        int lastCol = t.getColumnCount() - 1;
+        if (row >= 0 && lastCol >= 0) {
+            t.setColumnSelectionInterval(0, lastCol);
+            t.setRowSelectionInterval(row, row);
+        }
     }
 
     private void copyCell(JTable t) {
@@ -1016,7 +1367,10 @@ public class MainWindow extends JFrame {
         }
         File file = chooseSaveFile(r.title());
         if (file != null) {
-            doExport(List.of(new ExcelExporter.TableSheet(r.title(), r.model())), file);
+            List<ExcelExporter.TableSheet> sheets = new ArrayList<>();
+            sheets.add(new ExcelExporter.TableSheet(r.title(), r.model()));
+            sheets.add(instructionsSheet(List.of(r)));
+            doExport(sheets, file);
         }
     }
 
@@ -1033,10 +1387,26 @@ public class MainWindow extends JFrame {
                     "Exportar para Excel", JOptionPane.INFORMATION_MESSAGE);
             return;
         }
+        sheets.add(instructionsSheet(lastResults));
         File file = chooseSaveFile("resultados");
         if (file != null) {
             doExport(sheets, file);
         }
+    }
+
+    /** Monta a aba "Instrucoes SQL" (Resultado x SQL executado), estilo PL/SQL Developer. */
+    private ExcelExporter.TableSheet instructionsSheet(List<QueryResult> results) {
+        DefaultTableModel m = new DefaultTableModel(
+                new Object[] {"Resultado", "Instrucao SQL"}, 0) {
+            @Override
+            public boolean isCellEditable(int r, int c) {
+                return false;
+            }
+        };
+        for (QueryResult r : results) {
+            m.addRow(new Object[] {r.title(), r.sql()});
+        }
+        return new ExcelExporter.TableSheet("Instrucoes SQL", m);
     }
 
     private File chooseSaveFile(String defaultName) {
@@ -1068,12 +1438,34 @@ public class MainWindow extends JFrame {
                 try {
                     get();
                     statusBar.setText(" Exportado: " + file.getAbsolutePath());
+                    askToOpen(file);
                 } catch (Exception ex) {
                     showError("Falha ao exportar", ex);
                     statusBar.setText(" Erro ao exportar");
                 }
             }
         }.execute();
+    }
+
+    /** Apos exportar, pergunta se deseja abrir o arquivo no aplicativo padrao. */
+    private void askToOpen(File file) {
+        int opt = JOptionPane.showConfirmDialog(this,
+                "Exportacao concluida:\n" + file.getName() + "\n\nDeseja abrir o arquivo agora?",
+                "Exportar para Excel", JOptionPane.YES_NO_OPTION,
+                JOptionPane.QUESTION_MESSAGE);
+        if (opt != JOptionPane.YES_OPTION) {
+            return;
+        }
+        if (!Desktop.isDesktopSupported()
+                || !Desktop.getDesktop().isSupported(Desktop.Action.OPEN)) {
+            statusBar.setText(" Abertura automatica nao suportada neste sistema.");
+            return;
+        }
+        try {
+            Desktop.getDesktop().open(file);
+        } catch (Exception ex) {
+            showError("Nao foi possivel abrir o arquivo", ex);
+        }
     }
 
     // ---------- Auxiliares ----------

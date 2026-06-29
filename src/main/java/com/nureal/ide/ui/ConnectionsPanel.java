@@ -237,7 +237,9 @@ public class ConnectionsPanel extends JPanel {
                 setIcon(statusDot(connected ? new Color(0x059669) : new Color(0xC4C9D1)));
                 String sub = p.user() + "@" + p.host() + ":" + p.port() + "/" + p.schema();
                 String subColor = isSelected ? "#E5F5EC" : "#6B7280";
-                setText("<html><div style='line-height:1.5'><b>" + escape(p.name())
+                String family = getFont().getFamily();
+                setText("<html><div style='font-family:" + family + ";line-height:1.5'><b>"
+                        + escape(p.name())
                         + "</b><br><span style='color:" + subColor + ";font-size:10px'>"
                         + escape(sub) + "</span></div></html>");
             }

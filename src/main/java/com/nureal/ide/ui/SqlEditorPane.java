@@ -66,9 +66,11 @@ public class SqlEditorPane extends JPanel {
         textArea.setFractionalFontMetricsEnabled(true);
         textArea.setPaintTabLines(true);
         textArea.setHighlightCurrentLine(true);
+        // Fundo do editor em cinza bem claro (nao branco puro) p/ cansar menos a vista
+        textArea.setBackground(new Color(0xF6, 0xF7, 0xF9));
         // Realces translucidos (verde da marca) para um visual mais suave
-        textArea.setCurrentLineHighlightColor(new Color(0x16, 0xA3, 0x4A, 22));
-        textArea.setSelectionColor(new Color(0x16, 0xA3, 0x4A, 70));
+        textArea.setCurrentLineHighlightColor(new Color(0x05, 0x96, 0x69, 22));
+        textArea.setSelectionColor(new Color(0x05, 0x96, 0x69, 60));
         textArea.setMarkAllHighlightColor(new Color(0x22, 0xC5, 0x5E, 90));
 
         AutoCompletion ac = new AutoCompletion(provider);
@@ -133,6 +135,9 @@ public class SqlEditorPane extends JPanel {
 
         RTextScrollPane scroll = new RTextScrollPane(textArea);
         scroll.setBorder(BorderFactory.createEmptyBorder());
+        // Gutter (numeros de linha) num cinza levemente mais fechado que o editor
+        scroll.getGutter().setBackground(new Color(0xEC, 0xEE, 0xF1));
+        scroll.getGutter().setBorderColor(new Color(0xE0, 0xE3, 0xE7));
         add(scroll, BorderLayout.CENTER);
         add(buildFindBar(), BorderLayout.SOUTH);
     }

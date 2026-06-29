@@ -105,6 +105,32 @@ final class Icons {
         };
     }
 
+    /** Icone de exportar (seta para baixo sobre uma bandeja). */
+    static Icon export(int size, Color color) {
+        return new BaseIcon(size, color) {
+            @Override
+            void paint(Graphics2D g2, int s) {
+                g2.setStroke(new BasicStroke(Math.max(1.3f, s * 0.09f),
+                        BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                // haste da seta
+                g2.draw(new Line2D.Double(s * 0.50, s * 0.16, s * 0.50, s * 0.60));
+                // ponta da seta
+                Path2D head = new Path2D.Double();
+                head.moveTo(s * 0.32, s * 0.44);
+                head.lineTo(s * 0.50, s * 0.62);
+                head.lineTo(s * 0.68, s * 0.44);
+                g2.draw(head);
+                // bandeja
+                Path2D tray = new Path2D.Double();
+                tray.moveTo(s * 0.24, s * 0.70);
+                tray.lineTo(s * 0.24, s * 0.80);
+                tray.lineTo(s * 0.76, s * 0.80);
+                tray.lineTo(s * 0.76, s * 0.70);
+                g2.draw(tray);
+            }
+        };
+    }
+
     /** Icone de grade/tabela usado no estado vazio dos resultados. */
     static Icon grid(int size, Color color) {
         return new BaseIcon(size, color) {
