@@ -52,6 +52,7 @@ jobs:
             --input target/dist `
             --main-jar nureal-database-ide.jar `
             --main-class com.nureal.ide.App `
+            --icon src/main/resources/com/nureal/ide/icon/nureal.ico `
             --dest target/installer `
             --vendor "Nureal" `
             --win-dir-chooser `

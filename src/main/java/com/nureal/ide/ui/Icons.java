@@ -6,6 +6,7 @@ import java.awt.Color;
 import java.awt.Component;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
+import java.awt.Image;
 import java.awt.RenderingHints;
 import java.awt.geom.Area;
 import java.awt.geom.Ellipse2D;
@@ -13,6 +14,9 @@ import java.awt.geom.Line2D;
 import java.awt.geom.Path2D;
 import java.awt.geom.Rectangle2D;
 import java.awt.geom.RoundRectangle2D;
+import java.awt.image.BufferedImage;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Icones vetoriais desenhados com Java2D. Sao independentes da fonte (evitam o
@@ -151,6 +155,44 @@ final class Icons {
                 g2.draw(new Line2D.Double(xx, m + w * 0.22, xx, m + w));
             }
         };
+    }
+
+    /** Imagens do logo da Nureal (varios tamanhos) para o icone da janela/taskbar. */
+    static List<Image> brandImages() {
+        int[] sizes = {16, 20, 24, 32, 48, 64, 128, 256};
+        List<Image> images = new ArrayList<>();
+        for (int s : sizes) {
+            images.add(brandImage(s));
+        }
+        return images;
+    }
+
+    /** Logo "N" branco sobre quadrado esmeralda arredondado, no tamanho dado. */
+    static BufferedImage brandImage(int s) {
+        BufferedImage img = new BufferedImage(s, s, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = img.createGraphics();
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL,
+                RenderingHints.VALUE_STROKE_PURE);
+        double pad = s * 0.06;
+        double r = s * 0.22;
+        g.setColor(new Color(0x059669));
+        g.fill(new RoundRectangle2D.Double(pad, pad, s - 2 * pad, s - 2 * pad, r, r));
+        g.setColor(Color.WHITE);
+        g.setStroke(new BasicStroke((float) (s * 0.13),
+                BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        double x0 = s * 0.32;
+        double x1 = s * 0.68;
+        double y0 = s * 0.31;
+        double y1 = s * 0.69;
+        Path2D n = new Path2D.Double();
+        n.moveTo(x0, y1);
+        n.lineTo(x0, y0);
+        n.lineTo(x1, y1);
+        n.lineTo(x1, y0);
+        g.draw(n);
+        g.dispose();
+        return img;
     }
 
     private abstract static class BaseIcon implements Icon {

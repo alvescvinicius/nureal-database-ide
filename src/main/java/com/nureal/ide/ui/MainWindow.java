@@ -136,6 +136,7 @@ public class MainWindow extends JFrame {
     public MainWindow() {
         super("Nureal Database IDE");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        setIconImages(Icons.brandImages());
         setSize(1280, 800);
         setLocationRelativeTo(null);
         buildUi();
