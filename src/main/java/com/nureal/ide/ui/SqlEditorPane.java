@@ -42,8 +42,14 @@ import java.util.Set;
 public class SqlEditorPane extends JPanel {
 
     private static final long serialVersionUID = 1L;
+
+    private static final int BASE_FONT_SIZE = 14;
+    private static final int MIN_FONT_SIZE = 8;
+    private static final int MAX_FONT_SIZE = 42;
+
 	private final RSyntaxTextArea textArea;
     private final SqlFormatter formatter = new SqlFormatter();
+    private int fontSize = BASE_FONT_SIZE;
 
     private final SearchContext searchContext = new SearchContext();
     private JPanel findBar;
@@ -61,7 +67,7 @@ public class SqlEditorPane extends JPanel {
         textArea.setCodeFoldingEnabled(true);
         textArea.setTabSize(2);
         textArea.setText("");
-        textArea.setFont(pickEditorFont(14));
+        textArea.setFont(pickEditorFont(BASE_FONT_SIZE));
         textArea.setAntiAliasingEnabled(true);
         textArea.setFractionalFontMetricsEnabled(true);
         textArea.setPaintTabLines(true);
@@ -133,6 +139,31 @@ public class SqlEditorPane extends JPanel {
         textArea.getInputMap().put(KeyStroke.getKeyStroke("control L"), "to-lower");
         textArea.getInputMap().put(KeyStroke.getKeyStroke("control shift L"), "to-lower");
 
+        // Zoom: Ctrl + '=' / '+' / numpad+  aumenta; Ctrl + '-' diminui; Ctrl+0 reseta
+        textArea.getActionMap().put("zoom-in", new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) { zoom(+1); }
+        });
+        textArea.getActionMap().put("zoom-out", new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) { zoom(-1); }
+        });
+        textArea.getActionMap().put("zoom-reset", new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent e) { setFontSize(BASE_FONT_SIZE); }
+        });
+        int ctrl = InputEvent.CTRL_DOWN_MASK;
+        textArea.getInputMap().put(KeyStroke.getKeyStroke(KeyEvent.VK_EQUALS, ctrl), "zoom-in");
+        textArea.getInputMap().put(KeyStroke.getKeyStroke(KeyEvent.VK_PLUS, ctrl), "zoom-in");
+        textArea.getInputMap().put(KeyStroke.getKeyStroke(KeyEvent.VK_ADD, ctrl), "zoom-in");
+        textArea.getInputMap().put(KeyStroke.getKeyStroke(KeyEvent.VK_MINUS, ctrl), "zoom-out");
+        textArea.getInputMap().put(KeyStroke.getKeyStroke(KeyEvent.VK_SUBTRACT, ctrl), "zoom-out");
+        textArea.getInputMap().put(KeyStroke.getKeyStroke(KeyEvent.VK_0, ctrl), "zoom-reset");
+        // Ctrl + roda do mouse tambem da zoom (sem ctrl, rola normalmente)
+        textArea.addMouseWheelListener(e -> {
+            if (e.isControlDown()) {
+                zoom(e.getWheelRotation() < 0 ? +1 : -1);
+                e.consume();
+            }
+        });
+
         RTextScrollPane scroll = new RTextScrollPane(textArea);
         scroll.setBorder(BorderFactory.createEmptyBorder());
         // Gutter (numeros de linha) num cinza levemente mais fechado que o editor
@@ -151,6 +182,22 @@ public class SqlEditorPane extends JPanel {
         String selected = textArea.getSelectedText();
         String sql = (selected != null && !selected.isBlank()) ? selected : textArea.getText();
         return sql.trim();
+    }
+
+    /** Verdadeiro se ha texto selecionado (entao currentSql() roda so a selecao). */
+    public boolean hasSelection() {
+        String selected = textArea.getSelectedText();
+        return selected != null && !selected.isBlank();
+    }
+
+    /** Ajusta o tamanho da fonte do editor (preservando o peso semibold). */
+    public void setFontSize(int size) {
+        fontSize = Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, size));
+        textArea.setFont(textArea.getFont().deriveFont((float) fontSize));
+    }
+
+    private void zoom(int delta) {
+        setFontSize(fontSize + delta);
     }
 
     /**
@@ -349,11 +396,12 @@ public class SqlEditorPane extends JPanel {
         String[] heavy = {
                 "JetBrains Mono Medium", "JetBrainsMono Medium",
                 "Cascadia Code SemiBold", "Cascadia Mono SemiBold",
-                "Fira Code Medium", "Source Code Pro Medium"};
+                "Fira Code Medium", "Source Code Pro Medium", "IBM Plex Mono Medium"};
         String[] regular = {
                 "JetBrains Mono", "Cascadia Code", "Cascadia Mono", "Fira Code",
-                "Source Code Pro", "Consolas", "DejaVu Sans Mono", "Menlo",
-                "Monaco", "Liberation Mono", "Courier New"};
+                "Iosevka", "IBM Plex Mono", "Hack", "Source Code Pro", "Roboto Mono",
+                "Ubuntu Mono", "Consolas", "SF Mono", "Menlo", "DejaVu Sans Mono",
+                "Liberation Mono", "Monaco", "Courier New"};
         Set<String> available = new HashSet<>(Arrays.asList(GraphicsEnvironment
                 .getLocalGraphicsEnvironment().getAvailableFontFamilyNames()));
 

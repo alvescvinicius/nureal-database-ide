@@ -45,7 +45,7 @@ public final class ConnectionEditDialog {
         addRow(form, c, row++, "Nome:", name);
         addRow(form, c, row++, "Host:", host);
         addRow(form, c, row++, "Porta:", port);
-        addRow(form, c, row++, "Schema (database):", schema);
+        addRow(form, c, row++, "Schema (vazio = listar todos):", schema);
         addRow(form, c, row++, "Usuario:", user);
         addRow(form, c, row++, "Senha:", password);
 

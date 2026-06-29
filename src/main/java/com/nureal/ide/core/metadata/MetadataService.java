@@ -33,6 +33,18 @@ public class MetadataService {
         this.dialect = dialect;
     }
 
+    /** Lista os esquemas (databases) acessiveis ao usuario conectado. */
+    public List<String> listSchemas(Connection conn) throws SQLException {
+        List<String> schemas = new ArrayList<>();
+        try (PreparedStatement ps = conn.prepareStatement(dialect.schemasQuery());
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                schemas.add(rs.getString(1));
+            }
+        }
+        return schemas;
+    }
+
     public SchemaInfo loadSchema(Connection conn, String schema) throws SQLException {
         // 1) Colunas de tudo (tabelas e views) em uma unica consulta.
         Map<String, List<ColumnInfo>> columnsByObject = new LinkedHashMap<>();

@@ -22,12 +22,22 @@ public class MySqlDialect implements DatabaseDialect {
 
     @Override
     public String buildJdbcUrl(ConnectionProfile p) {
+        // Schema em branco -> conecta sem banco padrao (lista todos os esquemas).
+        String schema = (p.schema() == null) ? "" : p.schema().trim();
         // useCursorFetch=true + Statement.setFetchSize(n) -> cursor no servidor,
         // buscando as linhas em lotes (streaming), sem carregar tudo na memoria.
         return String.format(
                 "jdbc:mysql://%s:%d/%s?useSSL=false&allowPublicKeyRetrieval=true"
                 + "&serverTimezone=UTC&useCursorFetch=true",
-                p.host(), p.port(), p.schema());
+                p.host(), p.port(), schema);
+    }
+
+    @Override
+    public String schemasQuery() {
+        return "SELECT SCHEMA_NAME FROM information_schema.SCHEMATA "
+                + "WHERE SCHEMA_NAME NOT IN "
+                + "('information_schema','performance_schema','mysql','sys') "
+                + "ORDER BY SCHEMA_NAME";
     }
 
     @Override

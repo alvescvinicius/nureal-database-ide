@@ -20,6 +20,12 @@ public interface DatabaseDialect {
     String buildJdbcUrl(ConnectionProfile profile);
 
     /**
+     * Lista os esquemas (databases) que o usuario pode acessar. Sem parametros;
+     * retorna uma coluna com o nome do esquema.
+     */
+    String schemasQuery();
+
+    /**
      * Consulta unica que traz TODAS as colunas de TODAS as tabelas de um schema.
      * Deve ter um unico parametro (?) para o nome do schema e retornar as colunas:
      * TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, ORDINAL_POSITION.

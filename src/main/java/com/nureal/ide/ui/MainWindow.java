@@ -23,6 +23,7 @@ import com.nureal.ide.core.safety.SqlRiskAnalyzer;
 import com.nureal.ide.core.session.SessionStore;
 import com.nureal.ide.core.sql.SqlStatementSplitter;
 
+import javax.swing.AbstractAction;
 import javax.swing.AbstractListModel;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
@@ -49,6 +50,7 @@ import javax.swing.JTable;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.JTree;
+import javax.swing.KeyStroke;
 import javax.swing.SwingConstants;
 import javax.swing.SwingWorker;
 import javax.swing.Timer;
@@ -77,6 +79,7 @@ import java.awt.Graphics;
 import java.awt.GridBagLayout;
 import java.awt.Toolkit;
 import java.awt.datatransfer.StringSelection;
+import java.awt.event.ActionEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.event.WindowAdapter;
@@ -88,12 +91,15 @@ import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Locale;
 import java.util.Vector;
 import java.util.concurrent.CancellationException;
 import java.util.function.BiConsumer;
-import java.util.regex.Pattern;
+import java.util.function.Predicate;
 
 /**
  * Janela principal no estilo de uma IDE moderna (FlatLaf): top bar com acao de
@@ -122,6 +128,12 @@ public class MainWindow extends JFrame {
     private JTabbedPane editorTabs;
     private Component plusTab;
     private boolean addingTab;
+    private JSplitPane mainSplit;
+    private JSplitPane centerSplit;
+    private JComponent leftSide;
+    private JComponent resultsArea;
+    private int sidebarLoc = 248;
+    private int resultsLoc = -1;
     private JTabbedPane resultTabs;
     private JPanel resultsCards;
     private JTree objectTree;
@@ -148,6 +160,7 @@ public class MainWindow extends JFrame {
         setSize(1280, 800);
         setLocationRelativeTo(null);
         buildUi();
+        registerWindowShortcuts();
         // Salva a sessao ao fechar (alem do autosave continuo durante a digitacao).
         addWindowListener(new WindowAdapter() {
             @Override
@@ -160,16 +173,19 @@ public class MainWindow extends JFrame {
     private void buildUi() {
         setLayout(new BorderLayout());
 
-        JSplitPane center = new JSplitPane(
-                JSplitPane.VERTICAL_SPLIT, buildEditorArea(), buildResultsArea());
-        center.setResizeWeight(0.62);
-        center.setBorder(BorderFactory.createEmptyBorder());
+        leftSide = buildLeftSide();
+        resultsArea = buildResultsArea();
 
-        JSplitPane main = new JSplitPane(
-                JSplitPane.HORIZONTAL_SPLIT, buildLeftSide(), center);
-        main.setResizeWeight(0.22);
-        main.setBorder(BorderFactory.createEmptyBorder());
-        add(main, BorderLayout.CENTER);
+        centerSplit = new JSplitPane(
+                JSplitPane.VERTICAL_SPLIT, buildEditorArea(), resultsArea);
+        centerSplit.setResizeWeight(0.62);
+        centerSplit.setBorder(BorderFactory.createEmptyBorder());
+
+        mainSplit = new JSplitPane(
+                JSplitPane.HORIZONTAL_SPLIT, leftSide, centerSplit);
+        mainSplit.setResizeWeight(0.22);
+        mainSplit.setBorder(BorderFactory.createEmptyBorder());
+        add(mainSplit, BorderLayout.CENTER);
 
         add(buildFooter(), BorderLayout.SOUTH);
     }
@@ -193,6 +209,14 @@ public class MainWindow extends JFrame {
             }
         });
 
+        JButton toggleSidebar = new JButton(Icons.panelLeft(16, MUTED));
+        toggleSidebar.setToolTipText("Mostrar/ocultar painel lateral (Ctrl+B)");
+        toggleSidebar.addActionListener(e -> toggleSidebar());
+
+        JButton toggleResults = new JButton(Icons.panelBottom(16, MUTED));
+        toggleResults.setToolTipText("Mostrar/ocultar resultados (Ctrl+J)");
+        toggleResults.addActionListener(e -> toggleResults());
+
         themeButton = new JButton(Icons.moon(16, MUTED));
         themeButton.setToolTipText("Alternar tema claro/escuro");
         themeButton.addActionListener(e -> toggleTheme());
@@ -204,6 +228,8 @@ public class MainWindow extends JFrame {
 
         JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
         right.setOpaque(false);
+        right.add(toggleSidebar);
+        right.add(toggleResults);
         right.add(themeButton);
 
         JPanel bar = new JPanel(new BorderLayout());
@@ -216,6 +242,71 @@ public class MainWindow extends JFrame {
     private void styleRunButton() {
         runButton.setBackground(ACCENT);
         runButton.setForeground(Color.WHITE);
+    }
+
+    /** Recolhe/expande o painel lateral, focando o editor. */
+    private void toggleSidebar() {
+        if (leftSide.isVisible()) {
+            sidebarLoc = mainSplit.getDividerLocation();
+            leftSide.setVisible(false);
+            mainSplit.setDividerSize(0);
+            mainSplit.setDividerLocation(0);
+        } else {
+            leftSide.setVisible(true);
+            mainSplit.setDividerSize(4);
+            mainSplit.setDividerLocation(sidebarLoc > 0 ? sidebarLoc : 248);
+        }
+        mainSplit.revalidate();
+        focusEditor();
+    }
+
+    /** Recolhe/expande a area de resultados, focando o editor. */
+    private void toggleResults() {
+        if (resultsArea.isVisible()) {
+            resultsLoc = centerSplit.getDividerLocation();
+            resultsArea.setVisible(false);
+            centerSplit.setDividerSize(0);
+            centerSplit.setDividerLocation(centerSplit.getHeight());
+        } else {
+            resultsArea.setVisible(true);
+            centerSplit.setDividerSize(4);
+            if (resultsLoc > 0) {
+                centerSplit.setDividerLocation(resultsLoc);
+            } else {
+                centerSplit.setResizeWeight(0.62);
+                centerSplit.setDividerLocation(0.62);
+            }
+        }
+        centerSplit.revalidate();
+        focusEditor();
+    }
+
+    private void focusEditor() {
+        SqlEditorPane editor = currentEditor();
+        if (editor != null) {
+            editor.textArea().requestFocusInWindow();
+        }
+    }
+
+    /** Atalhos globais: Ctrl+B (lateral) e Ctrl+J (resultados). */
+    private void registerWindowShortcuts() {
+        JComponent rp = getRootPane();
+        rp.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW)
+                .put(KeyStroke.getKeyStroke("control B"), "toggle-sidebar");
+        rp.getActionMap().put("toggle-sidebar", new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                toggleSidebar();
+            }
+        });
+        rp.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW)
+                .put(KeyStroke.getKeyStroke("control J"), "toggle-results");
+        rp.getActionMap().put("toggle-results", new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                toggleResults();
+            }
+        });
     }
 
     private JComponent buildFooter() {
@@ -804,12 +895,76 @@ public class MainWindow extends JFrame {
         runButton.setEnabled(false);
         statusBar.setText(" Conectando a " + target.host() + "...");
 
+        final boolean pickSchema = target.schema() == null || target.schema().isBlank();
+
+        new SwingWorker<Object, Void>() {
+            @Override
+            protected Object doInBackground() throws Exception {
+                connectionManager.open(target);
+                Connection conn = connectionManager.getConnection();
+                if (pickSchema) {
+                    return metadataService.listSchemas(conn); // List<String>
+                }
+                return metadataService.loadSchema(conn, target.schema()); // SchemaInfo
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    Object result = get();
+                    runButton.setEnabled(true);
+                    connectionsPanel.setConnected(target);
+                    setConnectedState(target.label());
+                    setTitle("Nureal Database IDE - " + target.name());
+                    if (pickSchema) {
+                        @SuppressWarnings("unchecked")
+                        List<String> schemas = (List<String>) result;
+                        buildSchemaPicker(schemas);
+                        statusBar.setText(" Conectado  (" + schemas.size()
+                                + " esquema(s) - duplo-clique para abrir)");
+                    } else {
+                        SchemaInfo schema = (SchemaInfo) result;
+                        metadataCache.set(schema);
+                        completionProvider.refresh(schema);
+                        populateTree(schema);
+                        statusBar.setText(" Conectado  (" + schema.tables().size() + " tabelas)");
+                    }
+                } catch (Exception ex) {
+                    connectionsPanel.setConnected(null);
+                    setDisconnectedState();
+                    objectTree.setModel(new DefaultTreeModel(
+                            new DefaultMutableTreeNode("Sem conexao")));
+                    showError("Falha ao conectar", ex);
+                    statusBar.setText(" Falha ao conectar");
+                }
+            }
+        }.execute();
+    }
+
+    /** Monta a arvore com a lista de esquemas (duplo-clique abre o esquema). */
+    private void buildSchemaPicker(List<String> schemas) {
+        currentSchema = null;
+        objectSearch.setEnabled(false);
+        objectSearch.setText("");
+        DefaultMutableTreeNode root = new DefaultMutableTreeNode(
+                new ObjNode(NodeType.SCHEMA, "Esquemas", "Esquemas", null, null));
+        for (String s : schemas) {
+            root.add(new DefaultMutableTreeNode(
+                    new ObjNode(NodeType.SCHEMA_PICK, s, s, null, null)));
+        }
+        objectTree.setModel(new DefaultTreeModel(root));
+        objectTree.expandPath(new TreePath(root.getPath()));
+    }
+
+    /** Abre um esquema escolhido na lista: define como banco padrao e carrega objetos. */
+    private void openSchema(String schemaName) {
+        statusBar.setText(" Abrindo esquema " + schemaName + "...");
         new SwingWorker<SchemaInfo, Void>() {
             @Override
             protected SchemaInfo doInBackground() throws Exception {
-                connectionManager.open(target);
                 Connection conn = connectionManager.getConnection();
-                return metadataService.loadSchema(conn, target.schema());
+                conn.setCatalog(schemaName); // define o banco padrao (USE schema)
+                return metadataService.loadSchema(conn, schemaName);
             }
 
             @Override
@@ -819,18 +974,12 @@ public class MainWindow extends JFrame {
                     metadataCache.set(schema);
                     completionProvider.refresh(schema);
                     populateTree(schema);
-                    runButton.setEnabled(true);
-                    connectionsPanel.setConnected(target);
-                    setConnectedState(target.label());
-                    setTitle("Nureal Database IDE - " + target.name());
-                    statusBar.setText(" Conectado  (" + schema.tables().size() + " tabelas)");
+                    setConnectedState(schemaName);
+                    statusBar.setText(" Esquema " + schemaName
+                            + "  (" + schema.tables().size() + " tabelas)");
                 } catch (Exception ex) {
-                    connectionsPanel.setConnected(null);
-                    setDisconnectedState();
-                    objectTree.setModel(new DefaultTreeModel(
-                            new DefaultMutableTreeNode("Sem conexao")));
-                    showError("Falha ao conectar", ex);
-                    statusBar.setText(" Falha ao conectar");
+                    showError("Falha ao abrir o esquema", ex);
+                    statusBar.setText(" Erro ao abrir esquema");
                 }
             }
         }.execute();
@@ -891,9 +1040,14 @@ public class MainWindow extends JFrame {
             return;
         }
         closeOpenCursors();
+        if (resultsArea != null && !resultsArea.isVisible()) {
+            toggleResults(); // reabre os resultados para mostrar o carregamento
+        }
         runButton.setEnabled(false);
         showExecuting(true);
-        statusBar.setText(" Executando " + statements.size() + " instrucao(oes)...");
+        boolean usingSelection = editor.hasSelection();
+        statusBar.setText(" Executando " + statements.size() + " instrucao(oes)"
+                + (usingSelection ? "  —  ATENCAO: rodando apenas a SELECAO" : "") + "...");
 
         SwingWorker<List<QueryResult>, Void> worker = new SwingWorker<>() {
             @Override
@@ -996,7 +1150,7 @@ public class MainWindow extends JFrame {
                 content = new JScrollPane(area);
             }
             resultTabs.addTab(r.title(), content);
-            resultTabs.setToolTipTextAt(resultTabs.getTabCount() - 1, snippet(r.sql()));
+            resultTabs.setToolTipTextAt(resultTabs.getTabCount() - 1, sqlTooltip(r.sql()));
             error = error || r.error();
         }
         if (resultTabs.getTabCount() > 0) {
@@ -1012,7 +1166,7 @@ public class MainWindow extends JFrame {
     /** Largura inicial uniforme, ordenacao por coluna e visual mais limpo. */
     private void styleResultTable(JTable table) {
         table.setAutoResizeMode(JTable.AUTO_RESIZE_OFF);
-        table.setRowHeight(24);
+        table.setRowHeight(22);
         table.setShowGrid(true);
         table.setGridColor(new Color(0xEDEFF2));
         table.setIntercellSpacing(new Dimension(0, 1));
@@ -1161,8 +1315,13 @@ public class MainWindow extends JFrame {
         }
 
         JTextField field = new JTextField(20);
-        field.putClientProperty("JTextField.placeholderText", "Filtrar resultados...");
+        field.putClientProperty("JTextField.placeholderText", "Filtrar...  (ex: >= 2026-06-01)");
         field.putClientProperty("JTextField.showClearButton", true);
+        field.setToolTipText("<html>Filtro inteligente:<br>"
+                + "&bull; texto: <b>contem</b> (ex: silva)<br>"
+                + "&bull; operadores: <b>&gt;= &lt;= &gt; &lt; = &lt;&gt;</b> (ex: &gt;= 2026-06-01, &gt; 100)<br>"
+                + "&bull; intervalo: <b>a..b</b> (ex: 2026-01-01..2026-06-30)<br>"
+                + "Entende data e numero mesmo em colunas de texto.</html>");
 
         Runnable apply = () -> applyColumnFilter(table, field.getText(), column.getSelectedIndex());
         field.getDocument().addDocumentListener(new DocumentListener() {
@@ -1181,7 +1340,11 @@ public class MainWindow extends JFrame {
         return filterBar;
     }
 
-    /** Aplica um filtro "contem" (sem diferenciar caixa) na coluna escolhida. */
+    /**
+     * Filtro inteligente: entende operadores (>= <= > < = <> e intervalo a..b) e
+     * compara como DATA ou NUMERO quando possivel (mesmo que a coluna seja texto),
+     * caindo para "contem" (sem diferenciar caixa) no texto simples.
+     */
     @SuppressWarnings("unchecked")
     private void applyColumnFilter(JTable table, String text, int columnChoice) {
         if (!(table.getRowSorter() instanceof TableRowSorter)) {
@@ -1194,15 +1357,127 @@ public class MainWindow extends JFrame {
             sorter.setRowFilter(null);
             return;
         }
-        String regex = "(?i)" + Pattern.quote(t);
-        try {
-            if (columnChoice <= 0) {
-                sorter.setRowFilter(RowFilter.regexFilter(regex));
-            } else {
-                sorter.setRowFilter(RowFilter.regexFilter(regex, columnChoice - 1));
+        final Predicate<String> pred = buildCellPredicate(t);
+        final int modelCol = columnChoice - 1; // -1 = todas as colunas
+        sorter.setRowFilter(new RowFilter<Object, Object>() {
+            @Override
+            public boolean include(Entry<? extends Object, ? extends Object> entry) {
+                if (modelCol < 0) {
+                    for (int c = 0; c < entry.getValueCount(); c++) {
+                        if (pred.test(entry.getStringValue(c))) {
+                            return true;
+                        }
+                    }
+                    return false;
+                }
+                if (modelCol >= entry.getValueCount()) {
+                    return false;
+                }
+                return pred.test(entry.getStringValue(modelCol));
             }
-        } catch (RuntimeException ex) {
-            sorter.setRowFilter(null);
+        });
+    }
+
+    /** Constroi o predicado de cada celula a partir do texto digitado no filtro. */
+    private static Predicate<String> buildCellPredicate(String raw) {
+        String text = raw.trim();
+        int range = text.indexOf("..");
+        if (range > 0 && range < text.length() - 2) {
+            String a = text.substring(0, range).trim();
+            String b = text.substring(range + 2).trim();
+            return cell -> compareCells(cell, a) >= 0 && compareCells(cell, b) <= 0;
+        }
+        for (String op : new String[] {">=", "<=", "<>", "!=", ">", "<", "="}) {
+            if (text.startsWith(op)) {
+                String val = text.substring(op.length()).trim();
+                return cell -> applyOperator(op, compareCells(cell, val));
+            }
+        }
+        String lower = text.toLowerCase(Locale.ROOT);
+        return cell -> cell.toLowerCase(Locale.ROOT).contains(lower);
+    }
+
+    /** Compara celula x valor: tenta data, depois numero, senao texto (caixa-insensivel). */
+    private static int compareCells(String cell, String value) {
+        LocalDateTime dc = parseDate(cell);
+        LocalDateTime dv = parseDate(value);
+        if (dc != null && dv != null) {
+            return dc.compareTo(dv);
+        }
+        Double nc = parseNumber(cell);
+        Double nv = parseNumber(value);
+        if (nc != null && nv != null) {
+            return Double.compare(nc, nv);
+        }
+        return cell.compareToIgnoreCase(value);
+    }
+
+    private static boolean applyOperator(String op, int cmp) {
+        return switch (op) {
+            case ">=" -> cmp >= 0;
+            case "<=" -> cmp <= 0;
+            case ">" -> cmp > 0;
+            case "<" -> cmp < 0;
+            case "=" -> cmp == 0;
+            case "<>", "!=" -> cmp != 0;
+            default -> true;
+        };
+    }
+
+    private static final DateTimeFormatter[] DATETIME_FMTS = {
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"),
+            DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss"),
+            DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm:ss")
+    };
+    private static final DateTimeFormatter[] DATE_FMTS = {
+            DateTimeFormatter.ofPattern("yyyy-MM-dd"),
+            DateTimeFormatter.ofPattern("dd/MM/yyyy")
+    };
+
+    /** Interpreta data/hora ou data; retorna null se nao for data. */
+    private static LocalDateTime parseDate(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        String s = raw.trim().replaceAll("\\.\\d+$", ""); // remove fracao de segundos
+        if (s.isEmpty()) {
+            return null;
+        }
+        for (DateTimeFormatter f : DATETIME_FMTS) {
+            try {
+                return LocalDateTime.parse(s, f);
+            } catch (RuntimeException ignore) {
+                // tenta o proximo
+            }
+        }
+        for (DateTimeFormatter f : DATE_FMTS) {
+            try {
+                return LocalDate.parse(s, f).atStartOfDay();
+            } catch (RuntimeException ignore) {
+                // tenta o proximo
+            }
+        }
+        return null;
+    }
+
+    /** Interpreta numero (aceita 1234.56 e 1.234,56); null se nao for numero. */
+    private static Double parseNumber(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        String s = raw.trim();
+        if (s.isEmpty()) {
+            return null;
+        }
+        try {
+            return Double.valueOf(s);
+        } catch (NumberFormatException ignore) {
+            // tenta formato BR
+        }
+        try {
+            return Double.valueOf(s.replace(".", "").replace(",", "."));
+        } catch (NumberFormatException ignore) {
+            return null;
         }
     }
 
@@ -1644,6 +1919,14 @@ public class MainWindow extends JFrame {
         return oneLine.length() > 80 ? oneLine.substring(0, 80) + "..." : oneLine;
     }
 
+    /** Tooltip com o SQL exato executado (para conferir se o WHERE foi incluido). */
+    private static String sqlTooltip(String sql) {
+        String body = sql.length() > 2000 ? sql.substring(0, 2000) + "..." : sql;
+        String esc = body.replace("&", "&amp;").replace("<", "&lt;")
+                .replace(">", "&gt;").replace("\n", "<br>");
+        return "<html><b>SQL executado:</b><br>" + esc + "</html>";
+    }
+
     /** Cria o modelo (apenas cabecalhos + tipos de coluna) para uma consulta. */
     private static ResultTableModel createModel(ResultSet rs) throws SQLException {
         ResultSetMetaData md = rs.getMetaData();
@@ -1851,8 +2134,12 @@ public class MainWindow extends JFrame {
             return;
         }
         Object node = ((DefaultMutableTreeNode) path.getLastPathComponent()).getUserObject();
-        if (node instanceof ObjNode obj && obj.kind() != null) {
-            showObjectProperties(obj);
+        if (node instanceof ObjNode obj) {
+            if (obj.type() == NodeType.SCHEMA_PICK) {
+                openSchema(obj.name());
+            } else if (obj.kind() != null) {
+                showObjectProperties(obj);
+            }
         }
     }
 
@@ -2046,7 +2333,7 @@ public class MainWindow extends JFrame {
     }
 
     /** Tipos de no na arvore de objetos. */
-    private enum NodeType { SCHEMA, CATEGORY, TABLE, VIEW, ROUTINE, TRIGGER, COLUMN }
+    private enum NodeType { SCHEMA, SCHEMA_PICK, CATEGORY, TABLE, VIEW, ROUTINE, TRIGGER, COLUMN }
 
     /**
      * No da arvore: tipo, texto exibido, nome cru do objeto, o tipo para o DDL

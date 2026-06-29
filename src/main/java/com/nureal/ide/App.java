@@ -3,6 +3,9 @@ package com.nureal.ide;
 import com.formdev.flatlaf.FlatLaf;
 import com.formdev.flatlaf.FlatLightLaf;
 import com.nureal.ide.ui.MainWindow;
+import com.nureal.ide.ui.SqlFoldParser;
+import org.fife.ui.rsyntaxtextarea.SyntaxConstants;
+import org.fife.ui.rsyntaxtextarea.folding.FoldParserManager;
 
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
@@ -26,6 +29,10 @@ public class App {
         // Fonte de interface moderna (definida ANTES do setup para ser aplicada)
         UIManager.put("defaultFont", pickUiFont(12));
         FlatLightLaf.setup();
+
+        // Folding (expandir/recolher) para o editor SQL
+        FoldParserManager.get().addFoldParserMapping(
+                SyntaxConstants.SYNTAX_STYLE_SQL, new SqlFoldParser());
 
         SwingUtilities.invokeLater(() -> new MainWindow().setVisible(true));
     }

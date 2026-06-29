@@ -135,6 +135,35 @@ final class Icons {
         };
     }
 
+    /** Painel lateral (retangulo com coluna esquerda preenchida). */
+    static Icon panelLeft(int size, Color color) {
+        return new BaseIcon(size, color) {
+            @Override
+            void paint(Graphics2D g2, int s) {
+                g2.setStroke(new BasicStroke(Math.max(1f, s * 0.06f)));
+                double m = s * 0.18;
+                double w = s - 2 * m;
+                g2.draw(new RoundRectangle2D.Double(m, m, w, w, s * 0.10, s * 0.10));
+                g2.fill(new RoundRectangle2D.Double(m, m, w * 0.36, w, s * 0.10, s * 0.10));
+            }
+        };
+    }
+
+    /** Painel inferior (retangulo com faixa de baixo preenchida). */
+    static Icon panelBottom(int size, Color color) {
+        return new BaseIcon(size, color) {
+            @Override
+            void paint(Graphics2D g2, int s) {
+                g2.setStroke(new BasicStroke(Math.max(1f, s * 0.06f)));
+                double m = s * 0.18;
+                double w = s - 2 * m;
+                g2.draw(new RoundRectangle2D.Double(m, m, w, w, s * 0.10, s * 0.10));
+                g2.fill(new RoundRectangle2D.Double(m, m + w * 0.62, w, w * 0.38,
+                        s * 0.10, s * 0.10));
+            }
+        };
+    }
+
     /** Pequeno circulo cheio (indicador de status). */
     static Icon dot(int size, Color color) {
         return new BaseIcon(size, color) {

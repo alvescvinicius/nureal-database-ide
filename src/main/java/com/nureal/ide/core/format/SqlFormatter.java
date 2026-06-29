@@ -25,9 +25,6 @@ public final class SqlFormatter {
 
     public enum KeywordCase { UPPER, LOWER, PRESERVE }
 
-    private static final String ITEM_INDENT = "    ";
-    private static final String COND_INDENT = "  ";
-
     private final KeywordCase keywordCase;
 
     public SqlFormatter() {
@@ -258,18 +255,22 @@ public final class SqlFormatter {
         private int depth = 0;
         private Mode mode = Mode.NONE;
         private boolean conditionCtx = false;
-        private boolean expectBy = false;
         private boolean pendingListItem = false;
         private int betweenPending = 0;
         private boolean atLineStart = true;
         private Tok prev = null;
+        private int riverWidth = 6;   // largura do "rio" (keywords alinhadas a direita)
+        private int content = 7;      // coluna onde o conteudo comeca (riverWidth + 1)
 
         Run(KeywordCase keywordCase) {
             this.keywordCase = keywordCase;
         }
 
         String run(List<Tok> toks) {
-            for (int idx = 0; idx < toks.size(); idx++) {
+            riverWidth = computeRiverWidth(toks);
+            content = riverWidth + 1;
+            int idx = 0;
+            while (idx < toks.size()) {
                 Tok t = toks.get(idx);
                 Tok next = (idx + 1 < toks.size()) ? toks.get(idx + 1) : null;
                 switch (t.type()) {
@@ -282,76 +283,115 @@ public final class SqlFormatter {
                         sb.append('\n');
                         atLineStart = true;
                         prev = null;
+                        idx++;
                     }
-                    case BLOCK_COMMENT, STRING, NUMBER, QUOTED -> place(t, t.text());
-                    case WORD -> handleWord(t, next);
-                    case PUNCT -> handlePunct(t);
-                    default -> place(t, t.text());
+                    case BLOCK_COMMENT, STRING, NUMBER, QUOTED -> {
+                        place(t, t.text());
+                        idx++;
+                    }
+                    case WORD -> idx = handleWord(t, next, idx);
+                    case PUNCT -> {
+                        handlePunct(t);
+                        idx++;
+                    }
+                    default -> {
+                        place(t, t.text());
+                        idx++;
+                    }
                 }
             }
             return finish();
         }
 
-        private void handleWord(Tok t, Tok next) {
+        /** Largura do rio = maior keyword de clausula presente (6, 8 com GROUP/ORDER BY). */
+        private int computeRiverWidth(List<Tok> toks) {
+            int width = 6;
+            int d = 0;
+            for (int i = 0; i < toks.size(); i++) {
+                Tok t = toks.get(i);
+                if (t.type() == T.PUNCT) {
+                    if (t.text().equals("(")) {
+                        d++;
+                    } else if (t.text().equals(")")) {
+                        d--;
+                    }
+                    continue;
+                }
+                if (t.type() == T.WORD && d == 0) {
+                    String l = t.text().toLowerCase(Locale.ROOT);
+                    if ((l.equals("group") || l.equals("order")) && i + 1 < toks.size()
+                            && toks.get(i + 1).text().equalsIgnoreCase("by")) {
+                        width = Math.max(width, 8);
+                    } else if (l.equals("returning")) {
+                        width = Math.max(width, 9);
+                    }
+                }
+            }
+            return width;
+        }
+
+        private int handleWord(Tok t, Tok next, int idx) {
             String low = t.text().toLowerCase(Locale.ROOT);
             if (depth == 0) {
                 boolean nextParen = next != null && next.type() == T.PUNCT
                         && next.text().equals("(");
 
-                if (CLAUSE_STARTERS.contains(low)) {
-                    startClauseLine();
+                // GROUP BY / ORDER BY como uma unica frase no rio (consome o BY)
+                if ((low.equals("group") || low.equals("order"))
+                        && next != null && next.text().equalsIgnoreCase("by")) {
+                    riverLine(display(t.text()) + " BY");
+                    mode = Mode.BYLIST;
                     conditionCtx = false;
                     betweenPending = 0;
                     pendingListItem = false;
-                    expectBy = false;
-                    placeWord(t);
-                    applyClauseMode(low);
-                    return;
+                    return idx + 2;
                 }
-                // JOIN (a menos que seja a funcao LEFT(/RIGHT( etc.)
+                if (CLAUSE_STARTERS.contains(low)) {
+                    riverLine(display(t.text()));
+                    conditionCtx = false;
+                    betweenPending = 0;
+                    pendingListItem = false;
+                    applyClauseMode(low);
+                    return idx + 1;
+                }
+                // JOIN (a menos que seja a funcao LEFT(/RIGHT( etc.) -> coluna de conteudo
                 if (JOIN_WORDS.contains(low) && !nextParen) {
                     boolean prevJoin = prev != null && prev.type() == T.WORD
                             && JOIN_WORDS.contains(prev.text().toLowerCase(Locale.ROOT));
                     if (!prevJoin) {
-                        startClauseLine();
+                        joinLine();
                         conditionCtx = false;
                         mode = Mode.NONE;
                         betweenPending = 0;
                         pendingListItem = false;
                     }
                     placeWord(t);
-                    return;
+                    return idx + 1;
                 }
                 if (low.equals("on")) {
                     placeWord(t);
                     conditionCtx = true;
                     mode = Mode.NONE;
-                    return;
-                }
-                if (low.equals("by") && expectBy) {
-                    placeWord(t);
-                    expectBy = false;
-                    mode = Mode.BYLIST;
-                    return;
+                    return idx + 1;
                 }
                 if ((low.equals("and") || low.equals("or"))
                         && conditionCtx && betweenPending == 0) {
-                    condLine();
-                    placeWord(t);
-                    return;
+                    riverLine(display(t.text()));
+                    return idx + 1;
                 }
                 if (low.equals("and") && betweenPending > 0) {
                     betweenPending--;
                     placeWord(t);
-                    return;
+                    return idx + 1;
                 }
                 if (low.equals("between")) {
                     betweenPending++;
                     placeWord(t);
-                    return;
+                    return idx + 1;
                 }
             }
             placeWord(t);
+            return idx + 1;
         }
 
         private void handlePunct(Tok t) {
@@ -383,7 +423,6 @@ public final class SqlFormatter {
                     conditionCtx = false;
                     betweenPending = 0;
                     pendingListItem = false;
-                    expectBy = false;
                 }
                 default -> place(t, p);
             }
@@ -391,20 +430,12 @@ public final class SqlFormatter {
 
         private void applyClauseMode(String low) {
             switch (low) {
-                case "select" -> {
-                    // A primeira coluna fica na MESMA linha do SELECT; apenas as
-                    // colunas seguintes (apos virgula) quebram para novas linhas.
-                    mode = Mode.SELECT;
-                }
+                case "select" -> mode = Mode.SELECT;
                 case "from" -> mode = Mode.FROM;
                 case "set" -> mode = Mode.SET;
                 case "where", "having" -> {
                     mode = Mode.NONE;
                     conditionCtx = true;
-                }
-                case "group", "order" -> {
-                    mode = Mode.NONE;
-                    expectBy = true;
                 }
                 default -> mode = Mode.NONE;
             }
@@ -429,24 +460,34 @@ public final class SqlFormatter {
             prev = tok;
         }
 
-        private void startClauseLine() {
+        /** Linha de clausula no "rio": keyword alinhada a direita + conteudo apos um espaco. */
+        private void riverLine(String phrase) {
             if (sb.length() > 0 && !atLineStart) {
                 trimTrailing();
                 sb.append('\n');
             }
+            int pad = Math.max(0, riverWidth - phrase.length());
+            sb.append(" ".repeat(pad)).append(phrase);
+            atLineStart = false;
+            int sp = phrase.lastIndexOf(' ');
+            prev = new Tok(T.WORD, phrase.substring(sp + 1)); // ultima palavra, p/ espacamento
+        }
+
+        /** Nova linha na coluna de conteudo (usada por JOINs, sob as tabelas do FROM). */
+        private void joinLine() {
+            if (sb.length() > 0 && !atLineStart) {
+                trimTrailing();
+                sb.append('\n');
+            }
+            sb.append(" ".repeat(content));
             atLineStart = true;
             prev = null;
         }
 
+        /** Nova linha de item alinhada na coluna de conteudo (colunas, itens de lista). */
         private void itemLine() {
             trimTrailing();
-            sb.append('\n').append(ITEM_INDENT);
-            atLineStart = true;
-        }
-
-        private void condLine() {
-            trimTrailing();
-            sb.append('\n').append(COND_INDENT);
+            sb.append('\n').append(" ".repeat(content));
             atLineStart = true;
         }
 
