@@ -1,0 +1,131 @@
+package com.nureal.ide.core.autocomplete;
+
+import com.nureal.ide.core.autocomplete.CaretContextResolver.CaretContext;
+import com.nureal.ide.core.metadata.model.ColumnInfo;
+import com.nureal.ide.core.metadata.model.SchemaInfo;
+import com.nureal.ide.core.metadata.model.TableInfo;
+import org.fife.ui.autocomplete.BasicCompletion;
+import org.fife.ui.autocomplete.Completion;
+import org.fife.ui.autocomplete.DefaultCompletionProvider;
+
+import javax.swing.text.JTextComponent;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.TreeMap;
+
+/**
+ * Gera as sugestoes a partir do cache de metadados, sensiveis ao contexto do cursor.
+ * Nunca consulta o banco ao digitar: tudo vem do schema ja carregado em memoria.
+ *
+ * Em contexto de coluna o provider retorna SOMENTE colunas (sem palavras-chave),
+ * escopadas as tabelas em uso no statement.
+ */
+public class SqlCompletionProvider extends DefaultCompletionProvider {
+
+    private static final int MAX_RESULTS = 300;
+
+    private final List<String> keywords;
+
+    private volatile SchemaInfo schema;
+    /** Indice tabela(lowercase) -> TableInfo, para resolver "alias." rapido. */
+    private volatile Map<String, TableInfo> tablesByName = new LinkedHashMap<>();
+
+    public SqlCompletionProvider(List<String> keywords) {
+        this.keywords = keywords;
+        // Auto-ativa o popup ao digitar letras E logo apos um ponto.
+        setAutoActivationRules(true, ".");
+    }
+
+    /** Atualiza o cache apos a estrutura do banco ser lida. */
+    public void refresh(SchemaInfo schema) {
+        this.schema = schema;
+        Map<String, TableInfo> index = new LinkedHashMap<>();
+        if (schema != null) {
+            for (TableInfo t : schema.tables()) {
+                index.put(t.name().toLowerCase(Locale.ROOT), t);
+            }
+        }
+        this.tablesByName = index;
+    }
+
+    @Override
+    protected List<Completion> getCompletionsImpl(JTextComponent comp) {
+        String entered = getAlreadyEnteredText(comp);
+        String prefix = (entered == null) ? "" : entered.toLowerCase(Locale.ROOT);
+
+        CaretContext ctx = CaretContextResolver.resolve(comp.getText(), comp.getCaretPosition());
+
+        // nome -> descricao, ordenado e case-insensitive, ja deduplicado
+        Map<String, String> candidates = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+
+        switch (ctx.kind()) {
+            case COLUMN -> addScopedColumns(candidates, ctx.tables());
+            case TABLE -> addTables(candidates);
+            case GENERAL -> {
+                addKeywords(candidates);
+                addTables(candidates);
+                addScopedColumns(candidates, List.of());
+            }
+        }
+
+        List<Completion> result = new ArrayList<>();
+        for (Map.Entry<String, String> e : candidates.entrySet()) {
+            if (prefix.isEmpty() || e.getKey().toLowerCase(Locale.ROOT).startsWith(prefix)) {
+                result.add(new BasicCompletion(this, e.getKey(), e.getValue()));
+                if (result.size() >= MAX_RESULTS) {
+                    break;
+                }
+            }
+        }
+        return result;
+    }
+
+    private void addKeywords(Map<String, String> out) {
+        for (String kw : keywords) {
+            out.putIfAbsent(kw, "palavra-chave");
+        }
+    }
+
+    private void addTables(Map<String, String> out) {
+        SchemaInfo s = this.schema;
+        if (s == null) {
+            return;
+        }
+        for (TableInfo t : s.tables()) {
+            out.putIfAbsent(t.name(), "tabela");
+        }
+    }
+
+    /**
+     * Colunas escopadas: se 'tables' tem nomes, mostra so as colunas dessas tabelas;
+     * se vier vazio (ou nenhuma resolvida), cai no fallback de todas as colunas.
+     */
+    private void addScopedColumns(Map<String, String> out, List<String> tables) {
+        SchemaInfo s = this.schema;
+        if (s == null) {
+            return;
+        }
+        boolean added = false;
+        for (String name : tables) {
+            TableInfo t = tablesByName.get(name.toLowerCase(Locale.ROOT));
+            if (t != null) {
+                for (ColumnInfo col : t.columns()) {
+                    out.putIfAbsent(col.name(), col.type() + " (" + t.name() + ")");
+                }
+                added = true;
+            }
+        }
+        if (added) {
+            return;
+        }
+        // fallback: todas as colunas do schema
+        for (TableInfo t : s.tables()) {
+            for (ColumnInfo col : t.columns()) {
+                out.putIfAbsent(col.name(), "coluna (" + t.name() + ")");
+            }
+        }
+    }
+}

@@ -1,0 +1,67 @@
+name: Release
+
+# Dispara ao publicar uma tag no formato vX.Y.Z (ex.: v0.1.0).
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write   # necessario para criar o Release e anexar arquivos
+
+jobs:
+  windows-installer:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout do codigo
+        uses: actions/checkout@v4
+
+      - name: Configurar JDK 17 (inclui o jpackage)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: Compilar e gerar o fat JAR
+        run: mvn -B -DskipTests package
+
+      - name: Derivar a versao a partir da tag (remove o 'v')
+        id: ver
+        shell: bash
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Instalar o WiX Toolset (jpackage usa para gerar o .msi)
+        run: choco install wixtoolset --no-progress -y
+
+      - name: Preparar pasta de entrada do jpackage (apenas o fat jar)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path target/dist | Out-Null
+          Copy-Item target/nureal-database-ide.jar target/dist/
+
+      - name: Gerar o instalador Windows (.msi)
+        shell: pwsh
+        run: |
+          Import-Module "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1"
+          refreshenv
+          jpackage `
+            --type msi `
+            --name "Nureal Database IDE" `
+            --app-version "${{ steps.ver.outputs.version }}" `
+            --input target/dist `
+            --main-jar nureal-database-ide.jar `
+            --main-class com.nureal.ide.App `
+            --dest target/installer `
+            --vendor "Nureal" `
+            --win-dir-chooser `
+            --win-menu `
+            --win-shortcut
+
+      - name: Publicar no GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Nureal Database IDE ${{ github.ref_name }}
+          files: |
+            target/installer/*.msi
+            target/nureal-database-ide.jar

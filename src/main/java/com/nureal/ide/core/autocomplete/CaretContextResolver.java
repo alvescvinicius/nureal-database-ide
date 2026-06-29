@@ -1,0 +1,198 @@
+package com.nureal.ide.core.autocomplete;
+
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+/**
+ * Decide o que sugerir com base na posicao do cursor dentro do SQL.
+ *
+ * Regras (na ordem):
+ *  1. "qualificador." -> COLUMN da tabela do qualificador (alias resolvido).
+ *  2. Cursor numa clausula de TABELA (FROM/JOIN/UPDATE/INTO) -> TABLE (schema inteiro).
+ *  3. Cursor numa clausula de COLUNA (SELECT/WHERE/ON/HAVING/SET/GROUP/ORDER/BY)
+ *     -> COLUMN, escopado as tabelas que aparecem no FROM/JOIN do statement atual.
+ *     Tambem oferece os qualificadores (aliases e nomes de tabela) em uso, para
+ *     que digitar "u" + Ctrl+Espaco proponha o alias/tabela (e depois "u." as colunas).
+ *  4. Caso contrario -> GENERAL.
+ *
+ * O escopo e a resolucao de alias usam apenas o statement atual (recortado por ';'),
+ * entao varios comandos no mesmo editor nao se misturam.
+ */
+public final class CaretContextResolver {
+
+    public enum Kind { TABLE, COLUMN, GENERAL }
+
+    /** Uma referencia de tabela no statement, com seu qualificador preferido. */
+    public record TableRef(String qualifier, String table) {
+    }
+
+    /**
+     * Para COLUMN: 'tables' indica de quais tabelas vir as colunas (vazio = todas)
+     * e 'refs' sao as tabelas em uso com seu qualificador preferido (alias se houver,
+     * senao o nome da tabela), usadas para sugerir colunas qualificadas "alias.coluna".
+     */
+    public record CaretContext(Kind kind, List<String> tables, List<TableRef> refs) {
+    }
+
+    private static final Set<String> TABLE_CLAUSE = Set.of("from", "join", "update", "into");
+    private static final Set<String> COLUMN_CLAUSE = Set.of(
+            "select", "where", "on", "having", "set", "group", "order", "by");
+
+    /** Palavras que nunca sao alias/tabela (evita falsos positivos no parser). */
+    private static final Set<String> RESERVED = Set.of(
+            "select", "from", "where", "join", "inner", "left", "right", "outer",
+            "full", "cross", "on", "group", "by", "order", "having", "limit",
+            "offset", "as", "and", "or", "not", "set", "update", "insert", "into",
+            "values", "distinct", "union", "using", "natural");
+
+    /**
+     * Captura "FROM/JOIN/UPDATE/INTO tabela [AS] alias".
+     * O lookahead impede que o alias (opcional) engula uma palavra de clausula seguinte.
+     */
+    private static final Pattern TABLE_REF = Pattern.compile(
+            "(?i)\\b(?:from|join|update|into)\\s+([`\"]?)(\\w+)\\1"
+            + "(?:\\s+(?:as\\s+)?"
+            + "(?!(?:on|where|join|inner|left|right|outer|full|cross|group|order|having|"
+            + "limit|offset|union|set|values|using|natural|and|or)\\b)"
+            + "([a-zA-Z_]\\w*))?");
+
+    private CaretContextResolver() {
+    }
+
+    public static CaretContext resolve(String text, int caret) {
+        if (text == null) {
+            return general();
+        }
+        if (caret < 0) {
+            caret = 0;
+        }
+        if (caret > text.length()) {
+            caret = text.length();
+        }
+
+        // recorta o statement atual (entre ';')
+        int start = (caret == 0) ? 0 : text.lastIndexOf(';', caret - 1) + 1;
+        int end = text.indexOf(';', caret);
+        if (end < 0) {
+            end = text.length();
+        }
+        String stmt = text.substring(start, end);
+        int pos = caret - start;
+        String before = stmt.substring(0, pos);
+
+        // inicio do identificador sendo digitado agora
+        int tokenStart = before.length();
+        while (tokenStart > 0 && isIdent(before.charAt(tokenStart - 1))) {
+            tokenStart--;
+        }
+
+        // 1) "qualificador."
+        if (tokenStart - 1 >= 0 && before.charAt(tokenStart - 1) == '.') {
+            int dot = tokenStart - 1;
+            int k = dot - 1;
+            while (k >= 0 && isIdent(before.charAt(k))) {
+                k--;
+            }
+            String qualifier = before.substring(k + 1, dot);
+            if (!qualifier.isEmpty()) {
+                return new CaretContext(Kind.COLUMN, List.of(resolveAlias(stmt, qualifier)), List.of());
+            }
+        }
+
+        // 2/3) clausula atual
+        String clause = nearestClause(before, tokenStart);
+        if (clause != null) {
+            if (TABLE_CLAUSE.contains(clause)) {
+                return new CaretContext(Kind.TABLE, List.of(), List.of());
+            }
+            if (COLUMN_CLAUSE.contains(clause)) {
+                return new CaretContext(Kind.COLUMN, scopeTables(stmt), scopeRefs(stmt));
+            }
+        }
+
+        // 4) geral
+        return general();
+    }
+
+    /** Tabelas presentes no FROM/JOIN do statement (ordem preservada, sem repetir). */
+    private static List<String> scopeTables(String stmt) {
+        Set<String> tables = new LinkedHashSet<>();
+        Matcher m = TABLE_REF.matcher(stmt);
+        while (m.find()) {
+            tables.add(m.group(2));
+        }
+        return new ArrayList<>(tables);
+    }
+
+    /**
+     * Tabelas em uso com o qualificador preferido (alias quando existe; senao o
+     * nome da tabela). Serve para propor colunas qualificadas "alias.coluna".
+     * Deduplica por qualificador, preservando a ordem de aparicao.
+     */
+    private static List<TableRef> scopeRefs(String stmt) {
+        Map<String, TableRef> byQualifier = new LinkedHashMap<>();
+        Matcher m = TABLE_REF.matcher(stmt);
+        while (m.find()) {
+            String table = m.group(2);
+            String alias = m.group(3);
+            String qualifier = (alias != null && !RESERVED.contains(alias.toLowerCase()))
+                    ? alias : table;
+            byQualifier.putIfAbsent(qualifier.toLowerCase(), new TableRef(qualifier, table));
+        }
+        return new ArrayList<>(byQualifier.values());
+    }
+
+    /** Resolve um alias (ou nome de tabela) para o nome da tabela. */
+    private static String resolveAlias(String stmt, String qualifier) {
+        Matcher m = TABLE_REF.matcher(stmt);
+        while (m.find()) {
+            String table = m.group(2);
+            String alias = m.group(3);
+            if (alias != null
+                    && !RESERVED.contains(alias.toLowerCase())
+                    && alias.equalsIgnoreCase(qualifier)) {
+                return table;
+            }
+            if (table.equalsIgnoreCase(qualifier)) {
+                return table;
+            }
+        }
+        return qualifier;
+    }
+
+    /** Primeira palavra-clausula encontrada ao caminhar para tras a partir do cursor. */
+    private static String nearestClause(String before, int tokenStart) {
+        int i = tokenStart - 1;
+        while (i >= 0) {
+            while (i >= 0 && !isIdent(before.charAt(i))) {
+                i--;
+            }
+            if (i < 0) {
+                break;
+            }
+            int end = i + 1;
+            while (i >= 0 && isIdent(before.charAt(i))) {
+                i--;
+            }
+            String w = before.substring(i + 1, end).toLowerCase();
+            if (TABLE_CLAUSE.contains(w) || COLUMN_CLAUSE.contains(w)) {
+                return w;
+            }
+        }
+        return null;
+    }
+
+    private static CaretContext general() {
+        return new CaretContext(Kind.GENERAL, List.of(), List.of());
+    }
+
+    private static boolean isIdent(char ch) {
+        return Character.isLetterOrDigit(ch) || ch == '_' || ch == '$';
+    }
+}

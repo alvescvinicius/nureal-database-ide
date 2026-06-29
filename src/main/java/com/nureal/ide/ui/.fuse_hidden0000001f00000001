@@ -1,0 +1,65 @@
+package com.nureal.ide.ui;
+
+import com.nureal.ide.core.connection.ConnectionProfile;
+
+import javax.swing.JLabel;
+import javax.swing.JOptionPane;
+import javax.swing.JPanel;
+import javax.swing.JPasswordField;
+import javax.swing.JTextField;
+import java.awt.Component;
+import java.awt.GridLayout;
+
+/**
+ * Formulario simples de conexao MySQL. Retorna null se o usuario cancelar.
+ */
+public final class ConnectionDialog {
+
+    private ConnectionDialog() {
+    }
+
+    public static ConnectionProfile show(Component parent) {
+        ConnectionProfile def = ConnectionProfile.mysqlDefault();
+
+        JTextField host = new JTextField(def.host());
+        JTextField port = new JTextField(String.valueOf(def.port()));
+        JTextField schema = new JTextField(def.schema());
+        JTextField user = new JTextField(def.user());
+        JPasswordField password = new JPasswordField(def.password());
+
+        JPanel panel = new JPanel(new GridLayout(0, 2, 6, 6));
+        panel.add(new JLabel("Host:"));
+        panel.add(host);
+        panel.add(new JLabel("Porta:"));
+        panel.add(port);
+        panel.add(new JLabel("Schema (database):"));
+        panel.add(schema);
+        panel.add(new JLabel("Usuario:"));
+        panel.add(user);
+        panel.add(new JLabel("Senha:"));
+        panel.add(password);
+
+        int result = JOptionPane.showConfirmDialog(
+                parent, panel, "Conectar ao MySQL",
+                JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+
+        if (result != JOptionPane.OK_OPTION) {
+            return null;
+        }
+
+        int portValue;
+        try {
+            portValue = Integer.parseInt(port.getText().trim());
+        } catch (NumberFormatException e) {
+            portValue = 3306;
+        }
+
+        return new ConnectionProfile(
+                "MySQL " + host.getText().trim(),
+                host.getText().trim(),
+                portValue,
+                schema.getText().trim(),
+                user.getText().trim(),
+                new String(password.getPassword()));
+    }
+}

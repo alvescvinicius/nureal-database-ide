@@ -56,51 +56,9 @@ mvn compile
 mvn exec:java
 ```
 
-## Gerar o instalador e publicar no GitHub (Releases)
-
-O projeto já vem com um workflow do GitHub Actions que, **ao publicar uma tag**,
-compila tudo e gera automaticamente um **instalador Windows (.msi)** que embute o
-Java — quem baixar não precisa ter Java instalado.
-
-### Primeira vez: subir o projeto para o GitHub
-```bash
-cd nureal-database-ide
-git init
-git add .
-git commit -m "Nureal Database IDE"
-git branch -M main
-git remote add origin https://github.com/<seu-usuario>/<seu-repo>.git
-git push -u origin main
-```
-
-### Publicar uma versão (gera o instalador sozinho)
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
-Isso dispara o workflow `.github/workflows/release.yml`. Em alguns minutos, vá em
-**Releases** no GitHub: o `Nureal Database IDE-0.1.0.msi` (e o `.jar` portátil)
-estarão lá para download. Para uma nova versão, repita com `v0.2.0`, etc.
-
-### Instalar em outra máquina
-Baixe o `.msi` do Releases, dê duplo-clique e instale. Vai aparecer no Menu
-Iniciar como **Nureal Database IDE** — não precisa de Java na máquina.
-
-### (Opcional) Gerar o instalador localmente, no seu PC Windows
-Precisa de JDK 17 e do [WiX Toolset 3.x](https://github.com/wixtoolset/wix3/releases):
-```powershell
-mvn -DskipTests package
-mkdir target\dist
-copy target\nureal-database-ide.jar target\dist\
-jpackage --type msi --name "Nureal Database IDE" --app-version 0.1.0 `
-  --input target\dist --main-jar nureal-database-ide.jar `
-  --main-class com.nureal.ide.App --dest target\installer `
-  --win-menu --win-shortcut
-```
-
 ## Requisitos
 
-- JDK 17+ (apenas para desenvolver/compilar — o instalador já embute o Java)
+- JDK 17+
 - MySQL acessível para testar a conexão
 
 ## Próximos passos (roadmap)
