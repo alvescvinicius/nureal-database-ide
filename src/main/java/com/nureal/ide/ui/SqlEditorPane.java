@@ -156,19 +156,23 @@ public class SqlEditorPane extends JPanel {
         textArea.getInputMap().put(KeyStroke.getKeyStroke(KeyEvent.VK_MINUS, ctrl), "zoom-out");
         textArea.getInputMap().put(KeyStroke.getKeyStroke(KeyEvent.VK_SUBTRACT, ctrl), "zoom-out");
         textArea.getInputMap().put(KeyStroke.getKeyStroke(KeyEvent.VK_0, ctrl), "zoom-reset");
-        // Ctrl + roda do mouse tambem da zoom (sem ctrl, rola normalmente)
-        textArea.addMouseWheelListener(e -> {
-            if (e.isControlDown()) {
-                zoom(e.getWheelRotation() < 0 ? +1 : -1);
-                e.consume();
-            }
-        });
-
         RTextScrollPane scroll = new RTextScrollPane(textArea);
         scroll.setBorder(BorderFactory.createEmptyBorder());
         // Gutter (numeros de linha) num cinza levemente mais fechado que o editor
         scroll.getGutter().setBackground(new Color(0xEC, 0xEE, 0xF1));
         scroll.getGutter().setBorderColor(new Color(0xE0, 0xE3, 0xE7));
+        // Ctrl + roda do mouse = zoom; sem Ctrl, repassa ao scroll (rola normalmente).
+        // IMPORTANTE: ao adicionar um MouseWheelListener no textArea, o Swing para de
+        // propagar a roda para o scroll pane -> por isso precisamos repassar manualmente.
+        textArea.addMouseWheelListener(e -> {
+            if (e.isControlDown()) {
+                zoom(e.getWheelRotation() < 0 ? +1 : -1);
+            } else {
+                for (var l : scroll.getMouseWheelListeners()) {
+                    l.mouseWheelMoved(e);
+                }
+            }
+        });
         add(scroll, BorderLayout.CENTER);
         add(buildFindBar(), BorderLayout.SOUTH);
     }

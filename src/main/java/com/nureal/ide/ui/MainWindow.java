@@ -1756,14 +1756,20 @@ public class MainWindow extends JFrame {
         copyRow.addActionListener(e -> copyRows(table));
         copyCol.addActionListener(e -> copyColumn(table));
         copySel.addActionListener(e -> copySelectionWithHeader(table));
+        JMenuItem copyInsert = new JMenuItem("Copiar como INSERT");
+        copyInsert.addActionListener(e -> copyAsInsert(table));
+        JMenuItem copyUpdate = new JMenuItem("Copiar como UPDATE");
+        copyUpdate.addActionListener(e -> copyAsUpdate(table));
         menu.add(selectRow);
         menu.add(selectAll);
         menu.addSeparator();
         menu.add(copyCell);
         menu.add(copyRow);
         menu.add(copyCol);
-        menu.addSeparator();
         menu.add(copySel);
+        menu.addSeparator();
+        menu.add(copyInsert);
+        menu.add(copyUpdate);
         table.addMouseListener(new MouseAdapter() {
             @Override
             public void mousePressed(MouseEvent e) {
@@ -1874,6 +1880,101 @@ public class MainWindow extends JFrame {
     private static String cellText(JTable t, int row, int col) {
         Object v = t.getValueAt(row, col);
         return v == null ? "" : v.toString();
+    }
+
+    /** Gera INSERT INTO <tabela> (cols) VALUES (...) para as linhas selecionadas. */
+    private void copyAsInsert(JTable t) {
+        int[] rows = t.getSelectedRows();
+        if (rows.length == 0) {
+            return;
+        }
+        String table = promptTableName();
+        if (table == null) {
+            return;
+        }
+        int cols = t.getColumnCount();
+        StringBuilder colList = new StringBuilder();
+        for (int c = 0; c < cols; c++) {
+            if (c > 0) {
+                colList.append(", ");
+            }
+            colList.append(t.getColumnName(c));
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int ri = 0; ri < rows.length; ri++) {
+            sb.append("INSERT INTO ").append(table).append(" (").append(colList).append(")")
+                    .append(" VALUES (");
+            for (int c = 0; c < cols; c++) {
+                if (c > 0) {
+                    sb.append(", ");
+                }
+                sb.append(sqlValue(t.getValueAt(rows[ri], c)));
+            }
+            sb.append(");");
+            if (ri < rows.length - 1) {
+                sb.append('\n');
+            }
+        }
+        setClipboard(sb.toString());
+    }
+
+    /** Gera UPDATE <tabela> SET ... WHERE <1a coluna> = ... para as linhas selecionadas. */
+    private void copyAsUpdate(JTable t) {
+        int[] rows = t.getSelectedRows();
+        int cols = t.getColumnCount();
+        if (rows.length == 0 || cols == 0) {
+            return;
+        }
+        String table = promptTableName();
+        if (table == null) {
+            return;
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int ri = 0; ri < rows.length; ri++) {
+            sb.append("UPDATE ").append(table).append(" SET ");
+            if (cols == 1) {
+                sb.append(t.getColumnName(0)).append(" = ")
+                        .append(sqlValue(t.getValueAt(rows[ri], 0)));
+            } else {
+                for (int c = 1; c < cols; c++) { // 1a coluna vira chave no WHERE
+                    if (c > 1) {
+                        sb.append(", ");
+                    }
+                    sb.append(t.getColumnName(c)).append(" = ")
+                            .append(sqlValue(t.getValueAt(rows[ri], c)));
+                }
+            }
+            sb.append(" WHERE ").append(t.getColumnName(0)).append(" = ")
+                    .append(sqlValue(t.getValueAt(rows[ri], 0))).append(";");
+            if (ri < rows.length - 1) {
+                sb.append('\n');
+            }
+        }
+        setClipboard(sb.toString());
+    }
+
+    /** Pergunta o nome da tabela (default "tabela"). null = cancelado. */
+    private String promptTableName() {
+        String name = JOptionPane.showInputDialog(this, "Nome da tabela:", "tabela");
+        if (name == null) {
+            return null;
+        }
+        name = name.trim();
+        return name.isEmpty() ? "tabela" : name;
+    }
+
+    /** Formata um valor para SQL: NULL, numero, booleano (1/0) ou string entre aspas. */
+    private static String sqlValue(Object v) {
+        if (v == null) {
+            return "NULL";
+        }
+        if (v instanceof Number) {
+            return v.toString();
+        }
+        if (v instanceof Boolean b) {
+            return b ? "1" : "0";
+        }
+        return "'" + v.toString().replace("'", "''") + "'";
     }
 
     private void setClipboard(String text) {
