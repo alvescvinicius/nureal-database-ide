@@ -5,7 +5,8 @@ import com.nureal.ide.core.connection.ConnectionProfile;
 import java.util.List;
 
 /**
- * Implementacao para MySQL. Le metadados via information_schema em UMA consulta,
+ * Implementacao para MySQL. Le metadados via information_schema em UMA
+ * consulta,
  * que e a base para o autocomplete rapido.
  */
 public class MySqlDialect implements DatabaseDialect {
@@ -21,15 +22,31 @@ public class MySqlDialect implements DatabaseDialect {
     }
 
     @Override
-    public String buildJdbcUrl(ConnectionProfile p) {
-        // Schema em branco -> conecta sem banco padrao (lista todos os esquemas).
-        String schema = (p.schema() == null) ? "" : p.schema().trim();
-        // useCursorFetch=true + Statement.setFetchSize(n) -> cursor no servidor,
-        // buscando as linhas em lotes (streaming), sem carregar tudo na memoria.
-        return String.format(
-                "jdbc:mysql://%s:%d/%s?useSSL=false&allowPublicKeyRetrieval=true"
-                + "&serverTimezone=UTC&useCursorFetch=true",
-                p.host(), p.port(), schema);
+    public String buildJdbcUrl(ConnectionProfile profile) {
+
+        StringBuilder url = new StringBuilder();
+
+        url.append("jdbc:mysql://")
+                .append(profile.host())
+                .append(":")
+                .append(profile.port())
+                .append("/")
+                .append(profile.schema());
+
+        // url.append("?connectionTimeZone=UTC");
+        // url.append("&forceConnectionTimeZoneToSession=true");
+        url.append("?preserveInstants=true");
+
+        return url.toString();
+
+    }
+
+    private static void appendParameter(StringBuilder url, String key, String value) {
+
+        url.append(url.indexOf("?") >= 0 ? '&' : '?')
+                .append(key)
+                .append('=')
+                .append(value);
     }
 
     @Override

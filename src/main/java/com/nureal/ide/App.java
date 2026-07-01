@@ -1,19 +1,21 @@
 package com.nureal.ide;
 
-import com.formdev.flatlaf.FlatLaf;
-import com.formdev.flatlaf.FlatLightLaf;
-import com.nureal.ide.ui.MainWindow;
-import com.nureal.ide.ui.SqlFoldParser;
-import org.fife.ui.rsyntaxtextarea.SyntaxConstants;
-import org.fife.ui.rsyntaxtextarea.folding.FoldParserManager;
-
-import javax.swing.SwingUtilities;
-import javax.swing.UIManager;
 import java.awt.Font;
 import java.awt.GraphicsEnvironment;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
+
+import javax.swing.SwingUtilities;
+import javax.swing.UIManager;
+
+import org.fife.ui.rsyntaxtextarea.SyntaxConstants;
+import org.fife.ui.rsyntaxtextarea.folding.FoldParserManager;
+
+import com.formdev.flatlaf.FlatLaf;
+import com.formdev.flatlaf.FlatLightLaf;
+import com.nureal.ide.ui.MainWindow;
+import com.nureal.ide.ui.SqlFoldParser;
 
 /**
  * Ponto de entrada da Nureal Database IDE.

@@ -1,72 +1,5 @@
 package com.nureal.ide.ui;
 
-import com.formdev.flatlaf.FlatDarkLaf;
-import com.formdev.flatlaf.FlatLaf;
-import com.formdev.flatlaf.FlatLightLaf;
-import com.nureal.ide.core.autocomplete.SqlCompletionProvider;
-import com.nureal.ide.core.connection.ConnectionManager;
-import com.nureal.ide.core.connection.ConnectionProfile;
-import com.nureal.ide.core.connection.ConnectionStore;
-import com.nureal.ide.core.dialect.DatabaseDialect;
-import com.nureal.ide.core.dialect.MySqlDialect;
-import com.nureal.ide.core.export.ExcelExporter;
-import com.nureal.ide.core.metadata.MetadataCache;
-import com.nureal.ide.core.metadata.MetadataService;
-import com.nureal.ide.core.metadata.model.ColumnDetail;
-import com.nureal.ide.core.metadata.model.ColumnInfo;
-import com.nureal.ide.core.metadata.model.ForeignKeyInfo;
-import com.nureal.ide.core.metadata.model.IndexInfo;
-import com.nureal.ide.core.metadata.model.SchemaInfo;
-import com.nureal.ide.core.metadata.model.TableDetails;
-import com.nureal.ide.core.metadata.model.TableInfo;
-import com.nureal.ide.core.safety.SqlRiskAnalyzer;
-import com.nureal.ide.core.session.SessionStore;
-import com.nureal.ide.core.sql.SqlStatementSplitter;
-
-import javax.swing.AbstractAction;
-import javax.swing.AbstractListModel;
-import javax.swing.BorderFactory;
-import javax.swing.Box;
-import javax.swing.BoxLayout;
-import javax.swing.JButton;
-import javax.swing.JComboBox;
-import javax.swing.JList;
-import javax.swing.JProgressBar;
-import javax.swing.ListCellRenderer;
-import javax.swing.RowFilter;
-import javax.swing.JComponent;
-import javax.swing.JDialog;
-import javax.swing.JFileChooser;
-import javax.swing.JFrame;
-import javax.swing.JLabel;
-import javax.swing.JMenuItem;
-import javax.swing.JOptionPane;
-import javax.swing.JPanel;
-import javax.swing.JPopupMenu;
-import javax.swing.JScrollPane;
-import javax.swing.JSplitPane;
-import javax.swing.JTabbedPane;
-import javax.swing.JTable;
-import javax.swing.JTextArea;
-import javax.swing.JTextField;
-import javax.swing.JTree;
-import javax.swing.KeyStroke;
-import javax.swing.SwingConstants;
-import javax.swing.SwingWorker;
-import javax.swing.Timer;
-import javax.swing.UIManager;
-import javax.swing.event.DocumentEvent;
-import javax.swing.event.DocumentListener;
-import javax.swing.filechooser.FileNameExtensionFilter;
-import javax.swing.table.DefaultTableCellRenderer;
-import javax.swing.table.DefaultTableModel;
-import javax.swing.table.JTableHeader;
-import javax.swing.table.TableCellRenderer;
-import javax.swing.table.TableModel;
-import javax.swing.table.TableRowSorter;
-import javax.swing.tree.DefaultMutableTreeNode;
-import javax.swing.tree.DefaultTreeModel;
-import javax.swing.tree.TreePath;
 import java.awt.BorderLayout;
 import java.awt.CardLayout;
 import java.awt.Color;
@@ -76,9 +9,8 @@ import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.Graphics;
+import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
-import java.awt.Toolkit;
-import java.awt.datatransfer.StringSelection;
 import java.awt.event.ActionEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
@@ -91,9 +23,6 @@ import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
-import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -103,2492 +32,2714 @@ import java.util.Set;
 import java.util.Vector;
 import java.util.concurrent.CancellationException;
 import java.util.function.BiConsumer;
-import java.util.function.Predicate;
+
+import javax.swing.AbstractAction;
+import javax.swing.BorderFactory;
+import javax.swing.Box;
+import javax.swing.BoxLayout;
+import javax.swing.DefaultListCellRenderer;
+import javax.swing.JButton;
+import javax.swing.JCheckBoxMenuItem;
+import javax.swing.JComboBox;
+import javax.swing.JComponent;
+import javax.swing.JDialog;
+import javax.swing.JFileChooser;
+import javax.swing.JFrame;
+import javax.swing.JLabel;
+import javax.swing.JList;
+import javax.swing.JMenu;
+import javax.swing.JMenuItem;
+import javax.swing.JOptionPane;
+import javax.swing.JPanel;
+import javax.swing.JPopupMenu;
+import javax.swing.JProgressBar;
+import javax.swing.JScrollPane;
+import javax.swing.JSplitPane;
+import javax.swing.JTabbedPane;
+import javax.swing.JTable;
+import javax.swing.JTextArea;
+import javax.swing.JTextField;
+import javax.swing.JTree;
+import javax.swing.KeyStroke;
+import javax.swing.SwingWorker;
+import javax.swing.Timer;
+import javax.swing.UIManager;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
+import javax.swing.filechooser.FileNameExtensionFilter;
+import javax.swing.table.DefaultTableModel;
+import javax.swing.tree.DefaultMutableTreeNode;
+import javax.swing.tree.DefaultTreeModel;
+import javax.swing.tree.TreePath;
+
+import com.formdev.flatlaf.FlatDarkLaf;
+import com.formdev.flatlaf.FlatLaf;
+import com.formdev.flatlaf.FlatLightLaf;
+import com.nureal.ide.core.autocomplete.SqlCompletionProvider;
+import com.nureal.ide.core.connection.ConnectionManager;
+import com.nureal.ide.core.connection.ConnectionProfile;
+import com.nureal.ide.core.connection.ConnectionStore;
+import com.nureal.ide.core.dialect.DatabaseDialect;
+import com.nureal.ide.core.dialect.MySqlDialect;
+import com.nureal.ide.core.export.ExcelExporter;
+import com.nureal.ide.core.format.FormatPreferences;
+import com.nureal.ide.core.format.SqlFormatter;
+import com.nureal.ide.core.metadata.MetadataCache;
+import com.nureal.ide.core.metadata.MetadataService;
+import com.nureal.ide.core.metadata.model.ColumnDetail;
+import com.nureal.ide.core.metadata.model.ColumnInfo;
+import com.nureal.ide.core.metadata.model.ForeignKeyInfo;
+import com.nureal.ide.core.metadata.model.IndexInfo;
+import com.nureal.ide.core.metadata.model.SchemaInfo;
+import com.nureal.ide.core.metadata.model.TableDetails;
+import com.nureal.ide.core.metadata.model.TableInfo;
+import com.nureal.ide.core.safety.SqlRiskAnalyzer;
+import com.nureal.ide.core.session.SessionStore;
+import com.nureal.ide.core.sql.SqlStatementSplitter;
+import com.nureal.ide.core.ui.UiPreferences;
 
 /**
  * Janela principal no estilo de uma IDE moderna (FlatLaf): top bar com acao de
- * executar e tema, conexoes e objetos a esquerda, editor SQL em abas no centro e
- * resultados em abas abaixo (uma aba por statement), com exportacao para Excel.
+ * executar e tema, conexoes e objetos a esquerda, editor SQL em abas no centro
+ * e resultados em abas abaixo (uma aba por statement), com exportacao para
+ * Excel.
  */
 public class MainWindow extends JFrame {
 
-    private static final long serialVersionUID = 1L;
-	private static final Color ACCENT = new Color(0x059669);
-    private static final Color MUTED = new Color(0x6B7280);
-
-    private static final int PAGE_SIZE = 200;
-    private static final int MAX_TABS = 15;
-
-    private static final String SCRATCH = "(sem conexao)";
-
-    private final DatabaseDialect dialect = new MySqlDialect();
-    /** Aponta SEMPRE para a conexao do workspace ativo (trocada ao alternar). */
-    private ConnectionManager connectionManager = new ConnectionManager(dialect);
-    private final Map<String, Workspace> workspaces = new LinkedHashMap<>();
-    private Workspace activeWorkspace;
-    private Map<String, SessionStore.Session> savedSessions = new LinkedHashMap<>();
-    private final MetadataService metadataService = new MetadataService(dialect);
-    private final MetadataCache metadataCache = new MetadataCache();
-    private final SqlCompletionProvider completionProvider =
-            new SqlCompletionProvider(dialect.keywords());
-    private final ConnectionStore connectionStore = new ConnectionStore();
-    private final SessionStore sessionStore = new SessionStore();
-    private Timer autosaveTimer;
-
-    private JTabbedPane editorTabs;
-    private Component plusTab;
-    private boolean addingTab;
-    private JSplitPane mainSplit;
-    private JSplitPane centerSplit;
-    private JComponent leftSide;
-    private JComponent resultsArea;
-    private int sidebarLoc = 248;
-    private int resultsLoc = -1;
-    private JTabbedPane resultTabs;
-    private JPanel resultsCards;
-    private JTree objectTree;
-    private ConnectionsPanel connectionsPanel;
-    private JTextField objectSearch;
-    private SchemaInfo currentSchema;
-    private JLabel statusBar;
-    private JLabel connStatusLabel;
-    private JProgressBar connProgress;
-    private JButton runButton;
-    private JButton themeButton;
-    private JComponent resultsOverlay;
-    private SwingWorker<List<QueryResult>, Void> runWorker;
-    private volatile Statement runningStatement;
-
-    private boolean dark = false;
-    private List<QueryResult> lastResults = new ArrayList<>();
-    private final List<ResultCursor> openCursors = new ArrayList<>();
-
-    public MainWindow() {
-        super("Nureal Database IDE");
-        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        setIconImages(Icons.brandImages());
-        setSize(1280, 800);
-        setLocationRelativeTo(null);
-        buildUi();
-        registerWindowShortcuts();
-        // Salva a sessao ao fechar (alem do autosave continuo durante a digitacao).
-        addWindowListener(new WindowAdapter() {
-            @Override
-            public void windowClosing(WindowEvent e) {
-                saveSession();
-            }
-        });
-    }
-
-    private void buildUi() {
-        setLayout(new BorderLayout());
-
-        leftSide = buildLeftSide();
-        resultsArea = buildResultsArea();
-
-        centerSplit = new JSplitPane(
-                JSplitPane.VERTICAL_SPLIT, buildEditorArea(), resultsArea);
-        centerSplit.setResizeWeight(0.62);
-        centerSplit.setBorder(BorderFactory.createEmptyBorder());
-
-        mainSplit = new JSplitPane(
-                JSplitPane.HORIZONTAL_SPLIT, leftSide, centerSplit);
-        mainSplit.setResizeWeight(0.22);
-        mainSplit.setBorder(BorderFactory.createEmptyBorder());
-        add(mainSplit, BorderLayout.CENTER);
-
-        add(buildFooter(), BorderLayout.SOUTH);
-    }
-
-    // ---------- Barras ----------
-
-    private JComponent buildToolbar() {
-        runButton = new JButton("Executar");
-        runButton.setIcon(Icons.play(13, Color.WHITE));
-        runButton.setToolTipText("Executar (Ctrl+Enter ou F5)");
-        runButton.setEnabled(false);
-        runButton.addActionListener(e -> onRun());
-        styleRunButton();
-
-        JButton formatButton = new JButton("Formatar");
-        formatButton.setToolTipText("Formatar SQL (Ctrl+Shift+F)");
-        formatButton.addActionListener(e -> {
-            SqlEditorPane editor = currentEditor();
-            if (editor != null) {
-                editor.formatText();
-            }
-        });
-
-        JButton toggleSidebar = new JButton(Icons.panelLeft(16, MUTED));
-        toggleSidebar.setToolTipText("Mostrar/ocultar painel lateral (Ctrl+B)");
-        toggleSidebar.addActionListener(e -> toggleSidebar());
-
-        JButton toggleResults = new JButton(Icons.panelBottom(16, MUTED));
-        toggleResults.setToolTipText("Mostrar/ocultar resultados (Ctrl+J)");
-        toggleResults.addActionListener(e -> toggleResults());
-
-        themeButton = new JButton(Icons.moon(16, MUTED));
-        themeButton.setToolTipText("Alternar tema claro/escuro");
-        themeButton.addActionListener(e -> toggleTheme());
-
-        JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
-        left.setOpaque(false);
-        left.add(runButton);
-        left.add(formatButton);
-
-        JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
-        right.setOpaque(false);
-        right.add(toggleSidebar);
-        right.add(toggleResults);
-        right.add(themeButton);
-
-        JPanel bar = new JPanel(new BorderLayout());
-        bar.setBorder(BorderFactory.createEmptyBorder(8, 12, 8, 12));
-        bar.add(left, BorderLayout.WEST);
-        bar.add(right, BorderLayout.EAST);
-        return bar;
-    }
-
-    private void styleRunButton() {
-        runButton.setBackground(ACCENT);
-        runButton.setForeground(Color.WHITE);
-    }
-
-    /** Recolhe/expande o painel lateral, focando o editor. */
-    private void toggleSidebar() {
-        if (leftSide.isVisible()) {
-            sidebarLoc = mainSplit.getDividerLocation();
-            leftSide.setVisible(false);
-            mainSplit.setDividerSize(0);
-            mainSplit.setDividerLocation(0);
-        } else {
-            leftSide.setVisible(true);
-            mainSplit.setDividerSize(4);
-            mainSplit.setDividerLocation(sidebarLoc > 0 ? sidebarLoc : 248);
-        }
-        mainSplit.revalidate();
-        focusEditor();
-    }
-
-    /** Recolhe/expande a area de resultados, focando o editor. */
-    private void toggleResults() {
-        if (resultsArea.isVisible()) {
-            resultsLoc = centerSplit.getDividerLocation();
-            resultsArea.setVisible(false);
-            centerSplit.setDividerSize(0);
-            centerSplit.setDividerLocation(centerSplit.getHeight());
-        } else {
-            resultsArea.setVisible(true);
-            centerSplit.setDividerSize(4);
-            if (resultsLoc > 0) {
-                centerSplit.setDividerLocation(resultsLoc);
-            } else {
-                centerSplit.setResizeWeight(0.62);
-                centerSplit.setDividerLocation(0.62);
-            }
-        }
-        centerSplit.revalidate();
-        focusEditor();
-    }
-
-    private void focusEditor() {
-        SqlEditorPane editor = currentEditor();
-        if (editor != null) {
-            editor.textArea().requestFocusInWindow();
-        }
-    }
-
-    /** Atalhos globais: Ctrl+B (lateral) e Ctrl+J (resultados). */
-    private void registerWindowShortcuts() {
-        JComponent rp = getRootPane();
-        rp.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW)
-                .put(KeyStroke.getKeyStroke("control B"), "toggle-sidebar");
-        rp.getActionMap().put("toggle-sidebar", new AbstractAction() {
-            @Override
-            public void actionPerformed(ActionEvent e) {
-                toggleSidebar();
-            }
-        });
-        rp.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW)
-                .put(KeyStroke.getKeyStroke("control J"), "toggle-results");
-        rp.getActionMap().put("toggle-results", new AbstractAction() {
-            @Override
-            public void actionPerformed(ActionEvent e) {
-                toggleResults();
-            }
-        });
-    }
-
-    private JComponent buildFooter() {
-        connStatusLabel = new JLabel();
-        connStatusLabel.setIconTextGap(6);
-        connStatusLabel.setFont(connStatusLabel.getFont().deriveFont(Font.BOLD));
-
-        statusBar = new JLabel(" Pronto");
-        statusBar.setForeground(MUTED);
-
-        connProgress = new JProgressBar();
-        connProgress.setIndeterminate(true);
-        connProgress.setPreferredSize(new Dimension(120, 6));
-        connProgress.setVisible(false);
-
-        JLabel brand = new JLabel("Nureal");
-        brand.setFont(brand.getFont().deriveFont(Font.BOLD));
-        brand.setForeground(ACCENT);
-
-        JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 12, 0));
-        left.setOpaque(false);
-        left.add(connStatusLabel);
-        left.add(statusBar);
-
-        JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 12, 0));
-        right.setOpaque(false);
-        right.add(connProgress);
-        right.add(brand);
-
-        JPanel footer = new JPanel(new BorderLayout());
-        footer.setBorder(BorderFactory.createEmptyBorder(5, 12, 5, 12));
-        footer.add(left, BorderLayout.WEST);
-        footer.add(right, BorderLayout.EAST);
-
-        setDisconnectedState();
-        return footer;
-    }
-
-    // ---------- Estado da conexao (rodape) ----------
-
-    private void setDisconnectedState() {
-        connStatusLabel.setIcon(Icons.dot(10, new Color(0xDC2626)));
-        connStatusLabel.setText("Desconectado");
-        connStatusLabel.setForeground(new Color(0xB91C1C));
-        connProgress.setVisible(false);
-    }
-
-    private void setConnectingState(String name) {
-        connStatusLabel.setIcon(Icons.dot(10, new Color(0xF59E0B)));
-        connStatusLabel.setText("Conectando a " + name + "...");
-        connStatusLabel.setForeground(new Color(0xB45309));
-        connProgress.setVisible(true);
-    }
-
-    private void setConnectedState(String label) {
-        connStatusLabel.setIcon(Icons.dot(10, ACCENT));
-        connStatusLabel.setText("Conectado: " + label);
-        connStatusLabel.setForeground(new Color(0x047857));
-        connProgress.setVisible(false);
-    }
-
-    // ---------- Lado esquerdo ----------
-
-    private JComponent buildLeftSide() {
-        connectionsPanel = new ConnectionsPanel(connectionStore, this::connectTo);
-        JSplitPane split = new JSplitPane(
-                JSplitPane.VERTICAL_SPLIT, connectionsPanel, buildObjectBrowser());
-        split.setResizeWeight(0.5);
-        split.setBorder(BorderFactory.createEmptyBorder());
-        split.setPreferredSize(new Dimension(248, 100));
-        return split;
-    }
-
-    private JComponent buildObjectBrowser() {
-        objectTree = new JTree(new DefaultTreeModel(
-                new DefaultMutableTreeNode("Sem conexao")));
-        objectTree.setRootVisible(true);
-        objectTree.setShowsRootHandles(true);
-        objectTree.setRowHeight(22);
-        objectTree.setBorder(BorderFactory.createEmptyBorder(4, 8, 4, 4));
-        objectTree.addMouseListener(new MouseAdapter() {
-            @Override
-            public void mouseClicked(MouseEvent e) {
-                if (e.getClickCount() == 2) {
-                    openSelectedObjectProperties();
-                }
-            }
-        });
-
-        JScrollPane sp = new JScrollPane(objectTree);
-        sp.setBorder(BorderFactory.createEmptyBorder());
-
-        objectSearch = new JTextField();
-        objectSearch.putClientProperty("JTextField.placeholderText", "Buscar objeto...");
-        objectSearch.putClientProperty("JTextField.showClearButton", true);
-        objectSearch.setEnabled(false);
-        objectSearch.getDocument().addDocumentListener(new DocumentListener() {
-            @Override public void insertUpdate(DocumentEvent e) { applyObjectFilter(); }
-            @Override public void removeUpdate(DocumentEvent e) { applyObjectFilter(); }
-            @Override public void changedUpdate(DocumentEvent e) { applyObjectFilter(); }
-        });
-
-        JPanel top = new JPanel(new BorderLayout(0, 8));
-        top.setOpaque(false);
-        top.add(sectionHeader("OBJETOS"), BorderLayout.NORTH);
-        top.add(objectSearch, BorderLayout.SOUTH);
-
-        JPanel panel = new JPanel(new BorderLayout(0, 8));
-        panel.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
-        panel.add(top, BorderLayout.NORTH);
-        panel.add(sp, BorderLayout.CENTER);
-        return panel;
-    }
-
-    // ---------- Editor (abas) ----------
-
-    private JComponent buildEditorArea() {
-        editorTabs = new JTabbedPane();
-        editorTabs.putClientProperty("JTabbedPane.tabClosable", true);
-        editorTabs.putClientProperty("JTabbedPane.tabCloseCallback",
-                (BiConsumer<JTabbedPane, Integer>) (pane, index) -> closeQueryTab(index));
-        // Selecionar a aba "+" abre uma nova query; qualquer outra troca salva a sessao.
-        editorTabs.addChangeListener(e -> {
-            if (addingTab) {
-                return; // evita reentrancia: insertTab desloca a selecao da aba "+"
-            }
-            if (plusTab != null && editorTabs.getSelectedComponent() == plusTab) {
-                if (!addQueryTab()) {
-                    selectLastRealTab();
-                }
-            } else {
-                scheduleSave();
-            }
-        });
-        // Botao direito no titulo da aba: fechar / fechar as outras.
-        editorTabs.addMouseListener(new MouseAdapter() {
-            @Override
-            public void mousePressed(MouseEvent e) {
-                maybeTabMenu(e);
-            }
-
-            @Override
-            public void mouseReleased(MouseEvent e) {
-                maybeTabMenu(e);
-            }
-        });
-
-        // Inicializa o workspace "sem conexao" com as abas salvas (+ aba "+").
-        initWorkspaces();
-
-        JPanel panel = new JPanel(new BorderLayout());
-        panel.setBorder(BorderFactory.createEmptyBorder(0, 8, 4, 8));
-        panel.add(buildToolbar(), BorderLayout.NORTH);
-        panel.add(editorTabs, BorderLayout.CENTER);
-        return panel;
-    }
-
-    private boolean addQueryTab() {
-        return addQueryTab(nextQueryTitle(), "");
-    }
-
-    /** Menor "SQL Query N" ainda nao usado pelas abas abertas (reaproveita gaps). */
-    private String nextQueryTitle() {
-        int n = 1;
-        while (titleExists("SQL Query " + n)) {
-            n++;
-        }
-        return "SQL Query " + n;
-    }
-
-    private boolean titleExists(String title) {
-        for (int i = 0; i < editorTabs.getTabCount(); i++) {
-            if (editorTabs.getComponentAt(i) != plusTab
-                    && title.equals(editorTabs.getTitleAt(i))) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private boolean addQueryTab(String title, String sql) {
-        if (realTabCount() >= MAX_TABS) {
-            if (statusBar != null) {
-                statusBar.setText(" Limite de " + MAX_TABS + " abas atingido.");
-            }
-            return false;
-        }
-        SqlEditorPane pane = new SqlEditorPane(completionProvider, this::onRun);
-        pane.textArea().setText(sql);
-        pane.textArea().setCaretPosition(0);
-        pane.textArea().getDocument().addDocumentListener(new DocumentListener() {
-            @Override public void insertUpdate(DocumentEvent e) { scheduleSave(); }
-            @Override public void removeUpdate(DocumentEvent e) { scheduleSave(); }
-            @Override public void changedUpdate(DocumentEvent e) { scheduleSave(); }
-        });
-        addingTab = true;
-        try {
-            // insere ANTES da aba "+", para que ela continue sendo a ultima
-            int at = (plusTab != null) ? editorTabs.indexOfComponent(plusTab)
-                    : editorTabs.getTabCount();
-            editorTabs.insertTab(title, null, pane, null, at);
-            editorTabs.setSelectedComponent(pane);
-        } finally {
-            addingTab = false;
-        }
-        scheduleSave();
-        return true;
-    }
-
-    /** Numero de abas reais (exclui a aba "+"). */
-    private int realTabCount() {
-        return editorTabs.getTabCount() - (plusTab != null ? 1 : 0);
-    }
-
-    private void selectLastRealTab() {
-        for (int i = editorTabs.getTabCount() - 1; i >= 0; i--) {
-            if (editorTabs.getComponentAt(i) != plusTab) {
-                editorTabs.setSelectedIndex(i);
-                return;
-            }
-        }
-    }
-
-    /** Menu de contexto do titulo da aba (botao direito). */
-    private void maybeTabMenu(MouseEvent e) {
-        if (!e.isPopupTrigger()) {
-            return;
-        }
-        int idx = editorTabs.indexAtLocation(e.getX(), e.getY());
-        if (idx < 0) {
-            return;
-        }
-        final Component target = editorTabs.getComponentAt(idx);
-        if (target == plusTab) {
-            return;
-        }
-        JPopupMenu menu = new JPopupMenu();
-        JMenuItem rename = new JMenuItem("Renomear...");
-        rename.addActionListener(a -> renameTab(target));
-        JMenuItem close = new JMenuItem("Fechar");
-        close.addActionListener(a -> closeTabComponent(target));
-        JMenuItem closeOthers = new JMenuItem("Fechar as outras");
-        closeOthers.addActionListener(a -> closeOtherTabs(target));
-        menu.add(rename);
-        menu.addSeparator();
-        menu.add(close);
-        menu.add(closeOthers);
-        menu.show(editorTabs, e.getX(), e.getY());
-    }
-
-    private void renameTab(Component target) {
-        int i = editorTabs.indexOfComponent(target);
-        if (i < 0) {
-            return;
-        }
-        String current = editorTabs.getTitleAt(i);
-        String name = JOptionPane.showInputDialog(this, "Novo nome da aba:", current);
-        if (name != null && !name.trim().isEmpty()) {
-            editorTabs.setTitleAt(i, name.trim());
-            scheduleSave();
-        }
-    }
-
-    private void closeTabComponent(Component c) {
-        int i = editorTabs.indexOfComponent(c);
-        if (i >= 0) {
-            closeQueryTab(i);
-        }
-    }
-
-    private void closeOtherTabs(Component keep) {
-        // Seleciona a aba a manter antes de remover as demais (evita cair na "+").
-        int keepIdx = editorTabs.indexOfComponent(keep);
-        if (keepIdx >= 0) {
-            editorTabs.setSelectedIndex(keepIdx);
-        }
-        for (int i = editorTabs.getTabCount() - 1; i >= 0; i--) {
-            Component c = editorTabs.getComponentAt(i);
-            if (c == plusTab || c == keep) {
-                continue;
-            }
-            editorTabs.removeTabAt(i);
-        }
-        scheduleSave();
-    }
-
-    /** Adiciona a aba "+" (conteudo vazio, pequena e nao fechavel) ao final. */
-    private void addPlusTab() {
-        JPanel dummy = new JPanel();
-        dummy.putClientProperty("JTabbedPane.tabClosable", false);
-        plusTab = dummy;
-        editorTabs.addTab("+", dummy);
-        editorTabs.setToolTipTextAt(editorTabs.indexOfComponent(dummy), "Nova query");
-    }
-
-    private void closeQueryTab(int index) {
-        if (editorTabs.getComponentAt(index) == plusTab) {
-            return;
-        }
-        if (realTabCount() <= 1) {
-            return;
-        }
-        // Se a aba a fechar e a selecionada, selecione antes uma aba real vizinha,
-        // para que a remocao nao caia na aba "+" (o que abriria uma nova query).
-        if (editorTabs.getSelectedIndex() == index) {
-            int neighbor = findAdjacentRealTab(index);
-            if (neighbor >= 0) {
-                editorTabs.setSelectedIndex(neighbor);
-            }
-        }
-        editorTabs.removeTabAt(index);
-        scheduleSave();
-    }
-
-    private int findAdjacentRealTab(int index) {
-        for (int i = index - 1; i >= 0; i--) {
-            if (editorTabs.getComponentAt(i) != plusTab) {
-                return i;
-            }
-        }
-        for (int i = index + 1; i < editorTabs.getTabCount(); i++) {
-            if (editorTabs.getComponentAt(i) != plusTab) {
-                return i;
-            }
-        }
-        return -1;
-    }
-
-    // ---------- Persistencia da sessao (nunca perder trabalho) ----------
-
-    /** Inicializa o workspace "sem conexao" com as abas salvas e monta o editor. */
-    private void initWorkspaces() {
-        try {
-            savedSessions = sessionStore.load();
-        } catch (Exception ex) {
-            savedSessions = new LinkedHashMap<>();
-        }
-        Workspace scratch = new Workspace(SCRATCH, null, connectionManager);
-        SessionStore.Session sc = savedSessions.get(SCRATCH);
-        if (sc != null) {
-            scratch.tabs = new ArrayList<>(sc.tabs());
-            scratch.selectedTab = sc.selectedIndex();
-        }
-        workspaces.put(SCRATCH, scratch);
-        activeWorkspace = scratch;
-        rebuildEditorTabs(scratch.tabs, scratch.selectedTab);
-    }
-
-    /** Reconstroi as abas do editor a partir do conteudo salvo (titulo + SQL). */
-    private void rebuildEditorTabs(List<SessionStore.Tab> tabs, int selected) {
-        editorTabs.removeAll();
-        plusTab = null;
-        if (tabs == null || tabs.isEmpty()) {
-            addQueryTab();
-        } else {
-            for (SessionStore.Tab t : tabs) {
-                String title = (t.title() == null || t.title().isBlank())
-                        ? nextQueryTitle() : t.title();
-                addQueryTab(title, t.sql());
-            }
-        }
-        addPlusTab();
-        if (selected >= 0 && selected < editorTabs.getTabCount()
-                && editorTabs.getComponentAt(selected) != plusTab) {
-            editorTabs.setSelectedIndex(selected);
-        }
-    }
-
-    /** Captura o conteudo atual das abas do editor (titulo + SQL). */
-    private List<SessionStore.Tab> collectTabs() {
-        List<SessionStore.Tab> list = new ArrayList<>();
-        for (int i = 0; i < editorTabs.getTabCount(); i++) {
-            Component c = editorTabs.getComponentAt(i);
-            if (c instanceof SqlEditorPane sep) {
-                list.add(new SessionStore.Tab(
-                        editorTabs.getTitleAt(i), sep.textArea().getText()));
-            }
-        }
-        return list;
-    }
-
-    /** Salva as abas atuais do editor no workspace ativo. */
-    private void saveActiveTabs() {
-        if (activeWorkspace != null && editorTabs != null) {
-            activeWorkspace.tabs = collectTabs();
-            activeWorkspace.selectedTab = Math.max(editorTabs.getSelectedIndex(), 0);
-        }
-    }
-
-    /**
-     * Ativa um workspace: guarda as abas do ativo, troca a conexao corrente,
-     * reconstroi as abas do alvo e atualiza navegador/autocomplete/indicadores.
-     */
-    private void activateWorkspace(Workspace w) {
-        saveActiveTabs();
-        activeWorkspace = w;
-        connectionManager = w.mgr;
-        rebuildEditorTabs(w.tabs, w.selectedTab);
-        if (w.schema != null) {
-            metadataCache.set(w.schema);
-            completionProvider.refresh(w.schema);
-            populateTree(w.schema);
-        } else if (w.schemaList != null) {
-            completionProvider.refresh(null);
-            buildSchemaPicker(w.schemaList);
-        } else {
-            currentSchema = null;
-            completionProvider.refresh(null);
-            objectSearch.setEnabled(false);
-            objectTree.setModel(new DefaultTreeModel(new DefaultMutableTreeNode(
-                    w.profile == null ? "Sem conexao" : "Selecione um esquema")));
-        }
-        refreshConnectionIndicators();
-        runButton.setEnabled(w.mgr.isConnected());
-        focusEditor();
-    }
-
-    /** Atualiza as bolinhas (conectados) e o indicador de status do rodape. */
-    private void refreshConnectionIndicators() {
-        Set<String> connected = new HashSet<>();
-        for (Workspace w : workspaces.values()) {
-            if (w.profile != null && w.mgr.isConnected()) {
-                connected.add(w.name);
-            }
-        }
-        connectionsPanel.setConnectedNames(connected);
-        if (activeWorkspace != null && activeWorkspace.profile != null
-                && activeWorkspace.mgr.isConnected()) {
-            setConnectedState(activeWorkspace.profile.label());
-        } else {
-            setDisconnectedState();
-        }
-    }
-
-    /** Agenda um salvamento (debounce) ~1s apos a ultima alteracao. */
-    private void scheduleSave() {
-        if (autosaveTimer == null) {
-            autosaveTimer = new Timer(1000, e -> saveSession());
-            autosaveTimer.setRepeats(false);
-        }
-        autosaveTimer.restart();
-    }
-
-    /** Grava agora as abas de TODAS as conexoes (workspaces) no disco. */
-    private void saveSession() {
-        if (editorTabs == null) {
-            return;
-        }
-        saveActiveTabs();
-        Map<String, SessionStore.Session> sessions = new LinkedHashMap<>();
-        for (Workspace w : workspaces.values()) {
-            sessions.put(w.name,
-                    new SessionStore.Session(new ArrayList<>(w.tabs), w.selectedTab));
-        }
-        try {
-            sessionStore.save(sessions);
-        } catch (Exception ex) {
-            if (statusBar != null) {
-                statusBar.setText(" Aviso: nao foi possivel salvar a sessao: "
-                        + ex.getMessage());
-            }
-        }
-    }
-
-    private SqlEditorPane currentEditor() {
-        Component c = editorTabs.getSelectedComponent();
-        return (c instanceof SqlEditorPane sep) ? sep : null;
-    }
-
-    // ---------- Resultados ----------
-
-    private JComponent buildResultsArea() {
-        resultTabs = new JTabbedPane();
-        resultTabs.putClientProperty("JTabbedPane.tabType", "card");
-        resultTabs.putClientProperty("JTabbedPane.minimumTabWidth", 96);
-        resultTabs.addMouseListener(new MouseAdapter() {
-            @Override
-            public void mousePressed(MouseEvent e) {
-                maybeShowTabMenu(e);
-            }
-
-            @Override
-            public void mouseReleased(MouseEvent e) {
-                maybeShowTabMenu(e);
-            }
-        });
-
-        JPanel tabsPanel = new JPanel(new BorderLayout());
-        tabsPanel.add(resultTabs, BorderLayout.CENTER);
-
-        resultsCards = new JPanel(new CardLayout());
-        resultsCards.add(buildEmptyState(), "empty");
-        resultsCards.add(tabsPanel, "tabs");
-
-        JPanel panel = new JPanel(new BorderLayout(0, 8));
-        panel.setBorder(BorderFactory.createEmptyBorder(4, 8, 8, 8));
-        panel.add(sectionHeader("RESULTADOS"), BorderLayout.NORTH);
-        panel.add(overlayStack(resultsCards), BorderLayout.CENTER);
-        return panel;
-    }
-
-    /** Empilha o conteudo dos resultados e um overlay de "carregando" por cima. */
-    private JComponent overlayStack(JComponent content) {
-        resultsOverlay = buildResultsOverlay();
-        JPanel stack = new JPanel(null) {
-            private static final long serialVersionUID = 1L;
-            @Override
-            public void doLayout() {
-                for (Component c : getComponents()) {
-                    c.setBounds(0, 0, getWidth(), getHeight());
-                }
-            }
-        };
-        stack.add(resultsOverlay);
-        stack.add(content);
-        stack.setComponentZOrder(resultsOverlay, 0); // overlay no topo
-        return stack;
-    }
-
-    /** Camada translucida com spinner e botao Cancelar, escondida por padrao. */
-    private JComponent buildResultsOverlay() {
-        JLabel label = new JLabel("Executando consulta...");
-        label.setAlignmentX(Component.CENTER_ALIGNMENT);
-        label.setFont(label.getFont().deriveFont(Font.BOLD, 13f));
-
-        JProgressBar spinner = new JProgressBar();
-        spinner.setIndeterminate(true);
-        spinner.setPreferredSize(new Dimension(200, 6));
-        spinner.setMaximumSize(new Dimension(200, 6));
-        spinner.setAlignmentX(Component.CENTER_ALIGNMENT);
-
-        JButton cancel = new JButton("Cancelar");
-        cancel.setAlignmentX(Component.CENTER_ALIGNMENT);
-        cancel.addActionListener(e -> cancelExecution());
-
-        JPanel card = new JPanel();
-        card.setLayout(new BoxLayout(card, BoxLayout.Y_AXIS));
-        card.setBackground(new Color(0xFFFFFF));
-        card.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(new Color(0xE0E3E7)),
-                BorderFactory.createEmptyBorder(18, 28, 18, 28)));
-        card.add(label);
-        card.add(Box.createVerticalStrut(12));
-        card.add(spinner);
-        card.add(Box.createVerticalStrut(14));
-        card.add(cancel);
-
-        JPanel overlay = new JPanel(new GridBagLayout()) {
-            private static final long serialVersionUID = 1L;
-            @Override
-            protected void paintComponent(Graphics g) {
-                g.setColor(new Color(244, 245, 247, 205)); // dim translucido
-                g.fillRect(0, 0, getWidth(), getHeight());
-                super.paintComponent(g);
-            }
-        };
-        overlay.setOpaque(false);
-        overlay.add(card);
-        // bloqueia interacao com os resultados por tras
-        overlay.addMouseListener(new MouseAdapter() { });
-        overlay.setVisible(false);
-        return overlay;
-    }
-
-    private void showExecuting(boolean executing) {
-        if (resultsOverlay != null) {
-            resultsOverlay.setVisible(executing);
-            resultsOverlay.repaint();
-        }
-    }
-
-    /** Cancela de fato a instrucao em execucao (Statement.cancel) e o worker. */
-    private void cancelExecution() {
-        statusBar.setText(" Cancelando execucao...");
-        Statement st = runningStatement;
-        if (st != null) {
-            // roda em outra thread: nao pode bloquear a EDT esperando o KILL QUERY
-            new Thread(() -> {
-                try {
-                    st.cancel();
-                } catch (SQLException ignore) {
-                    // ignora
-                }
-            }, "cancel-query").start();
-        }
-        if (runWorker != null) {
-            runWorker.cancel(true);
-        }
-    }
-
-    private JComponent buildEmptyState() {
-        JLabel icon = new JLabel(Icons.grid(46, new Color(0xCBD5E1)));
-        icon.setAlignmentX(Component.CENTER_ALIGNMENT);
-
-        JLabel title = new JLabel("Execute uma consulta para ver os resultados");
-        title.setFont(title.getFont().deriveFont(Font.BOLD, 14f));
-        title.setAlignmentX(Component.CENTER_ALIGNMENT);
-
-        JLabel sub = new JLabel("Os resultados da consulta aparecerao aqui");
-        sub.setForeground(MUTED);
-        sub.setAlignmentX(Component.CENTER_ALIGNMENT);
-
-        JPanel box = new JPanel();
-        box.setOpaque(false);
-        box.setLayout(new BoxLayout(box, BoxLayout.Y_AXIS));
-        box.add(icon);
-        box.add(Box.createVerticalStrut(12));
-        box.add(title);
-        box.add(Box.createVerticalStrut(4));
-        box.add(sub);
-
-        JPanel center = new JPanel(new GridBagLayout());
-        center.add(box);
-        return center;
-    }
-
-    private void showEmptyState() {
-        ((CardLayout) resultsCards.getLayout()).show(resultsCards, "empty");
-    }
-
-    private void showResultsCard() {
-        ((CardLayout) resultsCards.getLayout()).show(resultsCards, "tabs");
-    }
-
-    private JLabel sectionHeader(String text) {
-        JLabel label = new JLabel(text);
-        label.setFont(label.getFont().deriveFont(Font.BOLD, 11f));
-        label.setForeground(MUTED);
-        return label;
-    }
-
-    // ---------- Tema ----------
-
-    private void toggleTheme() {
-        dark = !dark;
-        if (dark) {
-            FlatDarkLaf.setup();
-        } else {
-            FlatLightLaf.setup();
-        }
-        FlatLaf.updateUI();
-        themeButton.setIcon(dark ? Icons.sun(16, MUTED) : Icons.moon(16, MUTED));
-        styleRunButton();
-    }
-
-    // ---------- Acoes ----------
-
-    private void connectTo(ConnectionProfile profile) {
-        ConnectionProfile effective = profile;
-        if (profile.needsPasswordPrompt()) {
-            String pw = ConnectionDialog.promptPassword(this, profile);
-            if (pw == null) {
-                return;
-            }
-            effective = profile.withPassword(pw);
-        }
-        final ConnectionProfile target = effective;
-
-        // Ja conectado a essa conexao? Apenas ativa o workspace dela.
-        Workspace existing = workspaces.get(target.name());
-        if (existing != null && existing.mgr.isConnected()) {
-            activateWorkspace(existing);
-            statusBar.setText(" Workspace: " + target.name());
-            return;
-        }
-
-        setConnectingState(target.name());
-        connectionsPanel.setConnecting(target);
-        runButton.setEnabled(false);
-        statusBar.setText(" Conectando a " + target.host() + "...");
-
-        final boolean pickSchema = target.schema() == null || target.schema().isBlank();
-        final Workspace ws = (existing != null) ? existing
-                : new Workspace(target.name(), target, new ConnectionManager(dialect));
-
-        new SwingWorker<Object, Void>() {
-            @Override
-            protected Object doInBackground() throws Exception {
-                ws.mgr.open(target);
-                Connection conn = ws.mgr.getConnection();
-                if (pickSchema) {
-                    return metadataService.listSchemas(conn); // List<String>
-                }
-                return metadataService.loadSchema(conn, target.schema()); // SchemaInfo
-            }
-
-            @Override
-            protected void done() {
-                try {
-                    Object result = get();
-                    if (existing == null) {
-                        SessionStore.Session saved = savedSessions.get(target.name());
-                        if (saved != null) {
-                            ws.tabs = new ArrayList<>(saved.tabs());
-                            ws.selectedTab = saved.selectedIndex();
-                        }
-                        workspaces.put(target.name(), ws);
-                    }
-                    if (pickSchema) {
-                        @SuppressWarnings("unchecked")
-                        List<String> schemas = (List<String>) result;
-                        ws.schemaList = schemas;
-                        ws.schema = null;
-                    } else {
-                        ws.schema = (SchemaInfo) result;
-                        ws.schemaList = null;
-                    }
-                    activateWorkspace(ws);
-                    setTitle("Nureal Database IDE - " + target.name());
-                    if (pickSchema) {
-                        statusBar.setText(" Conectado  (" + ((List<?>) result).size()
-                                + " esquema(s) - duplo-clique para abrir)");
-                    } else {
-                        statusBar.setText(" Conectado  ("
-                                + ws.schema.tables().size() + " tabelas)");
-                    }
-                } catch (Exception ex) {
-                    connectionsPanel.setConnecting(null);
-                    refreshConnectionIndicators();
-                    showError("Falha ao conectar", ex);
-                    statusBar.setText(" Falha ao conectar");
-                }
-            }
-        }.execute();
-    }
-
-    /** Monta a arvore com a lista de esquemas (duplo-clique abre o esquema). */
-    private void buildSchemaPicker(List<String> schemas) {
-        currentSchema = null;
-        objectSearch.setEnabled(false);
-        objectSearch.setText("");
-        DefaultMutableTreeNode root = new DefaultMutableTreeNode(
-                new ObjNode(NodeType.SCHEMA, "Esquemas", "Esquemas", null, null));
-        for (String s : schemas) {
-            root.add(new DefaultMutableTreeNode(
-                    new ObjNode(NodeType.SCHEMA_PICK, s, s, null, null)));
-        }
-        objectTree.setModel(new DefaultTreeModel(root));
-        objectTree.expandPath(new TreePath(root.getPath()));
-    }
-
-    /** Abre um esquema escolhido na lista: define como banco padrao e carrega objetos. */
-    private void openSchema(String schemaName) {
-        statusBar.setText(" Abrindo esquema " + schemaName + "...");
-        new SwingWorker<SchemaInfo, Void>() {
-            @Override
-            protected SchemaInfo doInBackground() throws Exception {
-                Connection conn = connectionManager.getConnection();
-                conn.setCatalog(schemaName); // define o banco padrao (USE schema)
-                return metadataService.loadSchema(conn, schemaName);
-            }
-
-            @Override
-            protected void done() {
-                try {
-                    SchemaInfo schema = get();
-                    if (activeWorkspace != null) {
-                        activeWorkspace.schema = schema;
-                        activeWorkspace.schemaList = null;
-                    }
-                    metadataCache.set(schema);
-                    completionProvider.refresh(schema);
-                    populateTree(schema);
-                    setConnectedState(schemaName);
-                    statusBar.setText(" Esquema " + schemaName
-                            + "  (" + schema.tables().size() + " tabelas)");
-                } catch (Exception ex) {
-                    showError("Falha ao abrir o esquema", ex);
-                    statusBar.setText(" Erro ao abrir esquema");
-                }
-            }
-        }.execute();
-    }
-
-    /**
-     * Se houver instrucoes de risco (DELETE/UPDATE sem WHERE, DDL), pede
-     * confirmacao listando-as. Retorna true para prosseguir; false para cancelar.
-     * O botao padrao e "Cancelar" (mais seguro).
-     */
-    private boolean confirmRiskyStatements(List<String> statements) {
-        StringBuilder sb = new StringBuilder();
-        int count = 0;
-        for (String sql : statements) {
-            String reason = SqlRiskAnalyzer.riskReason(sql);
-            if (reason != null) {
-                count++;
-                sb.append("• ").append(reason).append('\n')
-                        .append("      ").append(snippet(sql)).append("\n\n");
-            }
-        }
-        if (count == 0) {
-            return true;
-        }
-
-        JTextArea area = new JTextArea(
-                "Atencao: " + count + " instrucao(oes) de risco detectada(s):\n\n" + sb
-                + "Tem certeza de que deseja executar?");
-        area.setEditable(false);
-        area.setOpaque(false);
-        area.setFont(UIManager.getFont("Label.font"));
-        JScrollPane scroll = new JScrollPane(area);
-        scroll.setPreferredSize(new Dimension(560, 240));
-        scroll.setBorder(BorderFactory.createEmptyBorder());
-
-        Object[] options = {"Executar mesmo assim", "Cancelar"};
-        int opt = JOptionPane.showOptionDialog(this, scroll,
-                "Confirmar execucao de risco", JOptionPane.YES_NO_OPTION,
-                JOptionPane.WARNING_MESSAGE, null, options, options[1]);
-        return opt == 0;
-    }
-
-    private void onRun() {
-        if (!connectionManager.isConnected()) {
-            statusBar.setText(" Conecte-se a uma base antes de executar.");
-            return;
-        }
-        SqlEditorPane editor = currentEditor();
-        if (editor == null) {
-            return;
-        }
-        final List<String> statements = SqlStatementSplitter.split(editor.currentSql());
-        if (statements.isEmpty()) {
-            return;
-        }
-        if (!confirmRiskyStatements(statements)) {
-            statusBar.setText(" Execucao cancelada.");
-            return;
-        }
-        closeOpenCursors();
-        if (resultsArea != null && !resultsArea.isVisible()) {
-            toggleResults(); // reabre os resultados para mostrar o carregamento
-        }
-        runButton.setEnabled(false);
-        showExecuting(true);
-        boolean usingSelection = editor.hasSelection();
-        statusBar.setText(" Executando " + statements.size() + " instrucao(oes)"
-                + (usingSelection ? "  —  ATENCAO: rodando apenas a SELECAO" : "") + "...");
-
-        SwingWorker<List<QueryResult>, Void> worker = new SwingWorker<>() {
-            @Override
-            protected List<QueryResult> doInBackground() {
-                List<QueryResult> results = new ArrayList<>();
-                Connection conn = connectionManager.getConnection();
-                for (int i = 0; i < statements.size(); i++) {
-                    if (isCancelled()) {
-                        break;
-                    }
-                    String sql = statements.get(i);
-                    int n = i + 1;
-                    long t0 = System.nanoTime();
-                    Statement st = null;
-                    try {
-                        st = conn.createStatement();
-                        // cursor do servidor: busca em lotes do tamanho da pagina
-                        st.setFetchSize(PAGE_SIZE);
-                        runningStatement = st;
-                        boolean hasResultSet = st.execute(sql);
-                        long execMs = (System.nanoTime() - t0) / 1_000_000L;
-                        if (hasResultSet) {
-                            ResultSet rs = st.getResultSet();
-                            ResultTableModel model = createModel(rs);
-                            long t1 = System.nanoTime();
-                            int read = appendPage(model, rs, PAGE_SIZE);
-                            long fetchMs = (System.nanoTime() - t1) / 1_000_000L;
-                            boolean hasMore = read == PAGE_SIZE;
-                            ResultCursor cursor = null;
-                            if (hasMore) {
-                                cursor = new ResultCursor(st, rs);
-                            } else {
-                                rs.close();
-                                st.close();
-                            }
-                            results.add(QueryResult.grid(
-                                    "Resultado " + n, sql, model, execMs, fetchMs, cursor));
-                        } else {
-                            int updated = st.getUpdateCount();
-                            st.close();
-                            results.add(QueryResult.message("Comando " + n, sql,
-                                    updated + " linha(s) afetada(s)", false, execMs));
-                        }
-                    } catch (SQLException ex) {
-                        if (st != null) {
-                            try {
-                                st.close();
-                            } catch (SQLException ignore) {
-                                // ignora
-                            }
-                        }
-                        long execMs = (System.nanoTime() - t0) / 1_000_000L;
-                        results.add(QueryResult.message(
-                                "Erro " + n, sql, "Erro: " + ex.getMessage(), true, execMs));
-                        break;
-                    } finally {
-                        runningStatement = null;
-                    }
-                }
-                return results;
-            }
-
-            @Override
-            protected void done() {
-                showExecuting(false);
-                runningStatement = null;
-                runWorker = null;
-                runButton.setEnabled(true);
-                try {
-                    showResults(get());
-                } catch (CancellationException ce) {
-                    statusBar.setText(" Execucao cancelada.");
-                } catch (Exception ex) {
-                    showError("Erro ao executar SQL", ex);
-                    statusBar.setText(" Erro na execucao");
-                }
-            }
-        };
-        runWorker = worker;
-        worker.execute();
-    }
-
-    private void showResults(List<QueryResult> results) {
-        this.lastResults = results;
-        resultTabs.removeAll();
-        boolean error = false;
-        int grids = 0;
-        for (QueryResult r : results) {
-            JComponent content;
-            if (r.model() != null) {
-                if (r.cursor() != null && !r.cursor().exhausted) {
-                    openCursors.add(r.cursor());
-                }
-                content = buildGridPanel(r);
-                grids++;
-            } else {
-                JTextArea area = new JTextArea(
-                        r.message() + "\n\n(executado em " + r.execMs() + " ms)");
-                area.setEditable(false);
-                content = new JScrollPane(area);
-            }
-            resultTabs.addTab(r.title(), content);
-            resultTabs.setToolTipTextAt(resultTabs.getTabCount() - 1, sqlTooltip(r.sql()));
-            error = error || r.error();
-        }
-        if (resultTabs.getTabCount() > 0) {
-            resultTabs.setSelectedIndex(0);
-            showResultsCard();
-        } else {
-            showEmptyState();
-        }
-        statusBar.setText(" " + results.size() + " instrucao(oes) executada(s), "
-                + grids + " com resultado" + (error ? " - parou em erro" : ""));
-    }
-
-    /** Largura inicial uniforme, ordenacao por coluna e visual mais limpo. */
-    private void styleResultTable(JTable table) {
-        table.setAutoResizeMode(JTable.AUTO_RESIZE_OFF);
-        table.setRowHeight(22);
-        table.setShowGrid(true);
-        table.setGridColor(new Color(0xEDEFF2));
-        table.setIntercellSpacing(new Dimension(0, 1));
-        table.setFillsViewportHeight(true);
-        table.setAutoCreateRowSorter(true);
-        table.setCellSelectionEnabled(true);
-        table.getTableHeader().setReorderingAllowed(false);
-        styleResultHeader(table);
-        installCopyMenu(table);
-        ResultCellRenderer cellRenderer = new ResultCellRenderer();
-        final int uniformWidth = 150;
-        for (int c = 0; c < table.getColumnModel().getColumnCount(); c++) {
-            table.getColumnModel().getColumn(c).setPreferredWidth(uniformWidth);
-            table.getColumnModel().getColumn(c).setMinWidth(60);
-            table.getColumnModel().getColumn(c).setCellRenderer(cellRenderer);
-        }
-    }
-
-    /** Renderer das celulas: padding lateral e alinhamento por tipo (numeros a direita). */
-    private static final class ResultCellRenderer extends DefaultTableCellRenderer {
-        private static final long serialVersionUID = 1L;
-
-        @Override
-        public Component getTableCellRendererComponent(JTable table, Object value,
-                boolean isSelected, boolean hasFocus, int row, int column) {
-            super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
-            Class<?> cls = table.getColumnClass(column);
-            if (Number.class.isAssignableFrom(cls)) {
-                setHorizontalAlignment(SwingConstants.RIGHT);
-            } else if (cls == Boolean.class) {
-                setHorizontalAlignment(SwingConstants.CENTER);
-            } else {
-                setHorizontalAlignment(SwingConstants.LEFT);
-            }
-            setBorder(BorderFactory.createEmptyBorder(0, 8, 0, 8));
-            return this;
-        }
-    }
-
-    /** Cabecalho com destaque: negrito, fundo verde claro e borda de acento. */
-    private void styleResultHeader(JTable table) {
-        JTableHeader header = table.getTableHeader();
-        final TableCellRenderer base = header.getDefaultRenderer();
-        final Font bold = header.getFont().deriveFont(Font.BOLD);
-        final Color bg = new Color(0xF1F3F5);
-        final Color fg = new Color(0x334155);
-        final Color line = new Color(0xCBD5E1);
-        header.setDefaultRenderer((tbl, value, isSelected, hasFocus, row, column) -> {
-            Component comp = base.getTableCellRendererComponent(
-                    tbl, value, isSelected, hasFocus, row, column);
-            if (comp instanceof JLabel label) {
-                label.setFont(bold);
-                label.setBackground(bg);
-                label.setForeground(fg);
-                label.setOpaque(true);
-                label.setHorizontalAlignment(SwingConstants.LEFT);
-                label.setBorder(BorderFactory.createCompoundBorder(
-                        BorderFactory.createMatteBorder(0, 0, 2, 1, line),
-                        BorderFactory.createEmptyBorder(5, 10, 5, 10)));
-            }
-            return comp;
-        });
-        Dimension d = header.getPreferredSize();
-        d.height = Math.max(d.height, 30);
-        header.setPreferredSize(d);
-    }
-
-    /** Painel de grade: tabela + numeracao de linhas + barra de paginacao. */
-    private JComponent buildGridPanel(QueryResult r) {
-        JTable table = new JTable(r.model());
-        styleResultTable(table);
-        JScrollPane scroll = new JScrollPane(table);
-        scroll.setRowHeaderView(buildRowNumbers(table, r.model()));
-        scroll.setCorner(JScrollPane.UPPER_LEFT_CORNER, buildRowNumberCorner());
-
-        JLabel info = new JLabel();
-        JButton more = new JButton("Carregar mais " + PAGE_SIZE);
-        JButton all = new JButton("Carregar tudo");
-        Runnable refresh = () -> {
-            boolean hasMore = r.cursor() != null && !r.cursor().exhausted;
-            info.setText(r.model().getRowCount() + " linha(s)" + (hasMore ? "+" : "")
-                    + "   ·   execucao " + r.execMs() + " ms"
-                    + "   ·   busca " + r.fetchMs() + " ms");
-            more.setVisible(hasMore);
-            all.setVisible(hasMore);
-        };
-        more.addActionListener(e -> {
-            loadPage(r, PAGE_SIZE);
-            refresh.run();
-        });
-        all.addActionListener(e -> loadAll(r, refresh));
-        refresh.run();
-
-        JButton export = new JButton("Exportar");
-        export.setIcon(Icons.export(14, ACCENT));
-        export.setToolTipText("Exportar resultado para Excel");
-        JPopupMenu exportMenu = new JPopupMenu();
-        JMenuItem exportOne = new JMenuItem("Exportar este resultado...");
-        exportOne.addActionListener(a -> exportResult(r));
-        JMenuItem exportAll = new JMenuItem("Exportar todos (uma aba por resultado)...");
-        exportAll.addActionListener(a -> exportAll());
-        exportMenu.add(exportOne);
-        exportMenu.add(exportAll);
-        export.addActionListener(a -> exportMenu.show(export, 0, export.getHeight()));
-
-        JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 3));
-        left.add(info);
-        left.add(more);
-        left.add(all);
-        JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 3));
-        right.add(export);
-        JPanel bar = new JPanel(new BorderLayout());
-        bar.add(left, BorderLayout.WEST);
-        bar.add(right, BorderLayout.EAST);
-
-        JPanel panel = new JPanel(new BorderLayout());
-        panel.add(buildFilterBar(table, r.model()), BorderLayout.NORTH);
-        panel.add(scroll, BorderLayout.CENTER);
-        panel.add(bar, BorderLayout.SOUTH);
-        return panel;
-    }
-
-    /** Exporta um resultado especifico (este) para um arquivo Excel. */
-    private void exportResult(QueryResult r) {
-        if (r.model() == null) {
-            JOptionPane.showMessageDialog(this,
-                    "Este resultado nao possui dados tabulares para exportar.",
-                    "Exportar para Excel", JOptionPane.INFORMATION_MESSAGE);
-            return;
-        }
-        File file = chooseSaveFile(r.title());
-        if (file != null) {
-            List<ExcelExporter.TableSheet> sheets = new ArrayList<>();
-            sheets.add(new ExcelExporter.TableSheet(r.title(), r.model()));
-            sheets.add(instructionsSheet(List.of(r)));
-            doExport(sheets, file);
-        }
-    }
-
-    /** Barra de filtro: escolhe a coluna (ou todas) e filtra as linhas ao digitar. */
-    private JComponent buildFilterBar(JTable table, DefaultTableModel model) {
-        JComboBox<String> column = new JComboBox<>();
-        column.addItem("Todas as colunas");
-        for (int c = 0; c < model.getColumnCount(); c++) {
-            column.addItem(model.getColumnName(c));
-        }
-
-        JTextField field = new JTextField(20);
-        field.putClientProperty("JTextField.placeholderText", "Filtrar...  (ex: >= 2026-06-01)");
-        field.putClientProperty("JTextField.showClearButton", true);
-        field.setToolTipText("<html>Filtro inteligente:<br>"
-                + "&bull; texto: <b>contem</b> (ex: silva)<br>"
-                + "&bull; operadores: <b>&gt;= &lt;= &gt; &lt; = &lt;&gt;</b> (ex: &gt;= 2026-06-01, &gt; 100)<br>"
-                + "&bull; intervalo: <b>a..b</b> (ex: 2026-01-01..2026-06-30)<br>"
-                + "Entende data e numero mesmo em colunas de texto.</html>");
-
-        Runnable apply = () -> applyColumnFilter(table, field.getText(), column.getSelectedIndex());
-        field.getDocument().addDocumentListener(new DocumentListener() {
-            @Override public void insertUpdate(DocumentEvent e) { apply.run(); }
-            @Override public void removeUpdate(DocumentEvent e) { apply.run(); }
-            @Override public void changedUpdate(DocumentEvent e) { apply.run(); }
-        });
-        column.addActionListener(e -> apply.run());
-
-        JPanel filterBar = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 3));
-        JLabel icon = new JLabel("Filtro:");
-        icon.setForeground(MUTED);
-        filterBar.add(icon);
-        filterBar.add(column);
-        filterBar.add(field);
-        return filterBar;
-    }
-
-    /**
-     * Filtro inteligente: entende operadores (>= <= > < = <> e intervalo a..b) e
-     * compara como DATA ou NUMERO quando possivel (mesmo que a coluna seja texto),
-     * caindo para "contem" (sem diferenciar caixa) no texto simples.
-     */
-    @SuppressWarnings("unchecked")
-    private void applyColumnFilter(JTable table, String text, int columnChoice) {
-        if (!(table.getRowSorter() instanceof TableRowSorter)) {
-            return;
-        }
-        TableRowSorter<TableModel> sorter =
-                (TableRowSorter<TableModel>) table.getRowSorter();
-        String t = text == null ? "" : text.trim();
-        if (t.isEmpty()) {
-            sorter.setRowFilter(null);
-            return;
-        }
-        final Predicate<String> pred = buildCellPredicate(t);
-        final int modelCol = columnChoice - 1; // -1 = todas as colunas
-        sorter.setRowFilter(new RowFilter<Object, Object>() {
-            @Override
-            public boolean include(Entry<? extends Object, ? extends Object> entry) {
-                if (modelCol < 0) {
-                    for (int c = 0; c < entry.getValueCount(); c++) {
-                        if (pred.test(entry.getStringValue(c))) {
-                            return true;
-                        }
-                    }
-                    return false;
-                }
-                if (modelCol >= entry.getValueCount()) {
-                    return false;
-                }
-                return pred.test(entry.getStringValue(modelCol));
-            }
-        });
-    }
-
-    /** Constroi o predicado de cada celula a partir do texto digitado no filtro. */
-    private static Predicate<String> buildCellPredicate(String raw) {
-        String text = raw.trim();
-        int range = text.indexOf("..");
-        if (range > 0 && range < text.length() - 2) {
-            String a = text.substring(0, range).trim();
-            String b = text.substring(range + 2).trim();
-            return cell -> compareCells(cell, a) >= 0 && compareCells(cell, b) <= 0;
-        }
-        for (String op : new String[] {">=", "<=", "<>", "!=", ">", "<", "="}) {
-            if (text.startsWith(op)) {
-                String val = text.substring(op.length()).trim();
-                return cell -> applyOperator(op, compareCells(cell, val));
-            }
-        }
-        String lower = text.toLowerCase(Locale.ROOT);
-        return cell -> cell.toLowerCase(Locale.ROOT).contains(lower);
-    }
-
-    /** Compara celula x valor: tenta data, depois numero, senao texto (caixa-insensivel). */
-    private static int compareCells(String cell, String value) {
-        LocalDateTime dc = parseDate(cell);
-        LocalDateTime dv = parseDate(value);
-        if (dc != null && dv != null) {
-            return dc.compareTo(dv);
-        }
-        Double nc = parseNumber(cell);
-        Double nv = parseNumber(value);
-        if (nc != null && nv != null) {
-            return Double.compare(nc, nv);
-        }
-        return cell.compareToIgnoreCase(value);
-    }
-
-    private static boolean applyOperator(String op, int cmp) {
-        return switch (op) {
-            case ">=" -> cmp >= 0;
-            case "<=" -> cmp <= 0;
-            case ">" -> cmp > 0;
-            case "<" -> cmp < 0;
-            case "=" -> cmp == 0;
-            case "<>", "!=" -> cmp != 0;
-            default -> true;
-        };
-    }
-
-    private static final DateTimeFormatter[] DATETIME_FMTS = {
-            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"),
-            DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss"),
-            DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm:ss")
-    };
-    private static final DateTimeFormatter[] DATE_FMTS = {
-            DateTimeFormatter.ofPattern("yyyy-MM-dd"),
-            DateTimeFormatter.ofPattern("dd/MM/yyyy")
-    };
-
-    /** Interpreta data/hora ou data; retorna null se nao for data. */
-    private static LocalDateTime parseDate(String raw) {
-        if (raw == null) {
-            return null;
-        }
-        String s = raw.trim().replaceAll("\\.\\d+$", ""); // remove fracao de segundos
-        if (s.isEmpty()) {
-            return null;
-        }
-        for (DateTimeFormatter f : DATETIME_FMTS) {
-            try {
-                return LocalDateTime.parse(s, f);
-            } catch (RuntimeException ignore) {
-                // tenta o proximo
-            }
-        }
-        for (DateTimeFormatter f : DATE_FMTS) {
-            try {
-                return LocalDate.parse(s, f).atStartOfDay();
-            } catch (RuntimeException ignore) {
-                // tenta o proximo
-            }
-        }
-        return null;
-    }
-
-    /** Interpreta numero (aceita 1234.56 e 1.234,56); null se nao for numero. */
-    private static Double parseNumber(String raw) {
-        if (raw == null) {
-            return null;
-        }
-        String s = raw.trim();
-        if (s.isEmpty()) {
-            return null;
-        }
-        try {
-            return Double.valueOf(s);
-        } catch (NumberFormatException ignore) {
-            // tenta formato BR
-        }
-        try {
-            return Double.valueOf(s.replace(".", "").replace(",", "."));
-        } catch (NumberFormatException ignore) {
-            return null;
-        }
-    }
-
-    /** Le ate {@code max} linhas do cursor para o modelo (na EDT). */
-    private void loadPage(QueryResult r, int max) {
-        ResultCursor c = r.cursor();
-        if (c == null || c.exhausted) {
-            return;
-        }
-        try {
-            int read = appendPage(r.model(), c.rs, max);
-            if (read < max) {
-                c.exhausted = true;
-                c.close();
-                openCursors.remove(c);
-            }
-        } catch (SQLException ex) {
-            c.exhausted = true;
-            c.close();
-            openCursors.remove(c);
-            statusBar.setText(" Erro ao carregar mais linhas: " + ex.getMessage());
-        }
-    }
-
-    /** Le todas as linhas restantes do cursor em segundo plano. */
-    private void loadAll(QueryResult r, Runnable refresh) {
-        ResultCursor c = r.cursor();
-        if (c == null || c.exhausted) {
-            return;
-        }
-        statusBar.setText(" Carregando todas as linhas...");
-        new SwingWorker<Void, Vector<Object>>() {
-            @Override
-            protected Void doInBackground() throws Exception {
-                int cols = r.model().getColumnCount();
-                while (c.rs.next()) {
-                    Vector<Object> row = new Vector<>(cols);
-                    for (int i = 1; i <= cols; i++) {
-                        row.add(c.rs.getObject(i));
-                    }
-                    publish(row);
-                }
-                return null;
-            }
-
-            @Override
-            protected void process(List<Vector<Object>> chunks) {
-                for (Vector<Object> row : chunks) {
-                    r.model().addRow(row);
-                }
-                refresh.run();
-            }
-
-            @Override
-            protected void done() {
-                c.exhausted = true;
-                c.close();
-                openCursors.remove(c);
-                try {
-                    get();
-                    statusBar.setText(" Todas as linhas carregadas ("
-                            + r.model().getRowCount() + ").");
-                } catch (Exception ex) {
-                    statusBar.setText(" Erro ao carregar linhas: " + ex.getMessage());
-                }
-                refresh.run();
-            }
-        }.execute();
-    }
-
-    private void closeOpenCursors() {
-        for (ResultCursor c : openCursors) {
-            c.close();
-        }
-        openCursors.clear();
-    }
-
-    // ---------- Numeracao de linhas ----------
-
-    /** Coluna fixa (gutter) com o numero de cada linha, a esquerda da grade. */
-    private JComponent buildRowNumbers(JTable table, DefaultTableModel model) {
-        AbstractListModel<String> listModel = new AbstractListModel<>() {
-            private static final long serialVersionUID = 1L;
-
-            @Override
-            public int getSize() {
-                return table.getRowCount();
-            }
-
-            @Override
-            public String getElementAt(int index) {
-                return Integer.toString(index + 1);
-            }
-        };
-        JList<String> list = new JList<>(listModel);
-        list.setFixedCellHeight(table.getRowHeight());
-        list.setFixedCellWidth(54);
-        list.setFocusable(false);
-        final Color bg = new Color(0xF3F4F6);
-        final Color fg = new Color(0x9AA3AF);
-        final Font font = list.getFont().deriveFont(Font.PLAIN);
-        ListCellRenderer<Object> renderer = (lst, value, index, selected, focused) -> {
-            JLabel l = new JLabel(value == null ? "" : value.toString());
-            l.setHorizontalAlignment(SwingConstants.RIGHT);
-            l.setOpaque(true);
-            l.setBackground(bg);
-            l.setForeground(fg);
-            l.setFont(font);
-            l.setBorder(BorderFactory.createEmptyBorder(0, 6, 0, 8));
-            return l;
-        };
-        list.setCellRenderer(renderer);
-        model.addTableModelListener(e -> {
-            list.revalidate();
-            list.repaint();
-        });
-        // mantem a numeracao em sincronia com ordenacao/filtro
-        if (table.getRowSorter() != null) {
-            table.getRowSorter().addRowSorterListener(e -> {
-                list.revalidate();
-                list.repaint();
-            });
-        }
-        // clicar no numero seleciona a LINHA inteira (Shift = intervalo, Ctrl = adiciona)
-        list.addMouseListener(new MouseAdapter() {
-            @Override
-            public void mousePressed(MouseEvent e) {
-                int row = list.locationToIndex(e.getPoint());
-                int lastCol = table.getColumnCount() - 1;
-                if (row < 0 || lastCol < 0) {
-                    return;
-                }
-                table.requestFocusInWindow();
-                table.setColumnSelectionInterval(0, lastCol);
-                if (e.isControlDown()) {
-                    table.addRowSelectionInterval(row, row);
-                } else if (e.isShiftDown()) {
-                    int anchor = table.getSelectionModel().getAnchorSelectionIndex();
-                    table.setRowSelectionInterval(anchor < 0 ? row : anchor, row);
-                } else {
-                    table.setRowSelectionInterval(row, row);
-                }
-                table.scrollRectToVisible(table.getCellRect(row, 0, true));
-            }
-        });
-        return list;
-    }
-
-    private JComponent buildRowNumberCorner() {
-        JPanel corner = new JPanel();
-        corner.setOpaque(true);
-        corner.setBackground(new Color(0xF1F3F5));
-        corner.setBorder(BorderFactory.createMatteBorder(0, 0, 2, 1, new Color(0xCBD5E1)));
-        return corner;
-    }
-
-    // ---------- Copia (celula / linha / coluna) ----------
-
-    private void installCopyMenu(JTable table) {
-        JPopupMenu menu = new JPopupMenu();
-        JMenuItem selectRow = new JMenuItem("Selecionar linha");
-        JMenuItem selectAll = new JMenuItem("Selecionar tudo (Ctrl+A)");
-        JMenuItem copyCell = new JMenuItem("Copiar celula");
-        JMenuItem copyRow = new JMenuItem("Copiar linha");
-        JMenuItem copyCol = new JMenuItem("Copiar coluna");
-        JMenuItem copySel = new JMenuItem("Copiar selecao com cabecalho");
-        selectRow.addActionListener(e -> selectFullRow(table));
-        selectAll.addActionListener(e -> table.selectAll());
-        copyCell.addActionListener(e -> copyCell(table));
-        copyRow.addActionListener(e -> copyRows(table));
-        copyCol.addActionListener(e -> copyColumn(table));
-        copySel.addActionListener(e -> copySelectionWithHeader(table));
-        JMenuItem copyInsert = new JMenuItem("Copiar como INSERT");
-        copyInsert.addActionListener(e -> copyAsInsert(table));
-        JMenuItem copyUpdate = new JMenuItem("Copiar como UPDATE");
-        copyUpdate.addActionListener(e -> copyAsUpdate(table));
-        menu.add(selectRow);
-        menu.add(selectAll);
-        menu.addSeparator();
-        menu.add(copyCell);
-        menu.add(copyRow);
-        menu.add(copyCol);
-        menu.add(copySel);
-        menu.addSeparator();
-        menu.add(copyInsert);
-        menu.add(copyUpdate);
-        table.addMouseListener(new MouseAdapter() {
-            @Override
-            public void mousePressed(MouseEvent e) {
-                maybe(e);
-            }
-
-            @Override
-            public void mouseReleased(MouseEvent e) {
-                maybe(e);
-            }
-
-            private void maybe(MouseEvent e) {
-                if (!e.isPopupTrigger()) {
-                    return;
-                }
-                int row = table.rowAtPoint(e.getPoint());
-                int col = table.columnAtPoint(e.getPoint());
-                if (row >= 0 && col >= 0 && !table.isCellSelected(row, col)) {
-                    table.changeSelection(row, col, false, false);
-                }
-                menu.show(table, e.getX(), e.getY());
-            }
-        });
-    }
-
-    private void selectFullRow(JTable t) {
-        int row = t.getSelectedRow();
-        int lastCol = t.getColumnCount() - 1;
-        if (row >= 0 && lastCol >= 0) {
-            t.setColumnSelectionInterval(0, lastCol);
-            t.setRowSelectionInterval(row, row);
-        }
-    }
-
-    private void copyCell(JTable t) {
-        int r = t.getSelectedRow();
-        int c = t.getSelectedColumn();
-        if (r >= 0 && c >= 0) {
-            setClipboard(cellText(t, r, c));
-        }
-    }
-
-    private void copyRows(JTable t) {
-        int[] rows = t.getSelectedRows();
-        if (rows.length == 0) {
-            return;
-        }
-        int cols = t.getColumnCount();
-        StringBuilder sb = new StringBuilder();
-        for (int ri = 0; ri < rows.length; ri++) {
-            for (int c = 0; c < cols; c++) {
-                if (c > 0) {
-                    sb.append('\t');
-                }
-                sb.append(cellText(t, rows[ri], c));
-            }
-            if (ri < rows.length - 1) {
-                sb.append('\n');
-            }
-        }
-        setClipboard(sb.toString());
-    }
-
-    private void copyColumn(JTable t) {
-        int c = t.getSelectedColumn();
-        if (c < 0) {
-            return;
-        }
-        int rows = t.getRowCount();
-        StringBuilder sb = new StringBuilder();
-        for (int r = 0; r < rows; r++) {
-            if (r > 0) {
-                sb.append('\n');
-            }
-            sb.append(cellText(t, r, c));
-        }
-        setClipboard(sb.toString());
-    }
-
-    private void copySelectionWithHeader(JTable t) {
-        int[] rows = t.getSelectedRows();
-        int[] cols = t.getSelectedColumns();
-        if (rows.length == 0 || cols.length == 0) {
-            return;
-        }
-        StringBuilder sb = new StringBuilder();
-        for (int ci = 0; ci < cols.length; ci++) {
-            if (ci > 0) {
-                sb.append('\t');
-            }
-            sb.append(t.getColumnName(cols[ci]));
-        }
-        sb.append('\n');
-        for (int ri = 0; ri < rows.length; ri++) {
-            for (int ci = 0; ci < cols.length; ci++) {
-                if (ci > 0) {
-                    sb.append('\t');
-                }
-                sb.append(cellText(t, rows[ri], cols[ci]));
-            }
-            if (ri < rows.length - 1) {
-                sb.append('\n');
-            }
-        }
-        setClipboard(sb.toString());
-    }
-
-    private static String cellText(JTable t, int row, int col) {
-        Object v = t.getValueAt(row, col);
-        return v == null ? "" : v.toString();
-    }
-
-    /** Gera INSERT INTO <tabela> (cols) VALUES (...) para as linhas selecionadas. */
-    private void copyAsInsert(JTable t) {
-        int[] rows = t.getSelectedRows();
-        if (rows.length == 0) {
-            return;
-        }
-        String table = promptTableName();
-        if (table == null) {
-            return;
-        }
-        int cols = t.getColumnCount();
-        StringBuilder colList = new StringBuilder();
-        for (int c = 0; c < cols; c++) {
-            if (c > 0) {
-                colList.append(", ");
-            }
-            colList.append(t.getColumnName(c));
-        }
-        StringBuilder sb = new StringBuilder();
-        for (int ri = 0; ri < rows.length; ri++) {
-            sb.append("INSERT INTO ").append(table).append(" (").append(colList).append(")")
-                    .append(" VALUES (");
-            for (int c = 0; c < cols; c++) {
-                if (c > 0) {
-                    sb.append(", ");
-                }
-                sb.append(sqlValue(t.getValueAt(rows[ri], c)));
-            }
-            sb.append(");");
-            if (ri < rows.length - 1) {
-                sb.append('\n');
-            }
-        }
-        setClipboard(sb.toString());
-    }
-
-    /** Gera UPDATE <tabela> SET ... WHERE <1a coluna> = ... para as linhas selecionadas. */
-    private void copyAsUpdate(JTable t) {
-        int[] rows = t.getSelectedRows();
-        int cols = t.getColumnCount();
-        if (rows.length == 0 || cols == 0) {
-            return;
-        }
-        String table = promptTableName();
-        if (table == null) {
-            return;
-        }
-        StringBuilder sb = new StringBuilder();
-        for (int ri = 0; ri < rows.length; ri++) {
-            sb.append("UPDATE ").append(table).append(" SET ");
-            if (cols == 1) {
-                sb.append(t.getColumnName(0)).append(" = ")
-                        .append(sqlValue(t.getValueAt(rows[ri], 0)));
-            } else {
-                for (int c = 1; c < cols; c++) { // 1a coluna vira chave no WHERE
-                    if (c > 1) {
-                        sb.append(", ");
-                    }
-                    sb.append(t.getColumnName(c)).append(" = ")
-                            .append(sqlValue(t.getValueAt(rows[ri], c)));
-                }
-            }
-            sb.append(" WHERE ").append(t.getColumnName(0)).append(" = ")
-                    .append(sqlValue(t.getValueAt(rows[ri], 0))).append(";");
-            if (ri < rows.length - 1) {
-                sb.append('\n');
-            }
-        }
-        setClipboard(sb.toString());
-    }
-
-    /** Pergunta o nome da tabela (default "tabela"). null = cancelado. */
-    private String promptTableName() {
-        String name = JOptionPane.showInputDialog(this, "Nome da tabela:", "tabela");
-        if (name == null) {
-            return null;
-        }
-        name = name.trim();
-        return name.isEmpty() ? "tabela" : name;
-    }
-
-    /** Formata um valor para SQL: NULL, numero, booleano (1/0) ou string entre aspas. */
-    private static String sqlValue(Object v) {
-        if (v == null) {
-            return "NULL";
-        }
-        if (v instanceof Number) {
-            return v.toString();
-        }
-        if (v instanceof Boolean b) {
-            return b ? "1" : "0";
-        }
-        return "'" + v.toString().replace("'", "''") + "'";
-    }
-
-    private void setClipboard(String text) {
-        Toolkit.getDefaultToolkit().getSystemClipboard()
-                .setContents(new StringSelection(text), null);
-        statusBar.setText(" Copiado para a area de transferencia.");
-    }
-
-    // ---------- Exportacao ----------
-
-    private void maybeShowTabMenu(MouseEvent e) {
-        if (!e.isPopupTrigger()) {
-            return;
-        }
-        int idx = resultTabs.indexAtLocation(e.getX(), e.getY());
-        if (idx < 0) {
-            return;
-        }
-        resultTabs.setSelectedIndex(idx);
-
-        JPopupMenu menu = new JPopupMenu();
-        JMenuItem one = new JMenuItem("Exportar este resultado para Excel...");
-        one.addActionListener(a -> exportSingle(idx));
-        JMenuItem all = new JMenuItem("Exportar todos (uma aba por resultado)...");
-        all.addActionListener(a -> exportAll());
-        menu.add(one);
-        menu.add(all);
-        menu.show(resultTabs, e.getX(), e.getY());
-    }
-
-    private void exportSingle(int idx) {
-        if (idx < 0 || idx >= lastResults.size()) {
-            return;
-        }
-        QueryResult r = lastResults.get(idx);
-        if (r.model() == null) {
-            JOptionPane.showMessageDialog(this,
-                    "Esta aba nao possui dados tabulares para exportar.",
-                    "Exportar para Excel", JOptionPane.INFORMATION_MESSAGE);
-            return;
-        }
-        File file = chooseSaveFile(r.title());
-        if (file != null) {
-            List<ExcelExporter.TableSheet> sheets = new ArrayList<>();
-            sheets.add(new ExcelExporter.TableSheet(r.title(), r.model()));
-            sheets.add(instructionsSheet(List.of(r)));
-            doExport(sheets, file);
-        }
-    }
-
-    private void exportAll() {
-        List<ExcelExporter.TableSheet> sheets = new ArrayList<>();
-        for (QueryResult r : lastResults) {
-            if (r.model() != null) {
-                sheets.add(new ExcelExporter.TableSheet(r.title(), r.model()));
-            }
-        }
-        if (sheets.isEmpty()) {
-            JOptionPane.showMessageDialog(this,
-                    "Nenhum resultado tabular para exportar.",
-                    "Exportar para Excel", JOptionPane.INFORMATION_MESSAGE);
-            return;
-        }
-        sheets.add(instructionsSheet(lastResults));
-        File file = chooseSaveFile("resultados");
-        if (file != null) {
-            doExport(sheets, file);
-        }
-    }
-
-    /** Monta a aba "Instrucoes SQL" (Resultado x SQL executado), estilo PL/SQL Developer. */
-    private ExcelExporter.TableSheet instructionsSheet(List<QueryResult> results) {
-        DefaultTableModel m = new DefaultTableModel(
-                new Object[] {"Resultado", "Instrucao SQL"}, 0) {
-            @Override
-            public boolean isCellEditable(int r, int c) {
-                return false;
-            }
-        };
-        for (QueryResult r : results) {
-            m.addRow(new Object[] {r.title(), r.sql()});
-        }
-        return new ExcelExporter.TableSheet("Instrucoes SQL", m);
-    }
-
-    private File chooseSaveFile(String defaultName) {
-        JFileChooser fc = new JFileChooser();
-        fc.setDialogTitle("Salvar como Excel");
-        fc.setSelectedFile(new File(defaultName + ".xlsx"));
-        fc.setFileFilter(new FileNameExtensionFilter("Planilha Excel (*.xlsx)", "xlsx"));
-        if (fc.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) {
-            return null;
-        }
-        File file = fc.getSelectedFile();
-        if (!file.getName().toLowerCase().endsWith(".xlsx")) {
-            file = new File(file.getParentFile(), file.getName() + ".xlsx");
-        }
-        return file;
-    }
-
-    private void doExport(List<ExcelExporter.TableSheet> sheets, File file) {
-        statusBar.setText(" Exportando para " + file.getName() + "...");
-        new SwingWorker<Void, Void>() {
-            @Override
-            protected Void doInBackground() throws Exception {
-                ExcelExporter.export(sheets, file);
-                return null;
-            }
-
-            @Override
-            protected void done() {
-                try {
-                    get();
-                    statusBar.setText(" Exportado: " + file.getAbsolutePath());
-                    askToOpen(file);
-                } catch (Exception ex) {
-                    showError("Falha ao exportar", ex);
-                    statusBar.setText(" Erro ao exportar");
-                }
-            }
-        }.execute();
-    }
-
-    /** Apos exportar, pergunta se deseja abrir o arquivo no aplicativo padrao. */
-    private void askToOpen(File file) {
-        int opt = JOptionPane.showConfirmDialog(this,
-                "Exportacao concluida:\n" + file.getName() + "\n\nDeseja abrir o arquivo agora?",
-                "Exportar para Excel", JOptionPane.YES_NO_OPTION,
-                JOptionPane.QUESTION_MESSAGE);
-        if (opt != JOptionPane.YES_OPTION) {
-            return;
-        }
-        if (!Desktop.isDesktopSupported()
-                || !Desktop.getDesktop().isSupported(Desktop.Action.OPEN)) {
-            statusBar.setText(" Abertura automatica nao suportada neste sistema.");
-            return;
-        }
-        try {
-            Desktop.getDesktop().open(file);
-        } catch (Exception ex) {
-            showError("Nao foi possivel abrir o arquivo", ex);
-        }
-    }
-
-    // ---------- Auxiliares ----------
-
-    private static String snippet(String sql) {
-        String oneLine = sql.replaceAll("\\s+", " ").trim();
-        return oneLine.length() > 80 ? oneLine.substring(0, 80) + "..." : oneLine;
-    }
-
-    /** Tooltip com o SQL exato executado (para conferir se o WHERE foi incluido). */
-    private static String sqlTooltip(String sql) {
-        String body = sql.length() > 2000 ? sql.substring(0, 2000) + "..." : sql;
-        String esc = body.replace("&", "&amp;").replace("<", "&lt;")
-                .replace(">", "&gt;").replace("\n", "<br>");
-        return "<html><b>SQL executado:</b><br>" + esc + "</html>";
-    }
-
-    /** Cria o modelo (apenas cabecalhos + tipos de coluna) para uma consulta. */
-    private static ResultTableModel createModel(ResultSet rs) throws SQLException {
-        ResultSetMetaData md = rs.getMetaData();
-        int cols = md.getColumnCount();
-        Vector<String> names = new Vector<>();
-        Class<?>[] types = new Class<?>[cols];
-        for (int i = 1; i <= cols; i++) {
-            names.add(md.getColumnLabel(i));
-            types[i - 1] = resolveColumnClass(md, i);
-        }
-        return new ResultTableModel(names, types);
-    }
-
-    private static Class<?> resolveColumnClass(ResultSetMetaData md, int col) {
-        try {
-            return Class.forName(md.getColumnClassName(col));
-        } catch (Exception ex) {
-            return Object.class;
-        }
-    }
-
-    /** Anexa ate {@code max} linhas do ResultSet ao modelo; retorna quantas leu. */
-    private static int appendPage(DefaultTableModel model, ResultSet rs, int max)
-            throws SQLException {
-        int cols = model.getColumnCount();
-        int read = 0;
-        while (read < max && rs.next()) {
-            Vector<Object> row = new Vector<>(cols);
-            for (int i = 1; i <= cols; i++) {
-                row.add(rs.getObject(i));
-            }
-            model.addRow(row);
-            read++;
-        }
-        return read;
-    }
-
-    /** Modelo de tabela somente-leitura que expoe o tipo real de cada coluna
-     *  (para a ordenacao numerica/data funcionar corretamente). */
-    private static final class ResultTableModel extends DefaultTableModel {
-        private static final long serialVersionUID = 1L;
-        private final transient Class<?>[] types;
-
-        ResultTableModel(Vector<String> names, Class<?>[] types) {
-            super(names, 0);
-            this.types = types;
-        }
-
-        @Override
-        public boolean isCellEditable(int row, int column) {
-            return false;
-        }
-
-        @Override
-        public Class<?> getColumnClass(int column) {
-            if (column >= 0 && column < types.length && types[column] != null) {
-                return types[column];
-            }
-            return Object.class;
-        }
-    }
-
-    /** Cursor aberto (Statement + ResultSet) para paginacao sob demanda. */
-    private static final class ResultCursor {
-        final Statement st;
-        final ResultSet rs;
-        boolean exhausted;
-
-        ResultCursor(Statement st, ResultSet rs) {
-            this.st = st;
-            this.rs = rs;
-        }
-
-        void close() {
-            try {
-                rs.close();
-            } catch (SQLException ignore) {
-                // ignora
-            }
-            try {
-                st.close();
-            } catch (SQLException ignore) {
-                // ignora
-            }
-        }
-    }
-
-    private void populateTree(SchemaInfo schema) {
-        this.currentSchema = schema;
-        objectSearch.setEnabled(true);
-        rebuildTree("");
-    }
-
-    private void applyObjectFilter() {
-        if (currentSchema != null) {
-            rebuildTree(objectSearch.getText());
-        }
-    }
-
-    /**
-     * Monta a arvore de objetos agrupada por tipo (estilo PL/SQL Developer),
-     * filtrando pelos nomes que contem {@code filter}. Tabelas e views tambem
-     * casam quando uma de suas colunas bate com o filtro.
-     */
-    private void rebuildTree(String filter) {
-        String f = filter == null ? "" : filter.trim().toLowerCase(Locale.ROOT);
-        boolean filtering = !f.isEmpty();
-        SchemaInfo schema = currentSchema;
-
-        DefaultMutableTreeNode root = new DefaultMutableTreeNode(
-                new ObjNode(NodeType.SCHEMA, schema.name(), schema.name(), null, null));
-
-        addTableCategory(root, "Tabelas", schema.tables(), NodeType.TABLE, "TABLE", f, filtering);
-        addTableCategory(root, "Visualizacoes", schema.views(), NodeType.VIEW, "VIEW", f, filtering);
-        addNameCategory(root, "Procedures", schema.procedures(), NodeType.ROUTINE, "PROCEDURE", f, filtering);
-        addNameCategory(root, "Functions", schema.functions(), NodeType.ROUTINE, "FUNCTION", f, filtering);
-        addNameCategory(root, "Triggers", schema.triggers(), NodeType.TRIGGER, "TRIGGER", f, filtering);
-
-        objectTree.setModel(new DefaultTreeModel(root));
-        if (filtering) {
-            expandAll();
-        } else {
-            expandCategories(root);
-        }
-    }
-
-    private void addTableCategory(DefaultMutableTreeNode root, String label,
-            List<TableInfo> items, NodeType type, String kind, String f, boolean filtering) {
-        DefaultMutableTreeNode cat = new DefaultMutableTreeNode();
-        int shown = 0;
-        for (TableInfo t : items) {
-            if (filtering && !contains(t.name(), f) && !anyColumnMatches(t, f)) {
-                continue;
-            }
-            DefaultMutableTreeNode tn = new DefaultMutableTreeNode(
-                    new ObjNode(type, t.name(), t.name(), kind, t));
-            // Ao buscar, a arvore mostra so o objeto; as colunas ficam na tela
-            // de propriedades (duplo-clique). No modo normal, expande as colunas.
-            if (!filtering) {
-                for (ColumnInfo c : t.columns()) {
-                    tn.add(new DefaultMutableTreeNode(new ObjNode(
-                            NodeType.COLUMN, c.name() + " : " + c.type(), c.name(), null, null)));
-                }
-            }
-            cat.add(tn);
-            shown++;
-        }
-        if (!filtering || shown > 0) {
-            cat.setUserObject(new ObjNode(NodeType.CATEGORY,
-                    label + " (" + items.size() + ")", label, null, null));
-            root.add(cat);
-        }
-    }
-
-    private static boolean anyColumnMatches(TableInfo t, String f) {
-        for (ColumnInfo c : t.columns()) {
-            if (contains(c.name(), f)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private void addNameCategory(DefaultMutableTreeNode root, String label,
-            List<String> items, NodeType type, String kind, String f, boolean filtering) {
-        DefaultMutableTreeNode cat = new DefaultMutableTreeNode();
-        int shown = 0;
-        for (String name : items) {
-            if (filtering && !contains(name, f)) {
-                continue;
-            }
-            cat.add(new DefaultMutableTreeNode(new ObjNode(type, name, name, kind, null)));
-            shown++;
-        }
-        if (!filtering || shown > 0) {
-            cat.setUserObject(new ObjNode(NodeType.CATEGORY,
-                    label + " (" + items.size() + ")", label, null, null));
-            root.add(cat);
-        }
-    }
-
-    private static boolean contains(String value, String lowerFilter) {
-        return lowerFilter.isEmpty()
-                || value.toLowerCase(Locale.ROOT).contains(lowerFilter);
-    }
-
-    private void expandCategories(DefaultMutableTreeNode root) {
-        objectTree.expandPath(new TreePath(root.getPath()));
-        for (int i = 0; i < root.getChildCount(); i++) {
-            DefaultMutableTreeNode child = (DefaultMutableTreeNode) root.getChildAt(i);
-            objectTree.expandPath(new TreePath(child.getPath()));
-        }
-    }
-
-    private void expandAll() {
-        for (int i = 0; i < objectTree.getRowCount(); i++) {
-            objectTree.expandRow(i);
-        }
-    }
-
-    /** Abre a tela de propriedades do objeto selecionado (duplo-clique). */
-    private void openSelectedObjectProperties() {
-        TreePath path = objectTree.getSelectionPath();
-        if (path == null) {
-            return;
-        }
-        Object node = ((DefaultMutableTreeNode) path.getLastPathComponent()).getUserObject();
-        if (node instanceof ObjNode obj) {
-            if (obj.type() == NodeType.SCHEMA_PICK) {
-                openSchema(obj.name());
-            } else if (obj.kind() != null) {
-                showObjectProperties(obj);
-            }
-        }
-    }
-
-    /**
-     * Janela de propriedades: para tabelas/views mostra a grade de colunas;
-     * para todos os objetos carrega a definicao (DDL) sob demanda.
-     */
-    private void showObjectProperties(ObjNode obj) {
-        JDialog dialog = new JDialog(this, prettyKind(obj.kind()) + " - " + obj.name(), false);
-        dialog.setSize(560, 460);
-        dialog.setLocationRelativeTo(this);
-        dialog.setLayout(new BorderLayout());
-
-        JLabel title = new JLabel(obj.name());
-        title.setFont(title.getFont().deriveFont(Font.BOLD, 14f));
-        JLabel sub = new JLabel(prettyKind(obj.kind()) + "  ·  " + currentSchema.name());
-        sub.setForeground(MUTED);
-        JPanel head = new JPanel(new BorderLayout());
-        head.setBorder(BorderFactory.createEmptyBorder(10, 12, 8, 12));
-        head.add(title, BorderLayout.NORTH);
-        head.add(sub, BorderLayout.SOUTH);
-
-        JTabbedPane tabs = new JTabbedPane();
-        boolean isTableLike = obj.table() != null;
-        DefaultTableModel colModel = null;
-        DefaultTableModel idxModel = null;
-        DefaultTableModel fkModel = null;
-        if (isTableLike) {
-            colModel = readOnlyModel(
-                    "#", "Coluna", "Tipo", "Nulo", "Chave", "Default", "Extra", "Comentario");
-            tabs.addTab("Colunas", tableInScroll(colModel));
-            // Indices e FKs sao especificos de tabelas (views nao tem).
-            if ("TABLE".equals(obj.kind())) {
-                idxModel = readOnlyModel("Indice", "Unico", "Tipo", "Colunas");
-                tabs.addTab("Indices", tableInScroll(idxModel));
-                fkModel = readOnlyModel(
-                        "Constraint", "Coluna(s)", "Referencia", "Coluna(s) ref.",
-                        "On Update", "On Delete");
-                tabs.addTab("Chaves estrangeiras", tableInScroll(fkModel));
-            }
-        }
-
-        JTextArea ddlArea = new JTextArea("Carregando definicao...");
-        ddlArea.setEditable(false);
-        ddlArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
-        tabs.addTab("DDL", new JScrollPane(ddlArea));
-
-        dialog.add(head, BorderLayout.NORTH);
-        dialog.add(tabs, BorderLayout.CENTER);
-        dialog.setVisible(true);
-
-        if (isTableLike) {
-            loadTableDetailsInto(obj, colModel, idxModel, fkModel);
-        }
-        loadDefinition(obj, ddlArea);
-    }
-
-    private static DefaultTableModel readOnlyModel(Object... columns) {
-        return new DefaultTableModel(columns, 0) {
-            @Override
-            public boolean isCellEditable(int r, int c) {
-                return false;
-            }
-        };
-    }
-
-    private static JComponent tableInScroll(DefaultTableModel model) {
-        JTable t = new JTable(model);
-        t.setAutoResizeMode(JTable.AUTO_RESIZE_OFF);
-        t.setFillsViewportHeight(true);
-        if ("#".equals(model.getColumnName(0))) {
-            t.getColumnModel().getColumn(0).setMaxWidth(40);
-        }
-        t.getTableHeader().setReorderingAllowed(false);
-        return new JScrollPane(t);
-    }
-
-    /** Preenche as grades de colunas, indices e FKs em segundo plano. */
-    private void loadTableDetailsInto(ObjNode obj, DefaultTableModel colModel,
-            DefaultTableModel idxModel, DefaultTableModel fkModel) {
-        new SwingWorker<TableDetails, Void>() {
-            @Override
-            protected TableDetails doInBackground() throws Exception {
-                Connection conn = connectionManager.getConnection();
-                return metadataService.loadTableDetails(conn, currentSchema.name(), obj.name());
-            }
-
-            @Override
-            protected void done() {
-                try {
-                    TableDetails d = get();
-                    for (ColumnDetail c : d.columns()) {
-                        colModel.addRow(new Object[] {
-                                c.position(), c.name(), c.type(),
-                                c.nullable() ? "Sim" : "Nao",
-                                prettyKey(c.key()),
-                                c.defaultValue() == null ? "" : c.defaultValue(),
-                                c.extra() == null ? "" : c.extra(),
-                                c.comment() == null ? "" : c.comment()});
-                    }
-                    if (idxModel != null) {
-                        for (IndexInfo ix : d.indexes()) {
-                            idxModel.addRow(new Object[] {
-                                    ix.name(), ix.unique() ? "Sim" : "Nao",
-                                    ix.type(), String.join(", ", ix.columns())});
-                        }
-                    }
-                    if (fkModel != null) {
-                        for (ForeignKeyInfo fk : d.foreignKeys()) {
-                            fkModel.addRow(new Object[] {
-                                    fk.name(), String.join(", ", fk.columns()),
-                                    fk.referencedTable(),
-                                    String.join(", ", fk.referencedColumns()),
-                                    fk.onUpdate(), fk.onDelete()});
-                        }
-                    }
-                } catch (Exception ex) {
-                    Throwable c = (ex.getCause() != null) ? ex.getCause() : ex;
-                    statusBar.setText(" Erro ao carregar detalhes: " + c.getMessage());
-                }
-            }
-        }.execute();
-    }
-
-    private static String prettyKey(String key) {
-        if (key == null) {
-            return "";
-        }
-        return switch (key) {
-            case "PRI" -> "PK";
-            case "UNI" -> "Unica";
-            case "MUL" -> "Indice";
-            default -> key;
-        };
-    }
-
-    private void loadDefinition(ObjNode obj, JTextArea target) {
-        new SwingWorker<String, Void>() {
-            @Override
-            protected String doInBackground() throws Exception {
-                if (!connectionManager.isConnected()) {
-                    return "Sem conexao ativa.";
-                }
-                Connection conn = connectionManager.getConnection();
-                String sql = dialect.definitionQuery(obj.kind(), obj.name());
-                try (Statement st = conn.createStatement();
-                     ResultSet rs = st.executeQuery(sql)) {
-                    if (rs.next()) {
-                        int idx = pickDefinitionColumn(rs.getMetaData());
-                        String def = rs.getString(idx);
-                        return (def != null) ? def : "(sem definicao)";
-                    }
-                    return "(sem definicao)";
-                }
-            }
-
-            @Override
-            protected void done() {
-                try {
-                    target.setText(get());
-                } catch (Exception ex) {
-                    Throwable c = (ex.getCause() != null) ? ex.getCause() : ex;
-                    target.setText("Erro ao carregar a definicao: " + c.getMessage());
-                }
-                target.setCaretPosition(0);
-            }
-        }.execute();
-    }
-
-    /** Escolhe a coluna do SHOW CREATE que contem o DDL (ex.: "Create Table"). */
-    private static int pickDefinitionColumn(ResultSetMetaData md) throws SQLException {
-        int cols = md.getColumnCount();
-        for (int i = 1; i <= cols; i++) {
-            String label = md.getColumnLabel(i).toLowerCase(Locale.ROOT);
-            if (label.contains("create") || label.contains("statement")) {
-                return i;
-            }
-        }
-        return cols;
-    }
-
-    private static String prettyKind(String kind) {
-        return switch (kind) {
-            case "TABLE" -> "Tabela";
-            case "VIEW" -> "Visualizacao";
-            case "PROCEDURE" -> "Procedure";
-            case "FUNCTION" -> "Function";
-            case "TRIGGER" -> "Trigger";
-            default -> kind;
-        };
-    }
-
-    /** Tipos de no na arvore de objetos. */
-    private enum NodeType { SCHEMA, SCHEMA_PICK, CATEGORY, TABLE, VIEW, ROUTINE, TRIGGER, COLUMN }
-
-    /**
-     * No da arvore: tipo, texto exibido, nome cru do objeto, o tipo para o DDL
-     * (kind, null para schema/categoria/coluna) e a tabela associada quando houver.
-     */
-    private record ObjNode(NodeType type, String display, String name,
-                           String kind, TableInfo table) {
-        @Override
-        public String toString() {
-            return display;
-        }
-    }
-
-    private void showError(String title, Exception ex) {
-        Throwable cause = (ex.getCause() != null) ? ex.getCause() : ex;
-        JOptionPane.showMessageDialog(
-                this, cause.getMessage(), title, JOptionPane.ERROR_MESSAGE);
-    }
-
-    /** Workspace de uma conexao: sua sessao JDBC, esquema e abas de SQL proprias. */
-    private static final class Workspace {
-        final String name;                 // nome da conexao (ou SCRATCH)
-        final ConnectionProfile profile;   // null para o workspace sem conexao
-        final ConnectionManager mgr;        // gerenciador JDBC proprio
-        SchemaInfo schema;                  // esquema carregado (ou null)
-        List<String> schemaList;            // lista de esquemas (schema em branco)
-        List<SessionStore.Tab> tabs = new ArrayList<>();
-        int selectedTab = 0;
-
-        Workspace(String name, ConnectionProfile profile, ConnectionManager mgr) {
-            this.name = name;
-            this.profile = profile;
-            this.mgr = mgr;
-        }
-    }
-
-    /** Resultado de um statement: grade (model != null) ou mensagem (update/erro). */
-    private record QueryResult(String title, String sql, DefaultTableModel model,
-                               String message, boolean error, long execMs, long fetchMs,
-                               ResultCursor cursor) {
-        static QueryResult grid(String title, String sql, DefaultTableModel model,
-                long execMs, long fetchMs, ResultCursor cursor) {
-            return new QueryResult(title, sql, model, null, false, execMs, fetchMs, cursor);
-        }
-
-        static QueryResult message(String title, String sql, String message,
-                boolean error, long execMs) {
-            return new QueryResult(title, sql, null, message, error, execMs, 0L, null);
-        }
-    }
+	private static final long serialVersionUID = 1L;
+	// Pacote-visivel (nao private): reaproveitada por ResultStatusBar para o
+	// icone do botao "Exportar" — evita duplicar o mesmo valor de cor em duas
+	// classes do mesmo pacote.
+	static final Color ACCENT = new Color(0x059669);
+	private static final Color MUTED = new Color(0x6B7280);
+
+	private static final int PAGE_SIZE = 200;
+	private static final int MAX_TABS = 15;
+
+	private static final String SCRATCH = "(sem conexao)";
+
+	private final DatabaseDialect dialect = new MySqlDialect();
+	/** Aponta SEMPRE para a conexao do workspace ativo (trocada ao alternar). */
+	private ConnectionManager connectionManager = new ConnectionManager(dialect);
+	private final Map<String, Workspace> workspaces = new LinkedHashMap<>();
+	private Workspace activeWorkspace;
+	private Map<String, SessionStore.Session> savedSessions = new LinkedHashMap<>();
+	private final MetadataService metadataService = new MetadataService(dialect);
+	private final MetadataCache metadataCache = new MetadataCache();
+	// Cache de metadados de tabela (colunas/PK/indices/FKs) para a grade de
+	// resultados — indicador de FK no cabecalho e popup/menu de metadados de
+	// coluna; compartilhado por TODAS as grades da sessao (ver ResultGrid),
+	// evita repetir loadTableDetails() para a mesma tabela a cada resultado.
+	private final TableMetadataCache tableMetadataCache = new TableMetadataCache(metadataService);
+	private final SqlCompletionProvider completionProvider = new SqlCompletionProvider(dialect.keywords());
+	private final ConnectionStore connectionStore = new ConnectionStore();
+	private final SessionStore sessionStore = new SessionStore();
+	private Timer autosaveTimer;
+
+	private JTabbedPane editorTabs;
+	private Component plusTab;
+	private boolean addingTab;
+	private JSplitPane mainSplit;
+	private JSplitPane centerSplit;
+	private JComponent leftSide;
+	private JComponent resultsArea;
+	private JComponent editorAreaPanel;
+	private JComponent objectBrowserPanel;
+	private JComponent toolbarBar;
+	private JComponent footerBar;
+	private JButton resultsOrientationButton;
+	private int sidebarLoc = 248;
+	private int resultsLoc = -1;
+	private JTabbedPane resultTabs;
+	private JPanel resultsCards;
+	private JTree objectTree;
+	private JButton refreshObjectsButton;
+	private ConnectionsPanel connectionsPanel;
+	private JTextField objectSearch;
+	private SchemaInfo currentSchema;
+	private JLabel statusBar;
+	private JLabel connStatusLabel;
+	private JProgressBar connProgress;
+	private JButton runButton;
+	private JButton themeButton;
+	private JComponent resultsOverlay;
+	private SwingWorker<List<QueryResult>, Void> runWorker;
+	private volatile Statement runningStatement;
+
+	private boolean dark = false;
+	private List<QueryResult> lastResults = new ArrayList<>();
+	private final List<ResultCursor> openCursors = new ArrayList<>();
+
+	// ---------- Layout flexivel / zoom / modo compacto ----------
+
+	private static final double[] ZOOM_LEVELS = { 0.75, 0.90, 1.00, 1.10, 1.25, 1.50 };
+
+	private final UiPreferences uiPrefsStore = new UiPreferences();
+	private Font baseDefaultFont;
+	private boolean sidebarOnRight = false;
+	private boolean resultsVertical = false;
+	private boolean compactMode = false;
+	private int zoomIndex = UiPreferences.DEFAULT_ZOOM_INDEX;
+
+	// ---------- Formatacao de SQL (presets) e fonte do editor ----------
+
+	private final FormatPreferences formatPrefsStore = new FormatPreferences();
+	private FormatPreferences.State formatState = FormatPreferences.State.defaults();
+
+	public MainWindow() {
+		super("Nureal Database IDE");
+		setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+		setIconImages(Icons.brandImages());
+		setSize(1280, 800);
+		setLocationRelativeTo(null);
+		loadUiPrefs();
+		loadFormatPrefs();
+		buildUi();
+		registerWindowShortcuts();
+		// Salva a sessao ao fechar (alem do autosave continuo durante a digitacao).
+		addWindowListener(new WindowAdapter() {
+			@Override
+			public void windowClosing(WindowEvent e) {
+				saveSession();
+			}
+		});
+	}
+
+	/**
+	 * Carrega as preferencias de layout/zoom salvas e ja aplica a fonte do zoom.
+	 */
+	private void loadUiPrefs() {
+		captureBaseFont();
+		UiPreferences.State state;
+		try {
+			state = uiPrefsStore.load();
+		} catch (Exception ex) {
+			state = UiPreferences.State.defaults();
+		}
+		sidebarOnRight = state.sidebarOnRight();
+		resultsVertical = state.resultsVertical();
+		compactMode = state.compactMode();
+		zoomIndex = clampZoomIndex(state.zoomIndex());
+		if (zoomIndex != UiPreferences.DEFAULT_ZOOM_INDEX) {
+			applyZoomFont(zoomIndex); // so a fonte; ainda nao ha janela/componentes
+		}
+	}
+
+	/** Carrega o preset de formatacao de SQL e a fonte do editor salvos. */
+	private void loadFormatPrefs() {
+		try {
+			formatState = formatPrefsStore.load();
+		} catch (Exception ex) {
+			formatState = FormatPreferences.State.defaults();
+		}
+	}
+
+	private void saveFormatState() {
+		try {
+			formatPrefsStore.save(formatState);
+		} catch (Exception ex) {
+			if (statusBar != null) {
+				statusBar.setText(" Aviso: nao foi possivel salvar as preferencias de formatacao: " + ex.getMessage());
+			}
+		}
+	}
+
+	/** Formatador atual (preset + caixa + indentacao JSON), sob demanda. */
+	private SqlFormatter currentSqlFormatter() {
+		return formatState.buildFormatter();
+	}
+
+	/** Aplica a fonte escolhida a todas as abas de SQL atualmente abertas. */
+	private void applyEditorFontToOpenTabs() {
+		if (editorTabs == null) {
+			return;
+		}
+		for (int i = 0; i < editorTabs.getTabCount(); i++) {
+			Component c = editorTabs.getComponentAt(i);
+			if (c instanceof SqlEditorPane sep) {
+				sep.setFontFamily(formatState.editorFontFamily());
+			}
+		}
+	}
+
+	private void buildUi() {
+		setLayout(new BorderLayout());
+
+		leftSide = buildLeftSide();
+		resultsArea = buildResultsArea();
+		editorAreaPanel = buildEditorArea();
+
+		centerSplit = new JSplitPane(resultsVertical ? JSplitPane.HORIZONTAL_SPLIT : JSplitPane.VERTICAL_SPLIT,
+				editorAreaPanel, resultsArea);
+		centerSplit.setResizeWeight(0.62);
+		centerSplit.setBorder(BorderFactory.createEmptyBorder());
+
+		mainSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, sidebarOnRight ? centerSplit : leftSide,
+				sidebarOnRight ? leftSide : centerSplit);
+		mainSplit.setResizeWeight(sidebarOnRight ? 0.78 : 0.22);
+		mainSplit.setBorder(BorderFactory.createEmptyBorder());
+		add(mainSplit, BorderLayout.CENTER);
+
+		footerBar = buildFooter();
+		add(footerBar, BorderLayout.SOUTH);
+
+		applyDensityToPanels();
+	}
+
+	// ---------- Barras ----------
+	/*
+	 * private JComponent buildToolbar() { // Criamos barras de ferramentas nativas
+	 * do FlatLaf em vez de JPanels com FlowLayout JToolBar leftToolBar = new
+	 * JToolBar(); leftToolBar.setFloatable(false);
+	 * leftToolBar.putClientProperty("JToolBar.style", "flat"); // Estilo limpo e
+	 * moderno
+	 * 
+	 * JToolBar rightToolBar = new JToolBar(); rightToolBar.setFloatable(false);
+	 * rightToolBar.putClientProperty("JToolBar.style", "flat");
+	 * 
+	 * // --- Botão Executar --- runButton = new JButton("Executar"); // Subimos
+	 * para tamanho 15 para melhor leitura do SVG
+	 * runButton.setIcon(Icons.get(IconType.RUN, 15, Color.WHITE));
+	 * runButton.setToolTipText("Executar (Ctrl+Enter ou F5)");
+	 * runButton.setEnabled(false); runButton.addActionListener(e -> onRun());
+	 * styleRunButton(); // Mantém seu estilo customizado/verde nele
+	 * 
+	 * // --- Grupo Formatar (Segmented Button com FlatLaf) --- JButton formatButton
+	 * = new JButton("Formatar"); formatButton.setIcon(Icons.get(IconType.FORMAT,
+	 * 15, MUTED)); formatButton.setToolTipText("Formatar SQL (Ctrl+Shift+F)");
+	 * formatButton.addActionListener(e -> { SqlEditorPane editor = currentEditor();
+	 * if (editor != null) { editor.formatText(); } });
+	 * 
+	 * // Substituímos o caractere "▾" pelo ícone oficial de seta do FlatLaf,
+	 * corrigindo o erro visual JButton formatMenuButton = new JButton(new
+	 * com.formdev.flatlaf.icons.FlatMenuArrowIcon());
+	 * formatMenuButton.setToolTipText("Presets e opcoes de formatacao");
+	 * formatMenuButton.addActionListener(e -> buildFormatMenu().show(
+	 * formatMenuButton, 0, formatMenuButton.getHeight()));
+	 * 
+	 * // Propriedades mágicas do FlatLaf que transformam os dois botões em um bloco
+	 * unido moderno: formatButton.putClientProperty("JButton.segmentPosition",
+	 * "first"); formatMenuButton.putClientProperty("JButton.segmentPosition",
+	 * "last");
+	 * 
+	 * // Adicionamos os componentes da esquerda leftToolBar.add(runButton);
+	 * leftToolBar.addSeparator(new java.awt.Dimension(8, 0)); // Espaçamento
+	 * elegante entre os blocos leftToolBar.add(formatButton);
+	 * leftToolBar.add(formatMenuButton);
+	 * 
+	 * // --- Componentes da Direita --- JButton toggleSidebar = new
+	 * JButton(Icons.get(IconType.PANEL_LEFT, 16, MUTED));
+	 * toggleSidebar.setToolTipText("Mostrar/ocultar painel lateral (Ctrl+B)");
+	 * toggleSidebar.addActionListener(e -> toggleSidebar());
+	 * 
+	 * JButton toggleResults = new JButton(Icons.get(IconType.PANEL_BOTTOM, 16,
+	 * MUTED)); toggleResults.setToolTipText("Mostrar/ocultar resultados (Ctrl+J)");
+	 * toggleResults.addActionListener(e -> toggleResults());
+	 * 
+	 * themeButton = new JButton(Icons.get(IconType.THEME_DARK, 16, MUTED));
+	 * themeButton.setToolTipText("Alternar tema claro/escuro");
+	 * themeButton.addActionListener(e -> toggleTheme());
+	 * 
+	 * JButton layoutButton = new JButton(Icons.get(IconType.SETTINGS, 16, MUTED));
+	 * layoutButton.setToolTipText("Layout, zoom e modo compacto");
+	 * layoutButton.addActionListener(e -> buildLayoutMenu().show( layoutButton, 0,
+	 * layoutButton.getHeight()));
+	 * 
+	 * // Adicionamos os componentes da direita (com pequenos separadores invisíveis
+	 * se desejar) rightToolBar.add(toggleSidebar); rightToolBar.addSeparator(new
+	 * java.awt.Dimension(4, 0)); rightToolBar.add(toggleResults);
+	 * rightToolBar.addSeparator(new java.awt.Dimension(4, 0));
+	 * rightToolBar.add(layoutButton); rightToolBar.addSeparator(new
+	 * java.awt.Dimension(4, 0)); rightToolBar.add(themeButton);
+	 * 
+	 * // Painel mestre que segura as duas barras nas extremidades JPanel bar = new
+	 * JPanel(new BorderLayout()); bar.setBorder(BorderFactory.createEmptyBorder(6,
+	 * 12, 6, 12)); // Reduzido levemente para um look mais compacto
+	 * bar.add(leftToolBar, BorderLayout.WEST); bar.add(rightToolBar,
+	 * BorderLayout.EAST);
+	 * 
+	 * toolbarBar = bar; return bar; }
+	 */
+
+	private JComponent buildToolbar() {
+		// JPanel totalmente transparente (sem o fundo mais claro que você não gostou)
+		JPanel mainBar = new JPanel(new GridBagLayout());
+		mainBar.setOpaque(false);
+
+		// Margem cirúrgica: 6px acima/abaixo, 0px na esquerda para colar na linha da
+		// aba
+		mainBar.setBorder(BorderFactory.createEmptyBorder(6, 0, 6, 12));
+
+		GridBagConstraints gbc = new GridBagConstraints();
+		// O segredo do alinhamento: força todos os elementos a compartilharem a mesma
+		// linha base vertical
+		gbc.anchor = GridBagConstraints.BASELINE;
+		gbc.fill = GridBagConstraints.NONE;
+		gbc.weighty = 1.0;
+		gbc.gridy = 0;
+
+		// --- Botões da Esquerda ---
+		runButton = new JButton("Executar");
+		runButton.setIcon(Icons.get(IconType.RUN, 14, Color.WHITE));
+		runButton.setToolTipText("Executar (Ctrl+Enter ou F5)");
+		runButton.setEnabled(false);
+		runButton.addActionListener(e -> onRun());
+		styleRunButton(); // Mantém o verde arredondado da Nureal
+
+		JButton formatButton = new JButton("Formatar");
+		formatButton.setIcon(Icons.get(IconType.FORMAT, 14, MUTED));
+		formatButton.setToolTipText("Formatar SQL (Ctrl+Shift+F)");
+		formatButton.addActionListener(e -> {
+			SqlEditorPane editor = currentEditor();
+			if (editor != null) {
+				editor.formatText();
+			}
+		});
+
+		JButton formatMenuButton = new JButton(new com.formdev.flatlaf.icons.FlatMenuArrowIcon());
+		formatMenuButton.setToolTipText("Presets e opcoes de formatacao");
+		formatMenuButton
+				.addActionListener(e -> buildFormatMenu().show(formatMenuButton, 0, formatMenuButton.getHeight()));
+
+		// Segmentação limpa do FlatLaf (une os dois botões mantendo o fundo padrão do
+		// tema)
+		formatButton.putClientProperty("JButton.segmentPosition", "first");
+		formatMenuButton.putClientProperty("JButton.segmentPosition", "last");
+
+		// Adiciona os botões esquerdos um a um aplicando pequenos recuos à direita
+		// (insets)
+		gbc.gridx = 0;
+		gbc.weightx = 0.0;
+		gbc.insets = new java.awt.Insets(0, 0, 0, 8); // Colado na esquerda, espaço de 8px após o Executar
+		mainBar.add(runButton, gbc);
+
+		gbc.gridx = 1;
+		gbc.insets = new java.awt.Insets(0, 0, 0, 0);
+		mainBar.add(formatButton, gbc);
+
+		gbc.gridx = 2;
+		gbc.insets = new java.awt.Insets(0, 0, 0, 0);
+		mainBar.add(formatMenuButton, gbc);
+
+		// --- O ESPAÇADOR INVISÍVEL ---
+		// Ele joga tudo o que vier a partir daqui totalmente para a direita
+		gbc.gridx = 3;
+		gbc.weightx = 1.0;
+		mainBar.add(javax.swing.Box.createHorizontalGlue(), gbc);
+
+		// --- Botões da Direita ---
+		JButton toggleSidebar = new JButton(Icons.get(IconType.PANEL_LEFT, 16, MUTED));
+		toggleSidebar.setToolTipText("Mostrar/ocultar painel lateral (Ctrl+B)");
+		toggleSidebar.addActionListener(e -> toggleSidebar());
+
+		JButton toggleResults = new JButton(Icons.get(IconType.PANEL_BOTTOM, 16, MUTED));
+		toggleResults.setToolTipText("Mostrar/ocultar resultados (Ctrl+J)");
+		toggleResults.addActionListener(e -> toggleResults());
+
+		JButton layoutButton = new JButton(Icons.get(IconType.SETTINGS, 16, MUTED));
+		layoutButton.setToolTipText("Layout, zoom e modo compacto");
+		layoutButton.addActionListener(e -> buildLayoutMenu().show(layoutButton, 0, layoutButton.getHeight()));
+
+		themeButton = new JButton(Icons.get(IconType.THEME_DARK, 16, MUTED));
+		themeButton.setToolTipText("Alternar tema claro/escuro");
+		themeButton.addActionListener(e -> toggleTheme());
+
+		// Mantém os botões da direita planos/transparentes (estilo ícones discretos)
+		for (JButton btn : new JButton[] { toggleSidebar, toggleResults, layoutButton, themeButton }) {
+			btn.putClientProperty("JButton.buttonType", "toolBarButton");
+		}
+
+		// Adiciona os botões da direita sequencialmente
+		gbc.weightx = 0.0;
+		gbc.insets = new java.awt.Insets(0, 4, 0, 4); // Pequeno espaço entre os ícones
+
+		gbc.gridx = 4;
+		mainBar.add(toggleSidebar, gbc);
+		gbc.gridx = 5;
+		mainBar.add(toggleResults, gbc);
+		gbc.gridx = 6;
+		mainBar.add(layoutButton, gbc);
+		gbc.gridx = 7;
+		mainBar.add(themeButton, gbc);
+
+		toolbarBar = mainBar;
+		return mainBar;
+	}
+
+	/**
+	 * Menu de layout: mover painel lateral, alternar orientacao dos resultados,
+	 * modo compacto e niveis de zoom (Opcao B da spec: menu, em vez de
+	 * drag-and-drop dos paineis).
+	 */
+
+	private JPopupMenu buildLayoutMenu() {
+		JPopupMenu menu = new JPopupMenu();
+
+		JMenuItem moveSidebar = new JMenuItem(
+				sidebarOnRight ? "Mover painel lateral para a esquerda" : "Mover painel lateral para a direita");
+		moveSidebar.addActionListener(a -> toggleSidebarSide());
+		menu.add(moveSidebar);
+
+		JMenuItem toggleOrientation = new JMenuItem(resultsVertical ? "Resultados embaixo do editor (horizontal)"
+				: "Resultados ao lado do editor (vertical)");
+		toggleOrientation.addActionListener(a -> toggleResultsOrientation());
+		menu.add(toggleOrientation);
+
+		menu.addSeparator();
+
+		JCheckBoxMenuItem compact = new JCheckBoxMenuItem("Modo compacto", compactMode);
+		compact.addActionListener(a -> toggleCompactMode());
+		menu.add(compact);
+
+		menu.addSeparator();
+		JMenu zoomMenu = new JMenu("Zoom");
+		for (int i = 0; i < ZOOM_LEVELS.length; i++) {
+			int idx = i;
+			int pct = (int) Math.round(ZOOM_LEVELS[i] * 100);
+			String mark = (i == zoomIndex) ? "✓ " : "      ";
+			JMenuItem item = new JMenuItem(mark + pct + "%");
+			item.addActionListener(a -> setZoomIndex(idx));
+			zoomMenu.add(item);
+		}
+		zoomMenu.addSeparator();
+		JMenuItem reset = new JMenuItem("Redefinir (Ctrl+0)");
+		reset.addActionListener(a -> resetZoom());
+		zoomMenu.add(reset);
+		menu.add(zoomMenu);
+
+		return menu;
+	}
+
+	/**
+	 * Menu de formatacao: presets, opcoes (caixa alta / JSON) e fonte do editor.
+	 */
+	private JPopupMenu buildFormatMenu() {
+		JPopupMenu menu = new JPopupMenu();
+
+		JLabel presetsLabel = new JLabel("  Presets");
+		presetsLabel.setEnabled(false);
+		presetsLabel.setFont(presetsLabel.getFont().deriveFont(Font.BOLD, 10f));
+		menu.add(presetsLabel);
+
+		menu.add(formatStyleItem(SqlFormatter.Style.RIVER, "Oracle (Alinhado a direita)"));
+		menu.add(formatStyleItem(SqlFormatter.Style.STANDARD, "Standard (Indentado por tab)"));
+		menu.add(formatStyleItem(SqlFormatter.Style.COMMA_FIRST, "Commas First (Virgulas no inicio)"));
+
+		menu.addSeparator();
+		JLabel optionsLabel = new JLabel("  Configuracoes");
+		optionsLabel.setEnabled(false);
+		optionsLabel.setFont(optionsLabel.getFont().deriveFont(Font.BOLD, 10f));
+		menu.add(optionsLabel);
+
+		JCheckBoxMenuItem upper = new JCheckBoxMenuItem("Caixa alta para palavras-chave (SELECT, FROM...)",
+				formatState.upperKeywords());
+		upper.addActionListener(a -> {
+			formatState = new FormatPreferences.State(formatState.style(), !formatState.upperKeywords(),
+					formatState.indentJson(), formatState.editorFontFamily());
+			saveFormatState();
+		});
+		menu.add(upper);
+
+		JCheckBoxMenuItem json = new JCheckBoxMenuItem("Indentar funcoes JSON (JSON_OBJECT/JSON_ARRAY)",
+				formatState.indentJson());
+		json.addActionListener(a -> {
+			formatState = new FormatPreferences.State(formatState.style(), formatState.upperKeywords(),
+					!formatState.indentJson(), formatState.editorFontFamily());
+			saveFormatState();
+		});
+		menu.add(json);
+
+		menu.addSeparator();
+		JMenuItem chooseFont = new JMenuItem("Escolher fonte do editor...");
+		chooseFont.addActionListener(a -> chooseEditorFont());
+		menu.add(chooseFont);
+
+		return menu;
+	}
+
+	private JMenuItem formatStyleItem(SqlFormatter.Style style, String label) {
+		String mark = (formatState.style() == style) ? "✓ " : "      ";
+		JMenuItem item = new JMenuItem(mark + label);
+		item.addActionListener(a -> {
+			formatState = new FormatPreferences.State(style, formatState.upperKeywords(), formatState.indentJson(),
+					formatState.editorFontFamily());
+			saveFormatState();
+			if (statusBar != null) {
+				statusBar.setText(" Preset de formatacao: " + label);
+			}
+		});
+		return item;
+	}
+
+	/**
+	 * Abre o seletor de fonte do editor e aplica a escolha a todas as abas abertas.
+	 */
+	private void chooseEditorFont() {
+		List<String> fonts = SqlEditorPane.availableEditorFonts();
+		List<String> options = new ArrayList<>();
+		options.add("Automatico (recomendado pelo sistema)");
+		options.addAll(fonts);
+
+		String current = formatState.editorFontFamily();
+		int currentIdx = (current == null || current.isBlank()) ? 0 : options.indexOf(current);
+		if (currentIdx < 0) {
+			currentIdx = 0;
+		}
+
+		JComboBox<String> combo = new JComboBox<>(options.toArray(new String[0]));
+		combo.setSelectedIndex(currentIdx);
+		combo.setRenderer(new DefaultListCellRenderer() {
+			private static final long serialVersionUID = 1L;
+
+			@Override
+			public Component getListCellRendererComponent(JList<?> list, Object value, int index, boolean isSelected,
+					boolean cellHasFocus) {
+				JLabel l = (JLabel) super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
+				if (value instanceof String fam && index >= 1) {
+					l.setFont(new Font(fam, Font.PLAIN, 13));
+					l.setText(fam + "   —   SELECT * FROM tabela;");
+				}
+				return l;
+			}
+		});
+
+		JPanel panel = new JPanel(new BorderLayout(0, 8));
+		panel.add(new JLabel("Fonte do editor SQL:"), BorderLayout.NORTH);
+		panel.add(combo, BorderLayout.CENTER);
+		panel.setPreferredSize(new Dimension(420, 70));
+
+		int opt = JOptionPane.showConfirmDialog(this, panel, "Escolher fonte do editor", JOptionPane.OK_CANCEL_OPTION,
+				JOptionPane.PLAIN_MESSAGE);
+		if (opt != JOptionPane.OK_OPTION) {
+			return;
+		}
+		int sel = combo.getSelectedIndex();
+		String chosen = (sel <= 0) ? "" : options.get(sel);
+		formatState = new FormatPreferences.State(formatState.style(), formatState.upperKeywords(),
+				formatState.indentJson(), chosen);
+		saveFormatState();
+		applyEditorFontToOpenTabs();
+		if (statusBar != null) {
+			statusBar.setText(" Fonte do editor: " + (chosen.isEmpty() ? "automatica" : chosen));
+		}
+	}
+
+	private void styleRunButton() {
+		runButton.setBackground(ACCENT);
+		runButton.setForeground(Color.WHITE);
+	}
+
+	/**
+	 * Recolhe/expande o painel lateral, focando o editor (ciente do lado atual).
+	 */
+	private void toggleSidebar() {
+		if (leftSide.isVisible()) {
+			sidebarLoc = mainSplit.getDividerLocation();
+			leftSide.setVisible(false);
+			mainSplit.setDividerSize(0);
+			mainSplit.setDividerLocation(sidebarOnRight ? mainSplit.getWidth() : 0);
+		} else {
+			leftSide.setVisible(true);
+			mainSplit.setDividerSize(4);
+			if (sidebarOnRight) {
+				int total = mainSplit.getWidth();
+				int loc = (sidebarLoc > 0 && sidebarLoc < total) ? sidebarLoc : (int) (Math.max(total, 800) * 0.78);
+				mainSplit.setDividerLocation(loc);
+			} else {
+				mainSplit.setDividerLocation(sidebarLoc > 0 ? sidebarLoc : 248);
+			}
+		}
+		mainSplit.revalidate();
+		focusEditor();
+	}
+
+	/**
+	 * Recolhe/expande a area de resultados (ciente da orientacao atual), focando o
+	 * editor.
+	 */
+	private void toggleResults() {
+		boolean horizontalSplit = centerSplit.getOrientation() == JSplitPane.VERTICAL_SPLIT;
+		if (resultsArea.isVisible()) {
+			resultsLoc = centerSplit.getDividerLocation();
+			resultsArea.setVisible(false);
+			centerSplit.setDividerSize(0);
+			centerSplit.setDividerLocation(horizontalSplit ? centerSplit.getHeight() : centerSplit.getWidth());
+		} else {
+			resultsArea.setVisible(true);
+			centerSplit.setDividerSize(4);
+			if (resultsLoc > 0) {
+				centerSplit.setDividerLocation(resultsLoc);
+			} else {
+				centerSplit.setResizeWeight(0.62);
+				centerSplit.setDividerLocation(0.62);
+			}
+		}
+		centerSplit.revalidate();
+		focusEditor();
+	}
+
+	private void focusEditor() {
+		SqlEditorPane editor = currentEditor();
+		if (editor != null) {
+			editor.textArea().requestFocusInWindow();
+		}
+	}
+
+	/**
+	 * Atalhos globais: Ctrl+B (lateral), Ctrl+J (resultados), Ctrl +/-/0 (zoom da
+	 * UI).
+	 */
+	private void registerWindowShortcuts() {
+		JComponent rp = getRootPane();
+		rp.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(KeyStroke.getKeyStroke("control B"), "toggle-sidebar");
+		rp.getActionMap().put("toggle-sidebar", new AbstractAction() {
+			@Override
+			public void actionPerformed(ActionEvent e) {
+				toggleSidebar();
+			}
+		});
+		rp.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(KeyStroke.getKeyStroke("control J"), "toggle-results");
+		rp.getActionMap().put("toggle-results", new AbstractAction() {
+			@Override
+			public void actionPerformed(ActionEvent e) {
+				toggleResults();
+			}
+		});
+		// Zoom global da interface. Quando o foco esta no editor SQL, o proprio
+		// editor trata essas teclas para seu zoom de fonte (WHEN_FOCUSED tem
+		// prioridade sobre WHEN_IN_FOCUSED_WINDOW); fora do editor, e o zoom geral.
+		bindGlobalAction(rp, "control EQUALS", "zoom-ui-in", this::zoomIn);
+		bindGlobalAction(rp, "control PLUS", "zoom-ui-in2", this::zoomIn);
+		bindGlobalAction(rp, "control ADD", "zoom-ui-in3", this::zoomIn);
+		bindGlobalAction(rp, "control MINUS", "zoom-ui-out", this::zoomOut);
+		bindGlobalAction(rp, "control SUBTRACT", "zoom-ui-out2", this::zoomOut);
+		bindGlobalAction(rp, "control 0", "zoom-ui-reset", this::resetZoom);
+		bindGlobalAction(rp, "control R", "refresh-objects", () -> refreshObjectTree(true));
+	}
+
+	private static void bindGlobalAction(JComponent rp, String keyStroke, String name, Runnable action) {
+		rp.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(KeyStroke.getKeyStroke(keyStroke), name);
+		rp.getActionMap().put(name, new AbstractAction() {
+			@Override
+			public void actionPerformed(ActionEvent e) {
+				action.run();
+			}
+		});
+	}
+
+	// ---------- Inversao do painel lateral ----------
+
+	/**
+	 * Move o bloco "Conexoes/Objetos" para o outro lado, reconstruindo o split
+	 * principal.
+	 */
+	private void toggleSidebarSide() {
+		sidebarOnRight = !sidebarOnRight;
+		remove(mainSplit);
+		mainSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, sidebarOnRight ? centerSplit : leftSide,
+				sidebarOnRight ? leftSide : centerSplit);
+		mainSplit.setResizeWeight(sidebarOnRight ? 0.78 : 0.22);
+		mainSplit.setBorder(BorderFactory.createEmptyBorder());
+		add(mainSplit, BorderLayout.CENTER);
+		sidebarLoc = -1;
+		revalidate();
+		repaint();
+		focusEditor();
+		saveUiState();
+		if (statusBar != null) {
+			statusBar.setText(" Painel lateral movido para a " + (sidebarOnRight ? "direita" : "esquerda") + ".");
+		}
+	}
+
+	// ---------- Orientacao do painel de Resultados ----------
+
+	/**
+	 * Alterna entre Resultados embaixo do editor (horizontal) e ao lado (vertical).
+	 */
+	private void toggleResultsOrientation() {
+		resultsVertical = !resultsVertical;
+		centerSplit.setOrientation(resultsVertical ? JSplitPane.HORIZONTAL_SPLIT : JSplitPane.VERTICAL_SPLIT);
+		centerSplit.setResizeWeight(0.62);
+		resultsLoc = -1;
+		centerSplit.setDividerLocation(0.62);
+		centerSplit.revalidate();
+		centerSplit.repaint();
+		if (resultsOrientationButton != null) {
+			updateOrientationToggleIcon(resultsOrientationButton);
+		}
+		focusEditor();
+		saveUiState();
+		if (statusBar != null) {
+			statusBar.setText(" Resultados: layout "
+					+ (resultsVertical ? "vertical (lado a lado)" : "horizontal (embaixo)") + ".");
+		}
+	}
+
+	// ---------- Zoom global da interface ----------
+
+	private void captureBaseFont() {
+		if (baseDefaultFont == null) {
+			Font f = UIManager.getFont("defaultFont");
+			baseDefaultFont = (f != null) ? f : new Font(Font.SANS_SERIF, Font.PLAIN, 12);
+		}
+	}
+
+	private static int clampZoomIndex(int index) {
+		return Math.max(0, Math.min(ZOOM_LEVELS.length - 1, index));
+	}
+
+	private double currentScale() {
+		return ZOOM_LEVELS[zoomIndex];
+	}
+
+	/**
+	 * Tamanho em px escalado pelo zoom atual e, se ativo, pela densidade compacta.
+	 */
+	private int scaledPx(int basePx) {
+		double v = basePx * currentScale();
+		if (compactMode) {
+			v *= 0.6; // modo compacto: ~40% de reducao adicional
+		}
+		return Math.max(1, (int) Math.round(v));
+	}
+
+	/**
+	 * Aplica somente a fonte padrao (UIManager + FlatLaf.updateUI), sem reconstruir
+	 * layout.
+	 */
+	private void applyZoomFont(int index) {
+		zoomIndex = clampZoomIndex(index);
+		captureBaseFont();
+		float newSize = Math.round(baseDefaultFont.getSize2D() * (float) currentScale());
+		UIManager.put("defaultFont", baseDefaultFont.deriveFont(newSize));
+		FlatLaf.updateUI();
+	}
+
+	/**
+	 * Define o nivel de zoom (0..ZOOM_LEVELS.length-1) e atualiza tudo que depende
+	 * dele.
+	 */
+	private void setZoomIndex(int index) {
+		applyZoomFont(index);
+		refreshDynamicSizing();
+		saveUiState();
+		if (statusBar != null) {
+			statusBar.setText(" Zoom da interface: " + Math.round(currentScale() * 100) + "%.");
+		}
+	}
+
+	private void zoomIn() {
+		setZoomIndex(zoomIndex + 1);
+	}
+
+	private void zoomOut() {
+		setZoomIndex(zoomIndex - 1);
+	}
+
+	private void resetZoom() {
+		setZoomIndex(UiPreferences.DEFAULT_ZOOM_INDEX);
+	}
+
+	// ---------- Modo compacto ----------
+
+	private void toggleCompactMode() {
+		compactMode = !compactMode;
+		applyDensityToPanels();
+		refreshDynamicSizing();
+		saveUiState();
+		if (statusBar != null) {
+			statusBar.setText(compactMode ? " Modo compacto ativado." : " Modo compacto desativado.");
+		}
+	}
+
+	/** Reaplica os paddings dos paineis principais conforme zoom/modo compacto. */
+	private void applyDensityToPanels() {
+		int outer = compactMode ? 5 : 8;
+		if (objectBrowserPanel != null) {
+			objectBrowserPanel.setBorder(BorderFactory.createEmptyBorder(outer, outer, outer, outer));
+		}
+		if (editorAreaPanel != null) {
+			editorAreaPanel.setBorder(BorderFactory.createEmptyBorder(0, outer, compactMode ? 2 : 4, outer));
+		}
+		if (resultsArea != null) {
+			resultsArea.setBorder(BorderFactory.createEmptyBorder(compactMode ? 2 : 4, outer, outer, outer));
+		}
+		if (toolbarBar != null) {
+			int v = compactMode ? 4 : 8;
+			int h = compactMode ? 8 : 12;
+			toolbarBar.setBorder(BorderFactory.createEmptyBorder(v, h, v, h));
+		}
+		if (footerBar != null) {
+			int v = compactMode ? 3 : 5;
+			footerBar.setBorder(BorderFactory.createEmptyBorder(v, 12, v, 12));
+		}
+		revalidate();
+		repaint();
+	}
+
+	/**
+	 * Reaplica os tamanhos derivados do zoom/modo compacto a componentes ja
+	 * construidos (linhas da arvore, cartoes de conexao, grade de resultados).
+	 */
+	private void refreshDynamicSizing() {
+		if (objectTree != null) {
+			objectTree.setRowHeight(scaledPx(22));
+		}
+		if (connectionsPanel != null) {
+			connectionsPanel.setRowHeight(scaledPx(54));
+		}
+		// Reconstroi as abas de resultado (tabela, gutter e cabecalho usam
+		// tamanhos fixos definidos na hora da criacao do JTable).
+		if (resultTabs != null && resultTabs.getTabCount() > 0) {
+			showResults(lastResults);
+		}
+		if (mainSplit != null) {
+			mainSplit.revalidate();
+			mainSplit.repaint();
+		}
+	}
+
+	private void saveUiState() {
+		try {
+			uiPrefsStore.save(new UiPreferences.State(sidebarOnRight, resultsVertical, zoomIndex, compactMode));
+		} catch (Exception ex) {
+			if (statusBar != null) {
+				statusBar.setText(" Aviso: nao foi possivel salvar as preferencias de UI: " + ex.getMessage());
+			}
+		}
+	}
+
+	private JComponent buildFooter() {
+		connStatusLabel = new JLabel();
+		connStatusLabel.setIconTextGap(6);
+		connStatusLabel.setFont(connStatusLabel.getFont().deriveFont(Font.BOLD));
+
+		statusBar = new JLabel(" Pronto");
+		statusBar.setForeground(MUTED);
+
+		connProgress = new JProgressBar();
+		connProgress.setIndeterminate(true);
+		connProgress.setPreferredSize(new Dimension(120, 6));
+		connProgress.setVisible(false);
+
+		JLabel brand = new JLabel("Nureal");
+		brand.setFont(brand.getFont().deriveFont(Font.BOLD));
+		brand.setForeground(ACCENT);
+
+		JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 12, 0));
+		left.setOpaque(false);
+		left.add(connStatusLabel);
+		left.add(statusBar);
+
+		JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 12, 0));
+		right.setOpaque(false);
+		right.add(connProgress);
+		right.add(brand);
+
+		JPanel footer = new JPanel(new BorderLayout());
+		footer.setBorder(BorderFactory.createEmptyBorder(5, 12, 5, 12));
+		footer.add(left, BorderLayout.WEST);
+		footer.add(right, BorderLayout.EAST);
+
+		setDisconnectedState();
+		return footer;
+	}
+
+	// ---------- Estado da conexao (rodape) ----------
+
+	private void setDisconnectedState() {
+		connStatusLabel.setIcon(Icons.get(IconType.STATUS_DOT, 10, new Color(0xDC2626)));
+		connStatusLabel.setText("Desconectado");
+		connStatusLabel.setForeground(new Color(0xB91C1C));
+		connProgress.setVisible(false);
+	}
+
+	private void setConnectingState(String name) {
+		connStatusLabel.setIcon(Icons.get(IconType.STATUS_DOT, 10, new Color(0xF59E0B)));
+		connStatusLabel.setText("Conectando a " + name + "...");
+		connStatusLabel.setForeground(new Color(0xB45309));
+		connProgress.setVisible(true);
+	}
+
+	private void setConnectedState(String label) {
+		connStatusLabel.setIcon(Icons.get(IconType.STATUS_DOT, 10, ACCENT));
+		connStatusLabel.setText("Conectado: " + label);
+		connStatusLabel.setForeground(new Color(0x047857));
+		connProgress.setVisible(false);
+	}
+
+	// ---------- Lado esquerdo ----------
+
+	private JComponent buildLeftSide() {
+		connectionsPanel = new ConnectionsPanel(connectionStore, this::connectTo);
+		connectionsPanel.setRowHeight(scaledPx(54));
+		JSplitPane split = new JSplitPane(JSplitPane.VERTICAL_SPLIT, connectionsPanel, buildObjectBrowser());
+		split.setResizeWeight(0.5);
+		split.setBorder(BorderFactory.createEmptyBorder());
+		split.setPreferredSize(new Dimension(248, 100));
+		return split;
+	}
+
+	private JComponent buildObjectBrowser() {
+		objectTree = new JTree(new DefaultTreeModel(new DefaultMutableTreeNode("Sem conexao")));
+		objectTree.setRootVisible(true);
+		objectTree.setShowsRootHandles(true);
+		objectTree.setRowHeight(scaledPx(22));
+		objectTree.setBorder(BorderFactory.createEmptyBorder(4, 8, 4, 4));
+		objectTree.setCellRenderer(new ObjectTreeCellRenderer());
+		objectTree.addMouseListener(new MouseAdapter() {
+			@Override
+			public void mouseClicked(MouseEvent e) {
+				if (e.getClickCount() == 2) {
+					openSelectedObjectProperties();
+				}
+			}
+		});
+
+		JScrollPane sp = new JScrollPane(objectTree);
+		sp.setBorder(BorderFactory.createEmptyBorder());
+
+		objectSearch = new JTextField();
+		objectSearch.putClientProperty("JTextField.placeholderText", "Buscar objeto...");
+		objectSearch.putClientProperty("JTextField.showClearButton", true);
+		objectSearch.setEnabled(false);
+		objectSearch.getDocument().addDocumentListener(new DocumentListener() {
+			@Override
+			public void insertUpdate(DocumentEvent e) {
+				applyObjectFilter();
+			}
+
+			@Override
+			public void removeUpdate(DocumentEvent e) {
+				applyObjectFilter();
+			}
+
+			@Override
+			public void changedUpdate(DocumentEvent e) {
+				applyObjectFilter();
+			}
+		});
+
+		refreshObjectsButton = new JButton(Icons.get(IconType.REFRESH, 13, MUTED));
+		refreshObjectsButton.setBorderPainted(false);
+		refreshObjectsButton.setContentAreaFilled(false);
+		refreshObjectsButton.setToolTipText("Atualizar objetos (Ctrl+R)");
+		refreshObjectsButton.addActionListener(e -> refreshObjectTree(true));
+
+		JPanel headerRow = new JPanel(new BorderLayout());
+		headerRow.setOpaque(false);
+		headerRow.add(sectionHeader("OBJETOS"), BorderLayout.WEST);
+		headerRow.add(refreshObjectsButton, BorderLayout.EAST);
+
+		JPanel top = new JPanel(new BorderLayout(0, 8));
+		top.setOpaque(false);
+		top.add(headerRow, BorderLayout.NORTH);
+		top.add(objectSearch, BorderLayout.SOUTH);
+
+		JPanel panel = new JPanel(new BorderLayout(0, 8));
+		panel.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+		panel.add(top, BorderLayout.NORTH);
+		panel.add(sp, BorderLayout.CENTER);
+		objectBrowserPanel = panel;
+		return panel;
+	}
+
+	// ---------- Editor (abas) ----------
+
+	private JComponent buildEditorArea() {
+		editorTabs = new JTabbedPane();
+		editorTabs.putClientProperty("JTabbedPane.tabClosable", true);
+		editorTabs.putClientProperty("JTabbedPane.tabCloseCallback",
+				(BiConsumer<JTabbedPane, Integer>) (pane, index) -> closeQueryTab(index));
+		// Selecionar a aba "+" abre uma nova query; qualquer outra troca salva a
+		// sessao.
+		editorTabs.addChangeListener(e -> {
+			if (addingTab) {
+				return; // evita reentrancia: insertTab desloca a selecao da aba "+"
+			}
+			if (plusTab != null && editorTabs.getSelectedComponent() == plusTab) {
+				if (!addQueryTab()) {
+					selectLastRealTab();
+				}
+			} else {
+				scheduleSave();
+			}
+		});
+		// Botao direito no titulo da aba: fechar / fechar as outras.
+		editorTabs.addMouseListener(new MouseAdapter() {
+			@Override
+			public void mousePressed(MouseEvent e) {
+				maybeTabMenu(e);
+			}
+
+			@Override
+			public void mouseReleased(MouseEvent e) {
+				maybeTabMenu(e);
+			}
+		});
+
+		// Inicializa o workspace "sem conexao" com as abas salvas (+ aba "+").
+		initWorkspaces();
+
+		JPanel panel = new JPanel(new BorderLayout());
+		// CORREÇÃO: Removemos o 8 da esquerda e da direita para alinhar perfeitamente
+		// com a quina das conexões
+		panel.setBorder(BorderFactory.createEmptyBorder(0, 0, 4, 0));
+
+		panel.add(buildToolbar(), BorderLayout.NORTH);
+		panel.add(editorTabs, BorderLayout.CENTER);
+		return panel;
+	}
+
+	private boolean addQueryTab() {
+		return addQueryTab(nextQueryTitle(), "");
+	}
+
+	/**
+	 * Menor "SQL Query N" ainda nao usado pelas abas abertas (reaproveita gaps).
+	 */
+	private String nextQueryTitle() {
+		int n = 1;
+		while (titleExists("SQL Query " + n)) {
+			n++;
+		}
+		return "SQL Query " + n;
+	}
+
+	private boolean titleExists(String title) {
+		for (int i = 0; i < editorTabs.getTabCount(); i++) {
+			if (editorTabs.getComponentAt(i) != plusTab && title.equals(editorTabs.getTitleAt(i))) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private boolean addQueryTab(String title, String sql) {
+		if (realTabCount() >= MAX_TABS) {
+			if (statusBar != null) {
+				statusBar.setText(" Limite de " + MAX_TABS + " abas atingido.");
+			}
+			return false;
+		}
+		SqlEditorPane pane = new SqlEditorPane(completionProvider, this::onRun, this::currentSqlFormatter,
+				formatState.editorFontFamily());
+		pane.textArea().setText(sql);
+		pane.textArea().setCaretPosition(0);
+		pane.textArea().getDocument().addDocumentListener(new DocumentListener() {
+			@Override
+			public void insertUpdate(DocumentEvent e) {
+				scheduleSave();
+			}
+
+			@Override
+			public void removeUpdate(DocumentEvent e) {
+				scheduleSave();
+			}
+
+			@Override
+			public void changedUpdate(DocumentEvent e) {
+				scheduleSave();
+			}
+		});
+		addingTab = true;
+		try {
+			// insere ANTES da aba "+", para que ela continue sendo a ultima
+			int at = (plusTab != null) ? editorTabs.indexOfComponent(plusTab) : editorTabs.getTabCount();
+			editorTabs.insertTab(title, null, pane, null, at);
+			editorTabs.setSelectedComponent(pane);
+		} finally {
+			addingTab = false;
+		}
+		scheduleSave();
+		return true;
+	}
+
+	/** Numero de abas reais (exclui a aba "+"). */
+	private int realTabCount() {
+		return editorTabs.getTabCount() - (plusTab != null ? 1 : 0);
+	}
+
+	private void selectLastRealTab() {
+		for (int i = editorTabs.getTabCount() - 1; i >= 0; i--) {
+			if (editorTabs.getComponentAt(i) != plusTab) {
+				editorTabs.setSelectedIndex(i);
+				return;
+			}
+		}
+	}
+
+	/** Menu de contexto do titulo da aba (botao direito). */
+	private void maybeTabMenu(MouseEvent e) {
+		if (!e.isPopupTrigger()) {
+			return;
+		}
+		int idx = editorTabs.indexAtLocation(e.getX(), e.getY());
+		if (idx < 0) {
+			return;
+		}
+		final Component target = editorTabs.getComponentAt(idx);
+		if (target == plusTab) {
+			return;
+		}
+		JPopupMenu menu = new JPopupMenu();
+		JMenuItem rename = new JMenuItem("Renomear...");
+		rename.addActionListener(a -> renameTab(target));
+		JMenuItem close = new JMenuItem("Fechar");
+		close.addActionListener(a -> closeTabComponent(target));
+		JMenuItem closeOthers = new JMenuItem("Fechar as outras");
+		closeOthers.addActionListener(a -> closeOtherTabs(target));
+		menu.add(rename);
+		menu.addSeparator();
+		menu.add(close);
+		menu.add(closeOthers);
+		menu.show(editorTabs, e.getX(), e.getY());
+	}
+
+	private void renameTab(Component target) {
+		int i = editorTabs.indexOfComponent(target);
+		if (i < 0) {
+			return;
+		}
+		String current = editorTabs.getTitleAt(i);
+		String name = JOptionPane.showInputDialog(this, "Novo nome da aba:", current);
+		if (name != null && !name.trim().isEmpty()) {
+			editorTabs.setTitleAt(i, name.trim());
+			scheduleSave();
+		}
+	}
+
+	private void closeTabComponent(Component c) {
+		int i = editorTabs.indexOfComponent(c);
+		if (i >= 0) {
+			closeQueryTab(i);
+		}
+	}
+
+	private void closeOtherTabs(Component keep) {
+		// Seleciona a aba a manter antes de remover as demais (evita cair na "+").
+		int keepIdx = editorTabs.indexOfComponent(keep);
+		if (keepIdx >= 0) {
+			editorTabs.setSelectedIndex(keepIdx);
+		}
+		for (int i = editorTabs.getTabCount() - 1; i >= 0; i--) {
+			Component c = editorTabs.getComponentAt(i);
+			if (c == plusTab || c == keep) {
+				continue;
+			}
+			editorTabs.removeTabAt(i);
+		}
+		scheduleSave();
+	}
+
+	/** Adiciona a aba "+" (conteudo vazio, pequena e nao fechavel) ao final. */
+	private void addPlusTab() {
+		JPanel dummy = new JPanel();
+		dummy.putClientProperty("JTabbedPane.tabClosable", false);
+		plusTab = dummy;
+		editorTabs.addTab("+", dummy);
+		editorTabs.setToolTipTextAt(editorTabs.indexOfComponent(dummy), "Nova query");
+	}
+
+	private void closeQueryTab(int index) {
+		if (editorTabs.getComponentAt(index) == plusTab) {
+			return;
+		}
+		if (realTabCount() <= 1) {
+			return;
+		}
+		// Se a aba a fechar e a selecionada, selecione antes uma aba real vizinha,
+		// para que a remocao nao caia na aba "+" (o que abriria uma nova query).
+		if (editorTabs.getSelectedIndex() == index) {
+			int neighbor = findAdjacentRealTab(index);
+			if (neighbor >= 0) {
+				editorTabs.setSelectedIndex(neighbor);
+			}
+		}
+		editorTabs.removeTabAt(index);
+		scheduleSave();
+	}
+
+	private int findAdjacentRealTab(int index) {
+		for (int i = index - 1; i >= 0; i--) {
+			if (editorTabs.getComponentAt(i) != plusTab) {
+				return i;
+			}
+		}
+		for (int i = index + 1; i < editorTabs.getTabCount(); i++) {
+			if (editorTabs.getComponentAt(i) != plusTab) {
+				return i;
+			}
+		}
+		return -1;
+	}
+
+	// ---------- Persistencia da sessao (nunca perder trabalho) ----------
+
+	/** Inicializa o workspace "sem conexao" com as abas salvas e monta o editor. */
+	private void initWorkspaces() {
+		try {
+			savedSessions = sessionStore.load();
+		} catch (Exception ex) {
+			savedSessions = new LinkedHashMap<>();
+		}
+		Workspace scratch = new Workspace(SCRATCH, null, connectionManager);
+		SessionStore.Session sc = savedSessions.get(SCRATCH);
+		if (sc != null) {
+			scratch.tabs = new ArrayList<>(sc.tabs());
+			scratch.selectedTab = sc.selectedIndex();
+		}
+		workspaces.put(SCRATCH, scratch);
+		activeWorkspace = scratch;
+		rebuildEditorTabs(scratch.tabs, scratch.selectedTab);
+	}
+
+	/** Reconstroi as abas do editor a partir do conteudo salvo (titulo + SQL). */
+	private void rebuildEditorTabs(List<SessionStore.Tab> tabs, int selected) {
+		editorTabs.removeAll();
+		plusTab = null;
+		if (tabs == null || tabs.isEmpty()) {
+			addQueryTab();
+		} else {
+			for (SessionStore.Tab t : tabs) {
+				String title = (t.title() == null || t.title().isBlank()) ? nextQueryTitle() : t.title();
+				addQueryTab(title, t.sql());
+			}
+		}
+		addPlusTab();
+		if (selected >= 0 && selected < editorTabs.getTabCount() && editorTabs.getComponentAt(selected) != plusTab) {
+			editorTabs.setSelectedIndex(selected);
+		}
+	}
+
+	/** Captura o conteudo atual das abas do editor (titulo + SQL). */
+	private List<SessionStore.Tab> collectTabs() {
+		List<SessionStore.Tab> list = new ArrayList<>();
+		for (int i = 0; i < editorTabs.getTabCount(); i++) {
+			Component c = editorTabs.getComponentAt(i);
+			if (c instanceof SqlEditorPane sep) {
+				list.add(new SessionStore.Tab(editorTabs.getTitleAt(i), sep.textArea().getText()));
+			}
+		}
+		return list;
+	}
+
+	/** Salva as abas atuais do editor no workspace ativo. */
+	private void saveActiveTabs() {
+		if (activeWorkspace != null && editorTabs != null) {
+			activeWorkspace.tabs = collectTabs();
+			activeWorkspace.selectedTab = Math.max(editorTabs.getSelectedIndex(), 0);
+		}
+	}
+
+	/**
+	 * Ativa um workspace: guarda as abas do ativo, troca a conexao corrente,
+	 * reconstroi as abas do alvo e atualiza navegador/autocomplete/indicadores.
+	 */
+	private void activateWorkspace(Workspace w) {
+		saveActiveTabs();
+		activeWorkspace = w;
+		connectionManager = w.mgr;
+		rebuildEditorTabs(w.tabs, w.selectedTab);
+		if (w.schema != null) {
+			metadataCache.set(w.schema);
+			completionProvider.refresh(w.schema);
+			populateTree(w.schema);
+		} else if (w.schemaList != null) {
+			completionProvider.refresh(null);
+			buildSchemaPicker(w.schemaList);
+		} else {
+			currentSchema = null;
+			completionProvider.refresh(null);
+			objectSearch.setEnabled(false);
+			objectTree.setModel(new DefaultTreeModel(
+					new DefaultMutableTreeNode(w.profile == null ? "Sem conexao" : "Selecione um esquema")));
+		}
+		refreshConnectionIndicators();
+		runButton.setEnabled(w.mgr.isConnected());
+		focusEditor();
+	}
+
+	/** Atualiza as bolinhas (conectados) e o indicador de status do rodape. */
+	private void refreshConnectionIndicators() {
+		Set<String> connected = new HashSet<>();
+		for (Workspace w : workspaces.values()) {
+			if (w.profile != null && w.mgr.isConnected()) {
+				connected.add(w.name);
+			}
+		}
+		connectionsPanel.setConnectedNames(connected);
+		if (activeWorkspace != null && activeWorkspace.profile != null && activeWorkspace.mgr.isConnected()) {
+			setConnectedState(activeWorkspace.profile.label());
+		} else {
+			setDisconnectedState();
+		}
+	}
+
+	/** Agenda um salvamento (debounce) ~1s apos a ultima alteracao. */
+	private void scheduleSave() {
+		if (autosaveTimer == null) {
+			autosaveTimer = new Timer(1000, e -> saveSession());
+			autosaveTimer.setRepeats(false);
+		}
+		autosaveTimer.restart();
+	}
+
+	/** Grava agora as abas de TODAS as conexoes (workspaces) no disco. */
+	private void saveSession() {
+		if (editorTabs == null) {
+			return;
+		}
+		saveActiveTabs();
+		Map<String, SessionStore.Session> sessions = new LinkedHashMap<>();
+		for (Workspace w : workspaces.values()) {
+			sessions.put(w.name, new SessionStore.Session(new ArrayList<>(w.tabs), w.selectedTab));
+		}
+		try {
+			sessionStore.save(sessions);
+		} catch (Exception ex) {
+			if (statusBar != null) {
+				statusBar.setText(" Aviso: nao foi possivel salvar a sessao: " + ex.getMessage());
+			}
+		}
+	}
+
+	private SqlEditorPane currentEditor() {
+		Component c = editorTabs.getSelectedComponent();
+		return (c instanceof SqlEditorPane sep) ? sep : null;
+	}
+
+	// ---------- Resultados ----------
+
+	private JComponent buildResultsArea() {
+		resultTabs = new JTabbedPane();
+		resultTabs.putClientProperty("JTabbedPane.tabType", "card");
+		resultTabs.putClientProperty("JTabbedPane.minimumTabWidth", 96);
+		resultTabs.addMouseListener(new MouseAdapter() {
+			@Override
+			public void mousePressed(MouseEvent e) {
+				maybeShowTabMenu(e);
+			}
+
+			@Override
+			public void mouseReleased(MouseEvent e) {
+				maybeShowTabMenu(e);
+			}
+		});
+
+		JPanel tabsPanel = new JPanel(new BorderLayout());
+		tabsPanel.add(resultTabs, BorderLayout.CENTER);
+
+		resultsCards = new JPanel(new CardLayout());
+		resultsCards.add(buildEmptyState(), "empty");
+		resultsCards.add(tabsPanel, "tabs");
+
+		JButton orientationToggle = new JButton();
+		orientationToggle.setBorderPainted(false);
+		orientationToggle.setContentAreaFilled(false);
+		orientationToggle.addActionListener(e -> toggleResultsOrientation());
+		updateOrientationToggleIcon(orientationToggle);
+		this.resultsOrientationButton = orientationToggle;
+
+		JPanel header = new JPanel(new BorderLayout());
+		header.setOpaque(false);
+		header.add(sectionHeader("RESULTADOS"), BorderLayout.WEST);
+		header.add(orientationToggle, BorderLayout.EAST);
+
+		JPanel panel = new JPanel(new BorderLayout(0, 8));
+		panel.setBorder(BorderFactory.createEmptyBorder(4, 8, 8, 8));
+		panel.add(header, BorderLayout.NORTH);
+		panel.add(overlayStack(resultsCards), BorderLayout.CENTER);
+		return panel;
+	}
+
+	/**
+	 * Atualiza icone/tooltip do botao de orientacao dos resultados conforme o
+	 * estado atual.
+	 */
+	private void updateOrientationToggleIcon(JButton button) {
+		button.setIcon(resultsVertical ? Icons.get(IconType.PANEL_LEFT, 14, MUTED)
+				: Icons.get(IconType.PANEL_BOTTOM, 14, MUTED));
+		button.setToolTipText(resultsVertical ? "Mudar para resultados embaixo do editor (horizontal)"
+				: "Mudar para resultados ao lado do editor (vertical)");
+	}
+
+	/** Empilha o conteudo dos resultados e um overlay de "carregando" por cima. */
+	private JComponent overlayStack(JComponent content) {
+		resultsOverlay = buildResultsOverlay();
+		JPanel stack = new JPanel(null) {
+			private static final long serialVersionUID = 1L;
+
+			@Override
+			public void doLayout() {
+				for (Component c : getComponents()) {
+					c.setBounds(0, 0, getWidth(), getHeight());
+				}
+			}
+		};
+		stack.add(resultsOverlay);
+		stack.add(content);
+		stack.setComponentZOrder(resultsOverlay, 0); // overlay no topo
+		return stack;
+	}
+
+	/** Camada translucida com spinner e botao Cancelar, escondida por padrao. */
+	private JComponent buildResultsOverlay() {
+		JLabel label = new JLabel("Executando consulta...");
+		label.setAlignmentX(Component.CENTER_ALIGNMENT);
+		label.setFont(label.getFont().deriveFont(Font.BOLD, 13f));
+
+		JProgressBar spinner = new JProgressBar();
+		spinner.setIndeterminate(true);
+		spinner.setPreferredSize(new Dimension(200, 6));
+		spinner.setMaximumSize(new Dimension(200, 6));
+		spinner.setAlignmentX(Component.CENTER_ALIGNMENT);
+
+		JButton cancel = new JButton("Cancelar");
+		cancel.setAlignmentX(Component.CENTER_ALIGNMENT);
+		cancel.addActionListener(e -> cancelExecution());
+
+		JPanel card = new JPanel();
+		card.setLayout(new BoxLayout(card, BoxLayout.Y_AXIS));
+		card.setBackground(new Color(0xFFFFFF));
+		card.setBorder(BorderFactory.createCompoundBorder(BorderFactory.createLineBorder(new Color(0xE0E3E7)),
+				BorderFactory.createEmptyBorder(18, 28, 18, 28)));
+		card.add(label);
+		card.add(Box.createVerticalStrut(12));
+		card.add(spinner);
+		card.add(Box.createVerticalStrut(14));
+		card.add(cancel);
+
+		JPanel overlay = new JPanel(new GridBagLayout()) {
+			private static final long serialVersionUID = 1L;
+
+			@Override
+			protected void paintComponent(Graphics g) {
+				g.setColor(new Color(244, 245, 247, 205)); // dim translucido
+				g.fillRect(0, 0, getWidth(), getHeight());
+				super.paintComponent(g);
+			}
+		};
+		overlay.setOpaque(false);
+		overlay.add(card);
+		// bloqueia interacao com os resultados por tras
+		overlay.addMouseListener(new MouseAdapter() {
+		});
+		overlay.setVisible(false);
+		return overlay;
+	}
+
+	private void showExecuting(boolean executing) {
+		if (resultsOverlay != null) {
+			resultsOverlay.setVisible(executing);
+			resultsOverlay.repaint();
+		}
+	}
+
+	/** Cancela de fato a instrucao em execucao (Statement.cancel) e o worker. */
+	private void cancelExecution() {
+		statusBar.setText(" Cancelando execucao...");
+		Statement st = runningStatement;
+		if (st != null) {
+			// roda em outra thread: nao pode bloquear a EDT esperando o KILL QUERY
+			new Thread(() -> {
+				try {
+					st.cancel();
+				} catch (SQLException ignore) {
+					// ignora
+				}
+			}, "cancel-query").start();
+		}
+		if (runWorker != null) {
+			runWorker.cancel(true);
+		}
+	}
+
+	private JComponent buildEmptyState() {
+		JLabel icon = new JLabel(Icons.get(IconType.TABLE, 46, new Color(0xCBD5E1)));
+		icon.setAlignmentX(Component.CENTER_ALIGNMENT);
+
+		JLabel title = new JLabel("Execute uma consulta para ver os resultados");
+		title.setFont(title.getFont().deriveFont(Font.BOLD, 14f));
+		title.setAlignmentX(Component.CENTER_ALIGNMENT);
+
+		JLabel sub = new JLabel("Os resultados da consulta aparecerao aqui");
+		sub.setForeground(MUTED);
+		sub.setAlignmentX(Component.CENTER_ALIGNMENT);
+
+		JPanel box = new JPanel();
+		box.setOpaque(false);
+		box.setLayout(new BoxLayout(box, BoxLayout.Y_AXIS));
+		box.add(icon);
+		box.add(Box.createVerticalStrut(12));
+		box.add(title);
+		box.add(Box.createVerticalStrut(4));
+		box.add(sub);
+
+		JPanel center = new JPanel(new GridBagLayout());
+		center.add(box);
+		return center;
+	}
+
+	private void showEmptyState() {
+		((CardLayout) resultsCards.getLayout()).show(resultsCards, "empty");
+	}
+
+	private void showResultsCard() {
+		((CardLayout) resultsCards.getLayout()).show(resultsCards, "tabs");
+	}
+
+	private JLabel sectionHeader(String text) {
+		JLabel label = new JLabel(text);
+		label.setFont(label.getFont().deriveFont(Font.BOLD, 11f));
+		label.setForeground(MUTED);
+		return label;
+	}
+
+	// ---------- Tema ----------
+
+	private void toggleTheme() {
+		dark = !dark;
+		if (dark) {
+			FlatDarkLaf.setup();
+		} else {
+			FlatLightLaf.setup();
+		}
+		FlatLaf.updateUI();
+		themeButton
+				.setIcon(dark ? Icons.get(IconType.THEME_LIGHT, 16, MUTED) : Icons.get(IconType.THEME_DARK, 16, MUTED));
+		styleRunButton();
+	}
+
+	// ---------- Acoes ----------
+
+	private void connectTo(ConnectionProfile profile) {
+		ConnectionProfile effective = profile;
+		if (profile.needsPasswordPrompt()) {
+			String pw = ConnectionDialog.promptPassword(this, profile);
+			if (pw == null) {
+				return;
+			}
+			effective = profile.withPassword(pw);
+		}
+		final ConnectionProfile target = effective;
+
+		// Ja conectado a essa conexao? Apenas ativa o workspace dela.
+		Workspace existing = workspaces.get(target.name());
+		if (existing != null && existing.mgr.isConnected()) {
+			activateWorkspace(existing);
+			statusBar.setText(" Workspace: " + target.name());
+			return;
+		}
+
+		setConnectingState(target.name());
+		connectionsPanel.setConnecting(target);
+		runButton.setEnabled(false);
+		statusBar.setText(" Conectando a " + target.host() + "...");
+
+		final boolean pickSchema = target.schema() == null || target.schema().isBlank();
+		final Workspace ws = (existing != null) ? existing
+				: new Workspace(target.name(), target, new ConnectionManager(dialect));
+
+		new SwingWorker<Object, Void>() {
+			@Override
+			protected Object doInBackground() throws Exception {
+				ws.mgr.open(target);
+				Connection conn = ws.mgr.getConnection();
+				if (pickSchema) {
+					return metadataService.listSchemas(conn); // List<String>
+				}
+				return metadataService.loadSchema(conn, target.schema()); // SchemaInfo
+			}
+
+			@Override
+			protected void done() {
+				try {
+					Object result = get();
+					if (existing == null) {
+						SessionStore.Session saved = savedSessions.get(target.name());
+						if (saved != null) {
+							ws.tabs = new ArrayList<>(saved.tabs());
+							ws.selectedTab = saved.selectedIndex();
+						}
+						workspaces.put(target.name(), ws);
+					}
+					if (pickSchema) {
+						@SuppressWarnings("unchecked")
+						List<String> schemas = (List<String>) result;
+						ws.schemaList = schemas;
+						ws.schema = null;
+					} else {
+						ws.schema = (SchemaInfo) result;
+						ws.schemaList = null;
+					}
+					activateWorkspace(ws);
+					setTitle("Nureal Database IDE - " + target.name());
+					if (pickSchema) {
+						statusBar.setText(
+								" Conectado  (" + ((List<?>) result).size() + " esquema(s) - duplo-clique para abrir)");
+					} else {
+						statusBar.setText(" Conectado  (" + ws.schema.tables().size() + " tabelas)");
+					}
+				} catch (Exception ex) {
+					connectionsPanel.setConnecting(null);
+					refreshConnectionIndicators();
+					showError("Falha ao conectar", ex);
+					statusBar.setText(" Falha ao conectar");
+				}
+			}
+		}.execute();
+	}
+
+	/** Monta a arvore com a lista de esquemas (duplo-clique abre o esquema). */
+	private void buildSchemaPicker(List<String> schemas) {
+		currentSchema = null;
+		objectSearch.setEnabled(false);
+		objectSearch.setText("");
+		DefaultMutableTreeNode root = new DefaultMutableTreeNode(
+				new ObjNode(NodeType.SCHEMA, "Esquemas", "Esquemas", null, null));
+		for (String s : schemas) {
+			root.add(new DefaultMutableTreeNode(new ObjNode(NodeType.SCHEMA_PICK, s, s, null, null)));
+		}
+		objectTree.setModel(new DefaultTreeModel(root));
+		objectTree.expandPath(new TreePath(root.getPath()));
+	}
+
+	/**
+	 * Abre um esquema escolhido na lista: define como banco padrao e carrega
+	 * objetos.
+	 */
+	private void openSchema(String schemaName) {
+		statusBar.setText(" Abrindo esquema " + schemaName + "...");
+		new SwingWorker<SchemaInfo, Void>() {
+			@Override
+			protected SchemaInfo doInBackground() throws Exception {
+				Connection conn = connectionManager.getConnection();
+				conn.setCatalog(schemaName); // define o banco padrao (USE schema)
+				return metadataService.loadSchema(conn, schemaName);
+			}
+
+			@Override
+			protected void done() {
+				try {
+					SchemaInfo schema = get();
+					if (activeWorkspace != null) {
+						activeWorkspace.schema = schema;
+						activeWorkspace.schemaList = null;
+					}
+					metadataCache.set(schema);
+					completionProvider.refresh(schema);
+					populateTree(schema);
+					setConnectedState(schemaName);
+					statusBar.setText(" Esquema " + schemaName + "  (" + schema.tables().size() + " tabelas)");
+				} catch (Exception ex) {
+					showError("Falha ao abrir o esquema", ex);
+					statusBar.setText(" Erro ao abrir esquema");
+				}
+			}
+		}.execute();
+	}
+
+	/**
+	 * Se houver instrucoes de risco (DELETE/UPDATE sem WHERE, DDL), pede
+	 * confirmacao listando-as. Retorna true para prosseguir; false para cancelar. O
+	 * botao padrao e "Cancelar" (mais seguro).
+	 */
+	private boolean confirmRiskyStatements(List<String> statements) {
+		StringBuilder sb = new StringBuilder();
+		int count = 0;
+		for (String sql : statements) {
+			String reason = SqlRiskAnalyzer.riskReason(sql);
+			if (reason != null) {
+				count++;
+				sb.append("• ").append(reason).append('\n').append("      ").append(snippet(sql)).append("\n\n");
+			}
+		}
+		if (count == 0) {
+			return true;
+		}
+
+		JTextArea area = new JTextArea("Atencao: " + count + " instrucao(oes) de risco detectada(s):\n\n" + sb
+				+ "Tem certeza de que deseja executar?");
+		area.setEditable(false);
+		area.setOpaque(false);
+		area.setFont(UIManager.getFont("Label.font"));
+		JScrollPane scroll = new JScrollPane(area);
+		scroll.setPreferredSize(new Dimension(560, 240));
+		scroll.setBorder(BorderFactory.createEmptyBorder());
+
+		Object[] options = { "Executar mesmo assim", "Cancelar" };
+		int opt = JOptionPane.showOptionDialog(this, scroll, "Confirmar execucao de risco", JOptionPane.YES_NO_OPTION,
+				JOptionPane.WARNING_MESSAGE, null, options, options[1]);
+		return opt == 0;
+	}
+
+	private void onRun() {
+		if (!connectionManager.isConnected()) {
+			statusBar.setText(" Conecte-se a uma base antes de executar.");
+			return;
+		}
+		SqlEditorPane editor = currentEditor();
+		if (editor == null) {
+			return;
+		}
+		final List<String> statements = SqlStatementSplitter.split(editor.currentSql());
+		if (statements.isEmpty()) {
+			return;
+		}
+		if (!confirmRiskyStatements(statements)) {
+			statusBar.setText(" Execucao cancelada.");
+			return;
+		}
+		closeOpenCursors();
+		if (resultsArea != null && !resultsArea.isVisible()) {
+			toggleResults(); // reabre os resultados para mostrar o carregamento
+		}
+		runButton.setEnabled(false);
+		showExecuting(true);
+		boolean usingSelection = editor.hasSelection();
+		statusBar.setText(" Executando " + statements.size() + " instrucao(oes)"
+				+ (usingSelection ? "  —  ATENCAO: rodando apenas a SELECAO" : "") + "...");
+
+		SwingWorker<List<QueryResult>, Void> worker = new SwingWorker<>() {
+			@Override
+			protected List<QueryResult> doInBackground() {
+				List<QueryResult> results = new ArrayList<>();
+				Connection conn = connectionManager.getConnection();
+				for (int i = 0; i < statements.size(); i++) {
+					if (isCancelled()) {
+						break;
+					}
+					String sql = statements.get(i);
+					int n = i + 1;
+					long t0 = System.nanoTime();
+					Statement st = null;
+					try {
+						st = conn.createStatement();
+						// cursor do servidor: busca em lotes do tamanho da pagina
+						st.setFetchSize(PAGE_SIZE);
+						runningStatement = st;
+						boolean hasResultSet = st.execute(sql);
+						long execMs = (System.nanoTime() - t0) / 1_000_000L;
+						if (hasResultSet) {
+							ResultSet rs = st.getResultSet();
+							ResultTableModel model = createModel(rs);
+							long t1 = System.nanoTime();
+							int read = appendPage(model, rs, PAGE_SIZE);
+							long fetchMs = (System.nanoTime() - t1) / 1_000_000L;
+							boolean hasMore = read == PAGE_SIZE;
+							ResultCursor cursor = null;
+							if (hasMore) {
+								cursor = new ResultCursor(st, rs);
+							} else {
+								rs.close();
+								st.close();
+							}
+							results.add(QueryResult.grid("Resultado " + n, sql, model, execMs, fetchMs, cursor));
+						} else {
+							int updated = st.getUpdateCount();
+							st.close();
+							results.add(QueryResult.message("Comando " + n, sql, updated + " linha(s) afetada(s)",
+									false, execMs));
+						}
+					} catch (SQLException ex) {
+						if (st != null) {
+							try {
+								st.close();
+							} catch (SQLException ignore) {
+								// ignora
+							}
+						}
+						long execMs = (System.nanoTime() - t0) / 1_000_000L;
+						results.add(QueryResult.message("Erro " + n, sql, "Erro: " + ex.getMessage(), true, execMs));
+						break;
+					} finally {
+						runningStatement = null;
+					}
+				}
+				return results;
+			}
+
+			@Override
+			protected void done() {
+				showExecuting(false);
+				runningStatement = null;
+				runWorker = null;
+				runButton.setEnabled(true);
+				try {
+					List<QueryResult> results = get();
+					showResults(results);
+					if (ranStructuralDdl(statements, results)) {
+						refreshObjectTree(false);
+					}
+				} catch (CancellationException ce) {
+					statusBar.setText(" Execucao cancelada.");
+				} catch (Exception ex) {
+					showError("Erro ao executar SQL", ex);
+					statusBar.setText(" Erro na execucao");
+				}
+			}
+		};
+		runWorker = worker;
+		worker.execute();
+	}
+
+	/**
+	 * Verdadeiro se alguma das instrucoes EXECUTADAS COM SUCESSO (sem erro) era DDL
+	 * estrutural — caso em que o navegador de objetos precisa ser recarregado. A
+	 * lista de resultados pode ser menor que a de instrucoes quando a execucao
+	 * parou num erro ou foi cancelada no meio.
+	 */
+	private static boolean ranStructuralDdl(List<String> statements, List<QueryResult> results) {
+		int n = Math.min(statements.size(), results.size());
+		for (int i = 0; i < n; i++) {
+			QueryResult r = results.get(i);
+			if (!r.error() && SqlRiskAnalyzer.isStructuralChange(statements.get(i))) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private void showResults(List<QueryResult> results) {
+		this.lastResults = results;
+		resultTabs.removeAll();
+		boolean error = false;
+		int grids = 0;
+		for (QueryResult r : results) {
+			JComponent content;
+			if (r.model() != null) {
+				if (r.cursor() != null && !r.cursor().exhausted) {
+					openCursors.add(r.cursor());
+				}
+				content = buildGridPanel(r);
+				grids++;
+			} else {
+				JTextArea area = new JTextArea(r.message() + "\n\n(executado em " + r.execMs() + " ms)");
+				area.setEditable(false);
+				content = new JScrollPane(area);
+			}
+			resultTabs.addTab(r.title(), content);
+			resultTabs.setToolTipTextAt(resultTabs.getTabCount() - 1, sqlTooltip(r.sql()));
+			error = error || r.error();
+		}
+		if (resultTabs.getTabCount() > 0) {
+			resultTabs.setSelectedIndex(0);
+			showResultsCard();
+		} else {
+			showEmptyState();
+		}
+		statusBar.setText(" " + results.size() + " instrucao(oes) executada(s), " + grids + " com resultado"
+				+ (error ? " - parou em erro" : ""));
+	}
+
+	/**
+	 * Painel de grade de uma aba de resultado: monta {@link ResultGrid} +
+	 * {@link ResultStatusBar} atraves de {@link ResultView}. MainWindow so decide
+	 * OS CALLBACKS que dependem do ciclo de vida do cursor JDBC (paginacao/leitura,
+	 * que e responsabilidade sua, nao da grade nem da barra) — nenhuma logica de
+	 * layout do resultado mora aqui.
+	 */
+	private JComponent buildGridPanel(QueryResult r) {
+		ResultTableModel model = (ResultTableModel) r.model();
+		String schemaName = (currentSchema != null) ? currentSchema.name() : null;
+		ResultGrid grid = new ResultGrid(model, connectionManager, schemaName, tableMetadataCache,
+				() -> exportResult(r), this::scaledPx);
+
+		// Nome distinto de propósito do campo MainWindow.statusBar (JLabel do
+		// rodape da JANELA inteira) — esta e a barra de UMA aba de resultado.
+		ResultStatusBar resultStatusBar = new ResultStatusBar(PAGE_SIZE);
+		Runnable refresh = () -> resultStatusBar.refresh(r.model().getRowCount(), r.execMs(), r.fetchMs(),
+				r.cursor() != null && !r.cursor().exhausted);
+		resultStatusBar.onLoadMore(() -> {
+			loadPage(r, PAGE_SIZE);
+			refresh.run();
+		});
+		resultStatusBar.onLoadAll(() -> loadAll(r, refresh));
+		resultStatusBar.onExportThis(() -> exportResult(r));
+		resultStatusBar.onExportAll(this::exportAll);
+		refresh.run();
+
+		return new ResultView(grid, resultStatusBar).asComponent();
+	}
+
+	/** Exporta um resultado especifico (este) para um arquivo Excel. */
+	private void exportResult(QueryResult r) {
+		if (r.model() == null) {
+			JOptionPane.showMessageDialog(this, "Este resultado nao possui dados tabulares para exportar.",
+					"Exportar para Excel", JOptionPane.INFORMATION_MESSAGE);
+			return;
+		}
+		File file = chooseSaveFile(r.title());
+		if (file != null) {
+			List<ExcelExporter.TableSheet> sheets = new ArrayList<>();
+			sheets.add(new ExcelExporter.TableSheet(r.title(), r.model()));
+			sheets.add(instructionsSheet(List.of(r)));
+			doExport(sheets, file);
+		}
+	}
+
+	/** Le ate {@code max} linhas do cursor para o modelo (na EDT). */
+	private void loadPage(QueryResult r, int max) {
+		ResultCursor c = r.cursor();
+		if (c == null || c.exhausted) {
+			return;
+		}
+		try {
+			int read = appendPage(r.model(), c.rs, max);
+			if (read < max) {
+				c.exhausted = true;
+				c.close();
+				openCursors.remove(c);
+			}
+		} catch (SQLException ex) {
+			c.exhausted = true;
+			c.close();
+			openCursors.remove(c);
+			statusBar.setText(" Erro ao carregar mais linhas: " + ex.getMessage());
+		}
+	}
+
+	/** Le todas as linhas restantes do cursor em segundo plano. */
+	private void loadAll(QueryResult r, Runnable refresh) {
+		ResultCursor c = r.cursor();
+		if (c == null || c.exhausted) {
+			return;
+		}
+		statusBar.setText(" Carregando todas as linhas...");
+		new SwingWorker<Void, Vector<Object>>() {
+			@Override
+			protected Void doInBackground() throws Exception {
+				int cols = r.model().getColumnCount();
+				while (c.rs.next()) {
+					Vector<Object> row = new Vector<>(cols);
+					for (int i = 1; i <= cols; i++) {
+						row.add(c.rs.getObject(i));
+					}
+					publish(row);
+				}
+				return null;
+			}
+
+			@Override
+			protected void process(List<Vector<Object>> chunks) {
+				for (Vector<Object> row : chunks) {
+					r.model().addRow(row);
+				}
+				refresh.run();
+			}
+
+			@Override
+			protected void done() {
+				c.exhausted = true;
+				c.close();
+				openCursors.remove(c);
+				try {
+					get();
+					statusBar.setText(" Todas as linhas carregadas (" + r.model().getRowCount() + ").");
+				} catch (Exception ex) {
+					statusBar.setText(" Erro ao carregar linhas: " + ex.getMessage());
+				}
+				refresh.run();
+			}
+		}.execute();
+	}
+
+	private void closeOpenCursors() {
+		for (ResultCursor c : openCursors) {
+			c.close();
+		}
+		openCursors.clear();
+	}
+
+	// ---------- Exportacao ----------
+
+	private void maybeShowTabMenu(MouseEvent e) {
+		if (!e.isPopupTrigger()) {
+			return;
+		}
+		int idx = resultTabs.indexAtLocation(e.getX(), e.getY());
+		if (idx < 0) {
+			return;
+		}
+		resultTabs.setSelectedIndex(idx);
+
+		JPopupMenu menu = new JPopupMenu();
+		JMenuItem one = new JMenuItem("Exportar este resultado para Excel...");
+		one.addActionListener(a -> exportSingle(idx));
+		JMenuItem all = new JMenuItem("Exportar todos (uma aba por resultado)...");
+		all.addActionListener(a -> exportAll());
+		menu.add(one);
+		menu.add(all);
+		menu.show(resultTabs, e.getX(), e.getY());
+	}
+
+	private void exportSingle(int idx) {
+		if (idx < 0 || idx >= lastResults.size()) {
+			return;
+		}
+		QueryResult r = lastResults.get(idx);
+		if (r.model() == null) {
+			JOptionPane.showMessageDialog(this, "Esta aba nao possui dados tabulares para exportar.",
+					"Exportar para Excel", JOptionPane.INFORMATION_MESSAGE);
+			return;
+		}
+		File file = chooseSaveFile(r.title());
+		if (file != null) {
+			List<ExcelExporter.TableSheet> sheets = new ArrayList<>();
+			sheets.add(new ExcelExporter.TableSheet(r.title(), r.model()));
+			sheets.add(instructionsSheet(List.of(r)));
+			doExport(sheets, file);
+		}
+	}
+
+	private void exportAll() {
+		List<ExcelExporter.TableSheet> sheets = new ArrayList<>();
+		for (QueryResult r : lastResults) {
+			if (r.model() != null) {
+				sheets.add(new ExcelExporter.TableSheet(r.title(), r.model()));
+			}
+		}
+		if (sheets.isEmpty()) {
+			JOptionPane.showMessageDialog(this, "Nenhum resultado tabular para exportar.", "Exportar para Excel",
+					JOptionPane.INFORMATION_MESSAGE);
+			return;
+		}
+		sheets.add(instructionsSheet(lastResults));
+		File file = chooseSaveFile("resultados");
+		if (file != null) {
+			doExport(sheets, file);
+		}
+	}
+
+	/**
+	 * Monta a aba "Instrucoes SQL" (Resultado x SQL executado), estilo PL/SQL
+	 * Developer.
+	 */
+	private ExcelExporter.TableSheet instructionsSheet(List<QueryResult> results) {
+		DefaultTableModel m = new DefaultTableModel(new Object[] { "Resultado", "Instrucao SQL" }, 0) {
+			@Override
+			public boolean isCellEditable(int r, int c) {
+				return false;
+			}
+		};
+		for (QueryResult r : results) {
+			m.addRow(new Object[] { r.title(), r.sql() });
+		}
+		return new ExcelExporter.TableSheet("Instrucoes SQL", m);
+	}
+
+	private File chooseSaveFile(String defaultName) {
+		JFileChooser fc = new JFileChooser();
+		fc.setDialogTitle("Salvar como Excel");
+		fc.setSelectedFile(new File(defaultName + ".xlsx"));
+		fc.setFileFilter(new FileNameExtensionFilter("Planilha Excel (*.xlsx)", "xlsx"));
+		if (fc.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) {
+			return null;
+		}
+		File file = fc.getSelectedFile();
+		if (!file.getName().toLowerCase().endsWith(".xlsx")) {
+			file = new File(file.getParentFile(), file.getName() + ".xlsx");
+		}
+		return file;
+	}
+
+	private void doExport(List<ExcelExporter.TableSheet> sheets, File file) {
+		statusBar.setText(" Exportando para " + file.getName() + "...");
+		new SwingWorker<Void, Void>() {
+			@Override
+			protected Void doInBackground() throws Exception {
+				ExcelExporter.export(sheets, file);
+				return null;
+			}
+
+			@Override
+			protected void done() {
+				try {
+					get();
+					statusBar.setText(" Exportado: " + file.getAbsolutePath());
+					askToOpen(file);
+				} catch (Exception ex) {
+					showError("Falha ao exportar", ex);
+					statusBar.setText(" Erro ao exportar");
+				}
+			}
+		}.execute();
+	}
+
+	/** Apos exportar, pergunta se deseja abrir o arquivo no aplicativo padrao. */
+	private void askToOpen(File file) {
+		int opt = JOptionPane.showConfirmDialog(this,
+				"Exportacao concluida:\n" + file.getName() + "\n\nDeseja abrir o arquivo agora?", "Exportar para Excel",
+				JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
+		if (opt != JOptionPane.YES_OPTION) {
+			return;
+		}
+		if (!Desktop.isDesktopSupported() || !Desktop.getDesktop().isSupported(Desktop.Action.OPEN)) {
+			statusBar.setText(" Abertura automatica nao suportada neste sistema.");
+			return;
+		}
+		try {
+			Desktop.getDesktop().open(file);
+		} catch (Exception ex) {
+			showError("Nao foi possivel abrir o arquivo", ex);
+		}
+	}
+
+	// ---------- Auxiliares ----------
+
+	private static String snippet(String sql) {
+		String oneLine = sql.replaceAll("\\s+", " ").trim();
+		return oneLine.length() > 80 ? oneLine.substring(0, 80) + "..." : oneLine;
+	}
+
+	/**
+	 * Tooltip com o SQL exato executado (para conferir se o WHERE foi incluido).
+	 */
+	private static String sqlTooltip(String sql) {
+		String body = sql.length() > 2000 ? sql.substring(0, 2000) + "..." : sql;
+		String esc = body.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>");
+		return "<html><b>SQL executado:</b><br>" + esc + "</html>";
+	}
+
+	/**
+	 * Cria o modelo (cabecalhos + tipos + origem real + tipo SQL de cada coluna)
+	 * para uma consulta.
+	 */
+	private static ResultTableModel createModel(ResultSet rs) throws SQLException {
+		ResultSetMetaData md = rs.getMetaData();
+		int cols = md.getColumnCount();
+		Vector<String> names = new Vector<>();
+		Class<?>[] types = new Class<?>[cols];
+		String[] sourceTables = new String[cols];
+		String[] realColumnNames = new String[cols];
+		String[] sqlTypeNames = new String[cols];
+		ResultTableModel.ColumnJdbcMeta[] jdbcMeta = new ResultTableModel.ColumnJdbcMeta[cols];
+		for (int i = 1; i <= cols; i++) {
+			names.add(md.getColumnLabel(i));
+			types[i - 1] = resolveColumnClass(md, i);
+			// Tabela/coluna "reais" de origem (quando o driver informa) — usadas
+			// so para casar a coluna do resultado com FKs do schema (indicador
+			// no cabecalho). Podem vir vazias para expressoes/funcoes/JOINs
+			// complexos; nesse caso simplesmente nao mostramos o indicador.
+			try {
+				sourceTables[i - 1] = md.getTableName(i);
+				realColumnNames[i - 1] = md.getColumnName(i);
+			} catch (SQLException ignore) {
+				sourceTables[i - 1] = null;
+				realColumnNames[i - 1] = null;
+			}
+			// Nome do tipo SQL real (ex.: "VARCHAR", "BIGINT", "JSON", "TIMESTAMP")
+			// — usado pelo RendererFactory para colorir/alinhar por tipo.
+			try {
+				sqlTypeNames[i - 1] = md.getColumnTypeName(i);
+			} catch (SQLException ignore) {
+				sqlTypeNames[i - 1] = null;
+			}
+			jdbcMeta[i - 1] = readJdbcMeta(md, i);
+		}
+		return new ResultTableModel(names, types, sourceTables, realColumnNames, sqlTypeNames, jdbcMeta);
+	}
+
+	/**
+	 * Le os metadados de coluna que o driver ja entrega junto com o
+	 * ResultSetMetaData (sem nenhuma consulta extra ao banco): nulabilidade,
+	 * precisao, escala, tamanho de exibicao e auto-increment. Cada chamada e
+	 * protegida individualmente porque alguns drivers/tipos lancam SQLException
+	 * para campos que nao fazem sentido (ex.: escala de uma coluna texto) em vez de
+	 * simplesmente devolver 0.
+	 */
+	private static ResultTableModel.ColumnJdbcMeta readJdbcMeta(ResultSetMetaData md, int col) {
+		boolean nullable = true;
+		int precision = 0;
+		int scale = 0;
+		int displaySize = 0;
+		boolean autoIncrement = false;
+		try {
+			nullable = md.isNullable(col) != ResultSetMetaData.columnNoNulls;
+		} catch (SQLException ignore) {
+			// mantem o padrao (nullable)
+		}
+		try {
+			precision = md.getPrecision(col);
+		} catch (SQLException ignore) {
+			// mantem 0
+		}
+		try {
+			scale = md.getScale(col);
+		} catch (SQLException ignore) {
+			// mantem 0
+		}
+		try {
+			displaySize = md.getColumnDisplaySize(col);
+		} catch (SQLException ignore) {
+			// mantem 0
+		}
+		try {
+			autoIncrement = md.isAutoIncrement(col);
+		} catch (SQLException ignore) {
+			// mantem false
+		}
+		return new ResultTableModel.ColumnJdbcMeta(nullable, precision, scale, displaySize, autoIncrement);
+	}
+
+	private static Class<?> resolveColumnClass(ResultSetMetaData md, int col) {
+		try {
+			return Class.forName(md.getColumnClassName(col));
+		} catch (Exception ex) {
+			return Object.class;
+		}
+	}
+
+	/** Anexa ate {@code max} linhas do ResultSet ao modelo; retorna quantas leu. */
+	private static int appendPage(DefaultTableModel model, ResultSet rs, int max) throws SQLException {
+		int cols = model.getColumnCount();
+		int read = 0;
+		while (read < max && rs.next()) {
+			Vector<Object> row = new Vector<>(cols);
+			for (int i = 1; i <= cols; i++) {
+				row.add(rs.getObject(i));
+			}
+			model.addRow(row);
+			read++;
+		}
+		return read;
+	}
+
+	/** Cursor aberto (Statement + ResultSet) para paginacao sob demanda. */
+	private static final class ResultCursor {
+		final Statement st;
+		final ResultSet rs;
+		boolean exhausted;
+
+		ResultCursor(Statement st, ResultSet rs) {
+			this.st = st;
+			this.rs = rs;
+		}
+
+		void close() {
+			try {
+				rs.close();
+			} catch (SQLException ignore) {
+				// ignora
+			}
+			try {
+				st.close();
+			} catch (SQLException ignore) {
+				// ignora
+			}
+		}
+	}
+
+	private void populateTree(SchemaInfo schema) {
+		this.currentSchema = schema;
+		objectSearch.setEnabled(true);
+		// preserva o texto da busca (relevante quando isto e chamado por um
+		// refresh apos DDL, em vez de uma conexao/abertura de esquema nova)
+		rebuildTree(objectSearch.getText());
+	}
+
+	private void applyObjectFilter() {
+		if (currentSchema != null) {
+			rebuildTree(objectSearch.getText());
+		}
+	}
+
+	/**
+	 * Recarrega os metadados do esquema atual (tabelas, views, procedures,
+	 * functions, triggers) sem mudar a conexao nem a aba selecionada. Chamado
+	 * automaticamente apos DDL bem-sucedido e tambem pelo botao de atualizar
+	 * (icone) e pelo atalho Ctrl+R.
+	 */
+	private void refreshObjectTree(boolean manual) {
+		if (!connectionManager.isConnected() || currentSchema == null) {
+			if (manual && statusBar != null) {
+				statusBar.setText(" Conecte-se e abra um esquema antes de atualizar os objetos.");
+			}
+			return;
+		}
+		String schemaName = currentSchema.name();
+		if (manual && statusBar != null) {
+			statusBar.setText(" Atualizando objetos de " + schemaName + "...");
+		}
+		new SwingWorker<SchemaInfo, Void>() {
+			@Override
+			protected SchemaInfo doInBackground() throws Exception {
+				Connection conn = connectionManager.getConnection();
+				return metadataService.loadSchema(conn, schemaName);
+			}
+
+			@Override
+			protected void done() {
+				try {
+					SchemaInfo schema = get();
+					if (activeWorkspace != null) {
+						activeWorkspace.schema = schema;
+						activeWorkspace.schemaList = null;
+					}
+					metadataCache.set(schema);
+					completionProvider.refresh(schema);
+					populateTree(schema);
+					if (statusBar != null) {
+						statusBar.setText(" Objetos atualizados (" + schema.tables().size() + " tabelas).");
+					}
+				} catch (Exception ex) {
+					Throwable c = (ex.getCause() != null) ? ex.getCause() : ex;
+					if (statusBar != null) {
+						statusBar.setText(" Erro ao atualizar objetos: " + c.getMessage());
+					}
+				}
+			}
+		}.execute();
+	}
+
+	/**
+	 * Monta a arvore de objetos agrupada por tipo (estilo PL/SQL Developer),
+	 * filtrando pelos nomes que contem {@code filter}. Tabelas e views tambem casam
+	 * quando uma de suas colunas bate com o filtro.
+	 */
+	private void rebuildTree(String filter) {
+		String f = filter == null ? "" : filter.trim().toLowerCase(Locale.ROOT);
+		boolean filtering = !f.isEmpty();
+		SchemaInfo schema = currentSchema;
+
+		DefaultMutableTreeNode root = new DefaultMutableTreeNode(
+				new ObjNode(NodeType.SCHEMA, schema.name(), schema.name(), null, null));
+
+		addTableCategory(root, "Tabelas", schema.tables(), NodeType.TABLE, "TABLE", f, filtering);
+		addTableCategory(root, "Visualizacoes", schema.views(), NodeType.VIEW, "VIEW", f, filtering);
+		addNameCategory(root, "Procedures", schema.procedures(), NodeType.ROUTINE, "PROCEDURE", f, filtering);
+		addNameCategory(root, "Functions", schema.functions(), NodeType.ROUTINE, "FUNCTION", f, filtering);
+		addNameCategory(root, "Triggers", schema.triggers(), NodeType.TRIGGER, "TRIGGER", f, filtering);
+
+		objectTree.setModel(new DefaultTreeModel(root));
+		if (filtering) {
+			expandAll();
+		} else {
+			expandCategories(root);
+		}
+	}
+
+	private void addTableCategory(DefaultMutableTreeNode root, String label, List<TableInfo> items, NodeType type,
+			String kind, String f, boolean filtering) {
+		DefaultMutableTreeNode cat = new DefaultMutableTreeNode();
+		int shown = 0;
+		for (TableInfo t : items) {
+			if (filtering && !contains(t.name(), f) && !anyColumnMatches(t, f)) {
+				continue;
+			}
+			DefaultMutableTreeNode tn = new DefaultMutableTreeNode(new ObjNode(type, t.name(), t.name(), kind, t));
+			// Ao buscar, a arvore mostra so o objeto; as colunas ficam na tela
+			// de propriedades (duplo-clique). No modo normal, expande as colunas.
+			if (!filtering) {
+				for (ColumnInfo c : t.columns()) {
+					tn.add(new DefaultMutableTreeNode(
+							new ObjNode(NodeType.COLUMN, c.name() + " : " + c.type(), c.name(), null, null)));
+				}
+			}
+			cat.add(tn);
+			shown++;
+		}
+		if (!filtering || shown > 0) {
+			cat.setUserObject(new ObjNode(NodeType.CATEGORY, label + " (" + items.size() + ")", label, null, null));
+			root.add(cat);
+		}
+	}
+
+	private static boolean anyColumnMatches(TableInfo t, String f) {
+		for (ColumnInfo c : t.columns()) {
+			if (contains(c.name(), f)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private void addNameCategory(DefaultMutableTreeNode root, String label, List<String> items, NodeType type,
+			String kind, String f, boolean filtering) {
+		DefaultMutableTreeNode cat = new DefaultMutableTreeNode();
+		int shown = 0;
+		for (String name : items) {
+			if (filtering && !contains(name, f)) {
+				continue;
+			}
+			cat.add(new DefaultMutableTreeNode(new ObjNode(type, name, name, kind, null)));
+			shown++;
+		}
+		if (!filtering || shown > 0) {
+			cat.setUserObject(new ObjNode(NodeType.CATEGORY, label + " (" + items.size() + ")", label, null, null));
+			root.add(cat);
+		}
+	}
+
+	private static boolean contains(String value, String lowerFilter) {
+		return lowerFilter.isEmpty() || value.toLowerCase(Locale.ROOT).contains(lowerFilter);
+	}
+
+	private void expandCategories(DefaultMutableTreeNode root) {
+		objectTree.expandPath(new TreePath(root.getPath()));
+		for (int i = 0; i < root.getChildCount(); i++) {
+			DefaultMutableTreeNode child = (DefaultMutableTreeNode) root.getChildAt(i);
+			objectTree.expandPath(new TreePath(child.getPath()));
+		}
+	}
+
+	private void expandAll() {
+		for (int i = 0; i < objectTree.getRowCount(); i++) {
+			objectTree.expandRow(i);
+		}
+	}
+
+	/** Abre a tela de propriedades do objeto selecionado (duplo-clique). */
+	private void openSelectedObjectProperties() {
+		TreePath path = objectTree.getSelectionPath();
+		if (path == null) {
+			return;
+		}
+		Object node = ((DefaultMutableTreeNode) path.getLastPathComponent()).getUserObject();
+		if (node instanceof ObjNode obj) {
+			if (obj.type() == NodeType.SCHEMA_PICK) {
+				openSchema(obj.name());
+			} else if (obj.kind() != null) {
+				showObjectProperties(obj);
+			}
+		}
+	}
+
+	/**
+	 * Janela de propriedades: para tabelas/views mostra a grade de colunas; para
+	 * todos os objetos carrega a definicao (DDL) sob demanda.
+	 */
+	private void showObjectProperties(ObjNode obj) {
+		JDialog dialog = new JDialog(this, prettyKind(obj.kind()) + " - " + obj.name(), false);
+		dialog.setSize(560, 460);
+		dialog.setLocationRelativeTo(this);
+		dialog.setLayout(new BorderLayout());
+
+		JLabel title = new JLabel(obj.name());
+		title.setFont(title.getFont().deriveFont(Font.BOLD, 14f));
+		JLabel sub = new JLabel(prettyKind(obj.kind()) + "  ·  " + currentSchema.name());
+		sub.setForeground(MUTED);
+		JPanel head = new JPanel(new BorderLayout());
+		head.setBorder(BorderFactory.createEmptyBorder(10, 12, 8, 12));
+		head.add(title, BorderLayout.NORTH);
+		head.add(sub, BorderLayout.SOUTH);
+
+		JTabbedPane tabs = new JTabbedPane();
+		boolean isTableLike = obj.table() != null;
+		DefaultTableModel colModel = null;
+		DefaultTableModel idxModel = null;
+		DefaultTableModel fkModel = null;
+		if (isTableLike) {
+			colModel = readOnlyModel("#", "Coluna", "Tipo", "Nulo", "Chave", "Default", "Extra", "Comentario");
+			tabs.addTab("Colunas", tableInScroll(colModel));
+			// Indices e FKs sao especificos de tabelas (views nao tem).
+			if ("TABLE".equals(obj.kind())) {
+				idxModel = readOnlyModel("Indice", "Unico", "Tipo", "Colunas");
+				tabs.addTab("Indices", tableInScroll(idxModel));
+				fkModel = readOnlyModel("Constraint", "Coluna(s)", "Referencia", "Coluna(s) ref.", "On Update",
+						"On Delete");
+				tabs.addTab("Chaves estrangeiras", tableInScroll(fkModel));
+			}
+		}
+
+		JTextArea ddlArea = new JTextArea("Carregando definicao...");
+		ddlArea.setEditable(false);
+		ddlArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
+		tabs.addTab("DDL", new JScrollPane(ddlArea));
+
+		dialog.add(head, BorderLayout.NORTH);
+		dialog.add(tabs, BorderLayout.CENTER);
+		dialog.setVisible(true);
+
+		if (isTableLike) {
+			loadTableDetailsInto(obj, colModel, idxModel, fkModel);
+		}
+		loadDefinition(obj, ddlArea);
+	}
+
+	private static DefaultTableModel readOnlyModel(Object... columns) {
+		return new DefaultTableModel(columns, 0) {
+			@Override
+			public boolean isCellEditable(int r, int c) {
+				return false;
+			}
+		};
+	}
+
+	private static JComponent tableInScroll(DefaultTableModel model) {
+		JTable t = new JTable(model);
+		t.setAutoResizeMode(JTable.AUTO_RESIZE_OFF);
+		t.setFillsViewportHeight(true);
+		if ("#".equals(model.getColumnName(0))) {
+			t.getColumnModel().getColumn(0).setMaxWidth(40);
+		}
+		t.getTableHeader().setReorderingAllowed(false);
+		return new JScrollPane(t);
+	}
+
+	/** Preenche as grades de colunas, indices e FKs em segundo plano. */
+	private void loadTableDetailsInto(ObjNode obj, DefaultTableModel colModel, DefaultTableModel idxModel,
+			DefaultTableModel fkModel) {
+		new SwingWorker<TableDetails, Void>() {
+			@Override
+			protected TableDetails doInBackground() throws Exception {
+				Connection conn = connectionManager.getConnection();
+				return metadataService.loadTableDetails(conn, currentSchema.name(), obj.name());
+			}
+
+			@Override
+			protected void done() {
+				try {
+					TableDetails d = get();
+					for (ColumnDetail c : d.columns()) {
+						colModel.addRow(new Object[] { c.position(), c.name(), c.type(), c.nullable() ? "Sim" : "Nao",
+								prettyKey(c.key()), c.defaultValue() == null ? "" : c.defaultValue(),
+								c.extra() == null ? "" : c.extra(), c.comment() == null ? "" : c.comment() });
+					}
+					if (idxModel != null) {
+						for (IndexInfo ix : d.indexes()) {
+							idxModel.addRow(new Object[] { ix.name(), ix.unique() ? "Sim" : "Nao", ix.type(),
+									String.join(", ", ix.columns()) });
+						}
+					}
+					if (fkModel != null) {
+						for (ForeignKeyInfo fk : d.foreignKeys()) {
+							fkModel.addRow(
+									new Object[] { fk.name(), String.join(", ", fk.columns()), fk.referencedTable(),
+											String.join(", ", fk.referencedColumns()), fk.onUpdate(), fk.onDelete() });
+						}
+					}
+				} catch (Exception ex) {
+					Throwable c = (ex.getCause() != null) ? ex.getCause() : ex;
+					statusBar.setText(" Erro ao carregar detalhes: " + c.getMessage());
+				}
+			}
+		}.execute();
+	}
+
+	private static String prettyKey(String key) {
+		if (key == null) {
+			return "";
+		}
+		return switch (key) {
+		case "PRI" -> "PK";
+		case "UNI" -> "Unica";
+		case "MUL" -> "Indice";
+		default -> key;
+		};
+	}
+
+	private void loadDefinition(ObjNode obj, JTextArea target) {
+		new SwingWorker<String, Void>() {
+			@Override
+			protected String doInBackground() throws Exception {
+				if (!connectionManager.isConnected()) {
+					return "Sem conexao ativa.";
+				}
+				Connection conn = connectionManager.getConnection();
+				String sql = dialect.definitionQuery(obj.kind(), obj.name());
+				try (Statement st = conn.createStatement(); ResultSet rs = st.executeQuery(sql)) {
+					if (rs.next()) {
+						int idx = pickDefinitionColumn(rs.getMetaData());
+						String def = rs.getString(idx);
+						return (def != null) ? def : "(sem definicao)";
+					}
+					return "(sem definicao)";
+				}
+			}
+
+			@Override
+			protected void done() {
+				try {
+					target.setText(get());
+				} catch (Exception ex) {
+					Throwable c = (ex.getCause() != null) ? ex.getCause() : ex;
+					target.setText("Erro ao carregar a definicao: " + c.getMessage());
+				}
+				target.setCaretPosition(0);
+			}
+		}.execute();
+	}
+
+	/** Escolhe a coluna do SHOW CREATE que contem o DDL (ex.: "Create Table"). */
+	private static int pickDefinitionColumn(ResultSetMetaData md) throws SQLException {
+		int cols = md.getColumnCount();
+		for (int i = 1; i <= cols; i++) {
+			String label = md.getColumnLabel(i).toLowerCase(Locale.ROOT);
+			if (label.contains("create") || label.contains("statement")) {
+				return i;
+			}
+		}
+		return cols;
+	}
+
+	private static String prettyKind(String kind) {
+		return switch (kind) {
+		case "TABLE" -> "Tabela";
+		case "VIEW" -> "Visualizacao";
+		case "PROCEDURE" -> "Procedure";
+		case "FUNCTION" -> "Function";
+		case "TRIGGER" -> "Trigger";
+		default -> kind;
+		};
+	}
+
+	/**
+	 * Tipos de no na arvore de objetos. Visibilidade de pacote: usado por outras
+	 * classes de UI da arvore, no mesmo pacote (ver {@code ui}).
+	 */
+	enum NodeType {
+		SCHEMA, SCHEMA_PICK, CATEGORY, TABLE, VIEW, ROUTINE, TRIGGER, COLUMN
+	}
+
+	/**
+	 * No da arvore: tipo, texto exibido, nome cru do objeto, o tipo para o DDL
+	 * (kind, null para schema/categoria/coluna) e a tabela associada quando houver.
+	 */
+	record ObjNode(NodeType type, String display, String name, String kind, TableInfo table) {
+		@Override
+		public String toString() {
+			return display;
+		}
+	}
+
+	private void showError(String title, Exception ex) {
+		Throwable cause = (ex.getCause() != null) ? ex.getCause() : ex;
+		JOptionPane.showMessageDialog(this, cause.getMessage(), title, JOptionPane.ERROR_MESSAGE);
+	}
+
+	/**
+	 * Workspace de uma conexao: sua sessao JDBC, esquema e abas de SQL proprias.
+	 */
+	private static final class Workspace {
+		final String name; // nome da conexao (ou SCRATCH)
+		final ConnectionProfile profile; // null para o workspace sem conexao
+		final ConnectionManager mgr; // gerenciador JDBC proprio
+		SchemaInfo schema; // esquema carregado (ou null)
+		List<String> schemaList; // lista de esquemas (schema em branco)
+		List<SessionStore.Tab> tabs = new ArrayList<>();
+		int selectedTab = 0;
+
+		Workspace(String name, ConnectionProfile profile, ConnectionManager mgr) {
+			this.name = name;
+			this.profile = profile;
+			this.mgr = mgr;
+		}
+	}
+
+	/**
+	 * Resultado de um statement: grade (model != null) ou mensagem (update/erro).
+	 */
+	private record QueryResult(String title, String sql, DefaultTableModel model, String message, boolean error,
+			long execMs, long fetchMs, ResultCursor cursor) {
+		static QueryResult grid(String title, String sql, DefaultTableModel model, long execMs, long fetchMs,
+				ResultCursor cursor) {
+			return new QueryResult(title, sql, model, null, false, execMs, fetchMs, cursor);
+		}
+
+		static QueryResult message(String title, String sql, String message, boolean error, long execMs) {
+			return new QueryResult(title, sql, null, message, error, execMs, 0L, null);
+		}
+	}
 }

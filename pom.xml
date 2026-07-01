@@ -13,7 +13,7 @@
     <description>IDE para desenvolvedores de banco de dados (MySQL primeiro, multi-banco depois).</description>
 
     <properties>
-        <maven.compiler.release>17</maven.compiler.release>
+        <maven.compiler.release>25</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <exec.mainClass>com.nureal.ide.App</exec.mainClass>
     </properties>
@@ -23,6 +23,13 @@
         <dependency>
             <groupId>com.formdev</groupId>
             <artifactId>flatlaf</artifactId>
+            <version>3.5.4</version>
+        </dependency>
+        
+        <!-- Extensões do FlatLaf para suporte a ícones SVG e utilitários -->
+        <dependency>
+            <groupId>com.formdev</groupId>
+            <artifactId>flatlaf-extras</artifactId>
             <version>3.5.4</version>
         </dependency>
 

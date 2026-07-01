@@ -10,7 +10,8 @@ import java.sql.SQLException;
  * Abre e mantem a conexao atual.
  *
  * Protótipo: usa DriverManager (uma conexao). A evolucao natural e trocar
- * o corpo de open()/getConnection() por um pool (HikariCP) sem alterar quem chama.
+ * o corpo de open()/getConnection() por um pool (HikariCP) sem alterar quem
+ * chama.
  */
 public class ConnectionManager implements AutoCloseable {
 
@@ -27,7 +28,17 @@ public class ConnectionManager implements AutoCloseable {
         close();
         this.profile = profile;
         String url = dialect.buildJdbcUrl(profile);
-        this.connection = DriverManager.getConnection(url, profile.user(), profile.password());
+        this.connection = DriverManager.getConnection(
+                url,
+                profile.user(),
+                profile.password());
+        try {
+            SessionInitializer.initialize(this.connection);
+        } catch (SQLException ex) {
+            this.connection.close();
+            this.connection = null;
+            throw ex;
+        }
     }
 
     public synchronized Connection getConnection() {

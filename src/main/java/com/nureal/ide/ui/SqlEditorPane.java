@@ -29,11 +29,15 @@ import java.awt.event.ActionEvent;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
 import java.awt.font.TextAttribute;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Supplier;
 
 /**
  * Uma aba de edicao SQL: editor com syntax highlighting e autocomplete.
@@ -48,8 +52,9 @@ public class SqlEditorPane extends JPanel {
     private static final int MAX_FONT_SIZE = 42;
 
 	private final RSyntaxTextArea textArea;
-    private final SqlFormatter formatter = new SqlFormatter();
+    private final Supplier<SqlFormatter> formatterSupplier;
     private int fontSize = BASE_FONT_SIZE;
+    private String fontFamily; // null/vazio = escolha automatica
 
     private final SearchContext searchContext = new SearchContext();
     private JPanel findBar;
@@ -59,15 +64,19 @@ public class SqlEditorPane extends JPanel {
     private JToggleButton wholeWordBtn;
     private JLabel findStatus;
 
-    public SqlEditorPane(SqlCompletionProvider provider, Runnable onRun) {
+    public SqlEditorPane(SqlCompletionProvider provider, Runnable onRun,
+            Supplier<SqlFormatter> formatterSupplier, String fontFamily) {
         super(new BorderLayout());
+
+        this.formatterSupplier = formatterSupplier;
+        this.fontFamily = fontFamily;
 
         textArea = new RSyntaxTextArea(20, 80);
         textArea.setSyntaxEditingStyle(SyntaxConstants.SYNTAX_STYLE_SQL);
         textArea.setCodeFoldingEnabled(true);
         textArea.setTabSize(2);
         textArea.setText("");
-        textArea.setFont(pickEditorFont(BASE_FONT_SIZE));
+        textArea.setFont(pickEditorFont(fontFamily, BASE_FONT_SIZE));
         textArea.setAntiAliasingEnabled(true);
         textArea.setFractionalFontMetricsEnabled(true);
         textArea.setPaintTabLines(true);
@@ -200,6 +209,16 @@ public class SqlEditorPane extends JPanel {
         textArea.setFont(textArea.getFont().deriveFont((float) fontSize));
     }
 
+    /** Troca a familia da fonte do editor, preservando o tamanho atual (zoom). */
+    public void setFontFamily(String family) {
+        this.fontFamily = family;
+        textArea.setFont(pickEditorFont(family, fontSize));
+    }
+
+    public String fontFamily() {
+        return fontFamily;
+    }
+
     private void zoom(int delta) {
         setFontSize(fontSize + delta);
     }
@@ -209,6 +228,15 @@ public class SqlEditorPane extends JPanel {
      * caso contrario, formata o texto inteiro da aba.
      */
     public void formatText() {
+        // Limpa marcacoes de "localizar todos" (Find) ANTES de trocar o texto:
+        // elas guardam offsets do documento antigo, e o RSyntaxTextArea
+        // continua tentando desenha-las depois do setText()/replaceSelection()
+        // — como os offsets nao existem mais no texto novo, viram retangulos
+        // tracejados em posicoes erradas (eram percebidos como "quadradinhos
+        // verdes" sobre o texto recem-formatado).
+        clearMarks();
+
+        SqlFormatter formatter = formatterSupplier.get();
         String selected = textArea.getSelectedText();
         if (selected != null && !selected.isBlank()) {
             textArea.replaceSelection(formatter.format(selected));
@@ -238,17 +266,17 @@ public class SqlEditorPane extends JPanel {
         wholeWordBtn.setToolTipText("Palavra inteira");
 
         Color iconColor = new Color(0x6B7280);
-        JButton prev = new JButton(Icons.chevron(12, iconColor, true));
+        JButton prev = new JButton(Icons.get(IconType.CHEVRON_LEFT, 12, iconColor));
         prev.setToolTipText("Anterior (Shift+Enter)");
         prev.addActionListener(e -> findPrevious());
-        JButton next = new JButton(Icons.chevron(12, iconColor, false));
+        JButton next = new JButton(Icons.get(IconType.CHEVRON_RIGHT, 12, iconColor));
         next.setToolTipText("Proximo (Enter)");
         next.addActionListener(e -> findNext());
         JButton replaceOne = new JButton("Substituir");
         replaceOne.addActionListener(e -> replaceOne());
         JButton replaceAll = new JButton("Substituir tudo");
         replaceAll.addActionListener(e -> replaceAll());
-        JButton close = new JButton(Icons.close(12, iconColor));
+        JButton close = new JButton(Icons.get(IconType.CLOSE, 12, iconColor));
         close.setToolTipText("Fechar (Esc)");
         close.addActionListener(e -> hideFindBar());
 
@@ -389,33 +417,67 @@ public class SqlEditorPane extends JPanel {
 
     // ---------- Fonte e caixa ----------
 
-    /**
-     * Escolhe a fonte monoespacada mais moderna disponivel e aplica um peso
-     * SEMIBOLD (sintetico) por cima, deixando o texto mais encorpado e legivel
-     * em codigos grandes — independente de existir uma variante "Medium" no SO.
-     */
-    private static Font pickEditorFont(int size) {
-        // Familias que ja sao "encorpadas" (peso medio/semibold) — se instaladas,
-        // usamos direto, sem aplicar peso sintetico por cima.
-        String[] heavy = {
-                "JetBrains Mono Medium", "JetBrainsMono Medium",
-                "Cascadia Code SemiBold", "Cascadia Mono SemiBold",
-                "Fira Code Medium", "Source Code Pro Medium", "IBM Plex Mono Medium"};
-        String[] regular = {
-                "JetBrains Mono", "Cascadia Code", "Cascadia Mono", "Fira Code",
-                "Iosevka", "IBM Plex Mono", "Hack", "Source Code Pro", "Roboto Mono",
-                "Ubuntu Mono", "Consolas", "SF Mono", "Menlo", "DejaVu Sans Mono",
-                "Liberation Mono", "Monaco", "Courier New"};
-        Set<String> available = new HashSet<>(Arrays.asList(GraphicsEnvironment
-                .getLocalGraphicsEnvironment().getAvailableFontFamilyNames()));
+    /** Familias "encorpadas" (peso medio/semibold) — usadas direto, sem peso sintetico. */
+    private static final String[] HEAVY_FONTS = {
+            "JetBrains Mono Medium", "JetBrainsMono Medium",
+            "Cascadia Code SemiBold", "Cascadia Mono SemiBold",
+            "Fira Code Medium", "Source Code Pro Medium", "IBM Plex Mono Medium"};
 
-        for (String family : heavy) {
+    /**
+     * Fontes monoespacadas candidatas, na ordem de preferencia. As 3
+     * primeiras sao as recomendadas para a Nureal IDE (JetBrains Mono por
+     * ter x-height alta e otima distincao 0/O; Fira Code pelas ligaduras de
+     * codigo; Consolas/SF Mono por serem sobrias e nativas do SO).
+     */
+    private static final String[] REGULAR_FONTS = {
+            "JetBrains Mono", "Fira Code", "SF Mono", "Consolas",
+            "Cascadia Code", "Cascadia Mono", "Iosevka", "IBM Plex Mono", "Hack",
+            "Source Code Pro", "Roboto Mono", "Ubuntu Mono", "Menlo",
+            "DejaVu Sans Mono", "Liberation Mono", "Monaco", "Courier New"};
+
+    /** Fontes (entre as candidatas acima) de fato instaladas neste sistema. */
+    public static List<String> availableEditorFonts() {
+        Set<String> available = installedFamilies();
+        List<String> result = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+        for (String family : REGULAR_FONTS) {
+            if (available.contains(family) && seen.add(family)) {
+                result.add(family);
+            }
+        }
+        return result;
+    }
+
+    private static Set<String> installedFamilies() {
+        return new HashSet<>(Arrays.asList(GraphicsEnvironment
+                .getLocalGraphicsEnvironment().getAvailableFontFamilyNames()));
+    }
+
+    /**
+     * Escolhe a fonte do editor no tamanho dado, aplicando um peso SEMIBOLD
+     * (sintetico) por cima quando necessario, para deixar o texto mais
+     * encorpado e legivel — independente de existir uma variante "Medium" no
+     * SO. Se {@code preferredFamily} for informada e estiver instalada, ela
+     * e usada; caso contrario, cai na deteccao automatica (melhor disponivel).
+     */
+    private static Font pickEditorFont(String preferredFamily, int size) {
+        Set<String> available = installedFamilies();
+
+        if (preferredFamily != null && !preferredFamily.isBlank()
+                && available.contains(preferredFamily)) {
+            Font base = new Font(preferredFamily, Font.PLAIN, size);
+            boolean alreadyHeavy = Arrays.asList(HEAVY_FONTS).contains(preferredFamily);
+            return alreadyHeavy ? base
+                    : base.deriveFont(Map.of(TextAttribute.WEIGHT, TextAttribute.WEIGHT_SEMIBOLD));
+        }
+
+        for (String family : HEAVY_FONTS) {
             if (available.contains(family)) {
                 return new Font(family, Font.PLAIN, size);
             }
         }
         Font base = new Font(Font.MONOSPACED, Font.PLAIN, size);
-        for (String family : regular) {
+        for (String family : REGULAR_FONTS) {
             if (available.contains(family)) {
                 base = new Font(family, Font.PLAIN, size);
                 break;

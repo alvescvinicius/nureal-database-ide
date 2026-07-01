@@ -64,7 +64,8 @@ public class ConnectionsPanel extends JPanel {
         title.setFont(title.getFont().deriveFont(Font.BOLD, 11f));
         title.setForeground(new java.awt.Color(0x6B7280));
 
-        JButton novo = new JButton("+ Nova");
+        JButton novo = new JButton("Nova");
+        novo.setIcon(Icons.get(IconType.NEW, 15, new Color(0x334155)));
         novo.addActionListener(e -> onNew());
 
         JPanel header = new JPanel(new BorderLayout());
@@ -114,8 +115,10 @@ public class ConnectionsPanel extends JPanel {
         JMenuItem connect = new JMenuItem("Conectar");
         connect.addActionListener(a -> connectSelected());
         JMenuItem edit = new JMenuItem("Editar...");
+        edit.setIcon(Icons.get(IconType.EDIT, 15, new Color(0x334155)));
         edit.addActionListener(a -> onEdit());
         JMenuItem delete = new JMenuItem("Excluir");
+        delete.setIcon(Icons.get(IconType.DELETE, 15, new Color(0x334155)));
         delete.addActionListener(a -> onDelete());
         menu.add(connect);
         menu.addSeparator();
@@ -190,6 +193,13 @@ public class ConnectionsPanel extends JPanel {
         if (p != null) {
             connectAction.accept(p);
         }
+    }
+
+    /** Ajusta a altura de cada cartao da lista (usado pelo zoom/modo compacto). */
+    public void setRowHeight(int height) {
+        list.setFixedCellHeight(height);
+        list.revalidate();
+        list.repaint();
     }
 
     /** Define o conjunto de conexoes atualmente conectadas (bolinha verde). */

@@ -1,63 +1,130 @@
 package com.nureal.ide.core.connection;
 
+import com.nureal.ide.core.security.LocalVault;
+
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.security.GeneralSecurityException;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 
 /**
- * Persiste as conexoes do usuario em um arquivo de texto na pasta pessoal:
+ * Persiste as conexoes do usuario (host, porta, usuario e — se marcado para
+ * salvar — a senha) em um arquivo cifrado na pasta pessoal:
  *   ~/.nureal-ide/connections.conf
  *
- * Formato (simples e robusto, sem dependencias de parser):
- *   [connection]
- *   name=...
- *   host=...
- *   port=3306
- *   schema=...
- *   user=...
- *   savePassword=true|false
- *   password=&lt;base64&gt;        (somente quando savePassword=true)
+ * O conteudo inteiro do arquivo e cifrado com AES-256/GCM atraves do
+ * {@link LocalVault}, usando uma chave gerada localmente na primeira
+ * gravacao (~/.nureal-ide/.connections.key, com permissoes restritas ao
+ * dono do perfil). Sem essa chave, o arquivo nao e legivel por ninguem —
+ * nem por um editor de texto, nem por outro programa. So a Nureal Database
+ * IDE, nesta maquina/perfil, consegue abrir as conexoes salvas.
  *
- * ATENCAO sobre a senha: quando salva, ela e apenas OFUSCADA em Base64 — isto
- * NAO e criptografia. Qualquer um com acesso ao arquivo consegue le-la.
- * Use "salvar senha" somente em maquinas confiaveis. A evolucao prevista e
- * integrar com o cofre de credenciais do SO (Windows Credential Manager).
+ * A senha continua guardada em Base64 *dentro* do conteudo cifrado (alem da
+ * cifragem do arquivo inteiro): isso evita que uma senha com quebra de linha
+ * quebre o parser linha-a-linha, e mantem o formato interno identico ao
+ * antigo, simplificando a migracao.
+ *
+ * Compatibilidade: se o arquivo encontrado ainda estiver no formato antigo
+ * (texto puro, nao cifrado), ele e lido e migrado automaticamente para o
+ * novo formato cifrado no proximo save().
  */
 public class ConnectionStore {
 
     private static final String DIR_NAME = ".nureal-ide";
     private static final String FILE_NAME = "connections.conf";
     private static final String RECORD_HEADER = "[connection]";
+    private static final String ENCRYPTED_MAGIC = "NUREAL-ENC-V1";
 
     private final Path file;
+    private final LocalVault vault;
 
     public ConnectionStore() {
         this(Paths.get(System.getProperty("user.home"), DIR_NAME, FILE_NAME));
     }
 
     public ConnectionStore(Path file) {
+        this(file, new LocalVault());
+    }
+
+    public ConnectionStore(Path file, LocalVault vault) {
         this.file = file;
+        this.vault = vault;
     }
 
     public Path location() {
         return file;
     }
 
-    /** Le as conexoes. Retorna lista vazia se o arquivo nao existir. */
+    /** Le as conexoes (cifradas ou, se ainda no formato antigo, migra ao salvar). Vazio se nao existir. */
     public List<ConnectionProfile> load() throws IOException {
-        List<ConnectionProfile> result = new ArrayList<>();
         if (!Files.exists(file)) {
-            return result;
+            return new ArrayList<>();
+        }
+        List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);
+        if (!lines.isEmpty() && ENCRYPTED_MAGIC.equals(lines.get(0).trim())) {
+            String cipherText = lines.size() > 1 ? lines.get(1).trim() : "";
+            if (cipherText.isEmpty()) {
+                return new ArrayList<>();
+            }
+            try {
+                String plain = vault.decrypt(cipherText);
+                return parseBlocks(plain);
+            } catch (GeneralSecurityException ex) {
+                throw new IOException("Nao foi possivel decifrar as conexoes salvas "
+                        + "(chave local ausente, trocada ou arquivo corrompido).", ex);
+            }
+        }
+        // Formato antigo (texto puro): migra para cifrado.
+        List<ConnectionProfile> legacy = parseBlocks(String.join("\n", lines));
+        try {
+            save(legacy);
+        } catch (IOException ignore) {
+            // Se a migracao falhar agora, tenta de novo no proximo save() explicito.
+        }
+        return legacy;
+    }
+
+    /** Grava todas as conexoes cifradas, criando a pasta se necessario. */
+    public void save(List<ConnectionProfile> connections) throws IOException {
+        Path parent = file.getParent();
+        if (parent != null) {
+            Files.createDirectories(parent);
         }
 
-        List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);
+        StringBuilder sb = new StringBuilder();
+        for (ConnectionProfile c : connections) {
+            sb.append(RECORD_HEADER).append('\n');
+            sb.append("name=").append(nullToEmpty(c.name())).append('\n');
+            sb.append("host=").append(nullToEmpty(c.host())).append('\n');
+            sb.append("port=").append(c.port()).append('\n');
+            sb.append("schema=").append(nullToEmpty(c.schema())).append('\n');
+            sb.append("user=").append(nullToEmpty(c.user())).append('\n');
+            sb.append("savePassword=").append(c.savePassword()).append('\n');
+            if (c.savePassword() && c.password() != null && !c.password().isEmpty()) {
+                sb.append("password=").append(encodeBase64(c.password())).append('\n');
+            }
+            sb.append('\n');
+        }
+
+        try {
+            String cipherText = vault.encrypt(sb.toString());
+            String out = ENCRYPTED_MAGIC + "\n" + cipherText + "\n";
+            Files.write(file, out.getBytes(StandardCharsets.UTF_8));
+        } catch (GeneralSecurityException ex) {
+            throw new IOException("Falha ao cifrar as conexoes: " + ex.getMessage(), ex);
+        }
+    }
+
+    /** Interpreta o conteudo (ja decifrado, ou o arquivo antigo em texto puro) em blocos. */
+    private static List<ConnectionProfile> parseBlocks(String content) {
+        List<ConnectionProfile> result = new ArrayList<>();
         Builder current = null;
-        for (String raw : lines) {
+        for (String raw : content.split("\n", -1)) {
             String line = raw.trim();
             if (line.isEmpty() || line.startsWith("#")) {
                 continue;
@@ -86,39 +153,11 @@ public class ConnectionStore {
         return result;
     }
 
-    /** Grava todas as conexoes, criando a pasta se necessario. */
-    public void save(List<ConnectionProfile> connections) throws IOException {
-        Path parent = file.getParent();
-        if (parent != null) {
-            Files.createDirectories(parent);
-        }
-
-        StringBuilder sb = new StringBuilder();
-        sb.append("# Nureal Database IDE - conexoes salvas\n");
-        sb.append("# Senha (quando salva) esta apenas ofuscada em Base64, NAO criptografada.\n\n");
-
-        for (ConnectionProfile c : connections) {
-            sb.append(RECORD_HEADER).append('\n');
-            sb.append("name=").append(nullToEmpty(c.name())).append('\n');
-            sb.append("host=").append(nullToEmpty(c.host())).append('\n');
-            sb.append("port=").append(c.port()).append('\n');
-            sb.append("schema=").append(nullToEmpty(c.schema())).append('\n');
-            sb.append("user=").append(nullToEmpty(c.user())).append('\n');
-            sb.append("savePassword=").append(c.savePassword()).append('\n');
-            if (c.savePassword() && c.password() != null && !c.password().isEmpty()) {
-                sb.append("password=").append(encode(c.password())).append('\n');
-            }
-            sb.append('\n');
-        }
-
-        Files.write(file, sb.toString().getBytes(StandardCharsets.UTF_8));
-    }
-
-    private static String encode(String plain) {
+    private static String encodeBase64(String plain) {
         return Base64.getEncoder().encodeToString(plain.getBytes(StandardCharsets.UTF_8));
     }
 
-    private static String decode(String encoded) {
+    private static String decodeBase64(String encoded) {
         try {
             return new String(Base64.getDecoder().decode(encoded), StandardCharsets.UTF_8);
         } catch (IllegalArgumentException e) {
@@ -148,7 +187,7 @@ public class ConnectionStore {
                 case "schema" -> schema = value.trim();
                 case "user" -> user = value.trim();
                 case "savePassword" -> savePassword = Boolean.parseBoolean(value.trim());
-                case "password" -> password = decode(value.trim());
+                case "password" -> password = decodeBase64(value.trim());
                 default -> { /* ignora chaves desconhecidas */ }
             }
         }

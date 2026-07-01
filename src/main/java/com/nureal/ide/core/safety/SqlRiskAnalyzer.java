@@ -51,6 +51,22 @@ public final class SqlRiskAnalyzer {
         return riskReason(sql) != null;
     }
 
+    /**
+     * Verdadeiro se a instrucao e DDL (CREATE/ALTER/DROP/RENAME) — ou seja,
+     * pode ter criado, removido ou alterado tabelas, views, procedures,
+     * functions ou triggers, exigindo recarregar o navegador de objetos.
+     */
+    public static boolean isStructuralChange(String sql) {
+        if (sql == null || sql.isBlank()) {
+            return false;
+        }
+        String first = firstWord(stripCommentsAndStrings(sql));
+        return switch (first) {
+            case "create", "alter", "drop", "rename" -> true;
+            default -> false;
+        };
+    }
+
     /** Primeira palavra (minuscula) da instrucao, ignorando pontuacao inicial. */
     private static String firstWord(String s) {
         int i = 0;
