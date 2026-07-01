@@ -52,7 +52,7 @@ final class ColumnMetadataPopup {
         this.table = table;
         this.header = header;
         this.metadataSource = metadataSource;
-        this.showTimer = new Timer(SHOW_DELAY_MS, _ -> showForPoint(lastPoint));
+        this.showTimer = new Timer(SHOW_DELAY_MS, k -> showForPoint(lastPoint));
         this.showTimer.setRepeats(false);
     }
 

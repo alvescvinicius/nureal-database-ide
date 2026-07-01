@@ -51,7 +51,7 @@ final class CellContentViewer {
         area.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
 
         JButton copy = new JButton("Copiar");
-        copy.addActionListener(_ -> copyToClipboard(area.getText()));
+        copy.addActionListener(k -> copyToClipboard(area.getText()));
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT));
         buttons.add(copy);
 

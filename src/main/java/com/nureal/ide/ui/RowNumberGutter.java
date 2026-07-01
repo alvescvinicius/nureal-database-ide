@@ -46,7 +46,7 @@ final class RowNumberGutter {
         list.setFixedCellWidth(54);
         list.setFocusable(false);
         final Font font = list.getFont().deriveFont(Font.PLAIN);
-        ListCellRenderer<Object> renderer = (_, value, index, _, _) -> {
+        ListCellRenderer<Object> renderer = (lst, value, index, selected, focused) -> {
             JLabel l = new JLabel(value == null ? "" : value.toString());
             l.setHorizontalAlignment(SwingConstants.RIGHT);
             l.setOpaque(true);
@@ -57,18 +57,18 @@ final class RowNumberGutter {
             return l;
         };
         list.setCellRenderer(renderer);
-        model.addTableModelListener(_ -> {
+        model.addTableModelListener(k -> {
             list.revalidate();
             list.repaint();
         });
         // mantem a numeracao/destaque em sincronia com ordenacao/filtro/selecao
         if (table.getRowSorter() != null) {
-            table.getRowSorter().addRowSorterListener(_ -> {
+            table.getRowSorter().addRowSorterListener(k -> {
                 list.revalidate();
                 list.repaint();
             });
         }
-        table.getSelectionModel().addListSelectionListener(_ -> list.repaint());
+        table.getSelectionModel().addListSelectionListener(k -> list.repaint());
 
         list.addMouseListener(new MouseAdapter() {
             @Override

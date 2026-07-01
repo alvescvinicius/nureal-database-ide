@@ -130,7 +130,7 @@ final class ResultContextMenu {
 
     private static JMenuItem item(String text, Runnable action) {
         JMenuItem item = new JMenuItem(text);
-        item.addActionListener(_ -> action.run());
+        item.addActionListener(k -> action.run());
         return item;
     }
 
