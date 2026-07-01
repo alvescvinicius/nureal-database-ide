@@ -116,7 +116,7 @@ final class ResultGrid extends JPanel {
                 persistLayout();
             }
         });
-        sorter.rowSorter().addRowSorterListener(e -> persistLayout());
+        sorter.rowSorter().addRowSorterListener(_ -> persistLayout());
 
         JScrollPane scroll = new JScrollPane(table);
         scroll.setRowHeaderView(RowNumberGutter.build(table, model, selection));
@@ -238,7 +238,7 @@ final class ResultGrid extends JPanel {
             @Override public void removeUpdate(DocumentEvent e) { apply.run(); }
             @Override public void changedUpdate(DocumentEvent e) { apply.run(); }
         });
-        filterColumnBox.addActionListener(e -> apply.run());
+        filterColumnBox.addActionListener(_ -> apply.run());
 
         JPanel bar = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 3));
         JLabel label = new JLabel("Filtro:");

@@ -112,7 +112,7 @@ final class ResultHeaderContextMenu {
         showMenu.addSeparator();
         for (String name : hidden) {
             JCheckBoxMenuItem item = new JCheckBoxMenuItem(name, false);
-            item.addActionListener(e -> runAndNotify(() -> ColumnVisibility.show(table, name), onLayoutChanged));
+            item.addActionListener(_ -> runAndNotify(() -> ColumnVisibility.show(table, name), onLayoutChanged));
             showMenu.add(item);
         }
         return showMenu;
@@ -135,7 +135,7 @@ final class ResultHeaderContextMenu {
 
     private static JMenuItem item(String text, Runnable action) {
         JMenuItem item = new JMenuItem(text);
-        item.addActionListener(e -> action.run());
+        item.addActionListener(_ -> action.run());
         return item;
     }
 }

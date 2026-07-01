@@ -66,7 +66,7 @@ public class ConnectionsPanel extends JPanel {
 
         JButton novo = new JButton("Nova");
         novo.setIcon(Icons.get(IconType.NEW, 15, new Color(0x334155)));
-        novo.addActionListener(e -> onNew());
+        novo.addActionListener(_ -> onNew());
 
         JPanel header = new JPanel(new BorderLayout());
         header.setOpaque(false);
@@ -113,13 +113,13 @@ public class ConnectionsPanel extends JPanel {
         }
         JPopupMenu menu = new JPopupMenu();
         JMenuItem connect = new JMenuItem("Conectar");
-        connect.addActionListener(a -> connectSelected());
+        connect.addActionListener(_ -> connectSelected());
         JMenuItem edit = new JMenuItem("Editar...");
         edit.setIcon(Icons.get(IconType.EDIT, 15, new Color(0x334155)));
-        edit.addActionListener(a -> onEdit());
+        edit.addActionListener(_ -> onEdit());
         JMenuItem delete = new JMenuItem("Excluir");
         delete.setIcon(Icons.get(IconType.DELETE, 15, new Color(0x334155)));
-        delete.addActionListener(a -> onDelete());
+        delete.addActionListener(_ -> onDelete());
         menu.add(connect);
         menu.addSeparator();
         menu.add(edit);

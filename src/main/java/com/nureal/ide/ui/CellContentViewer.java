@@ -3,7 +3,6 @@ package com.nureal.ide.ui;
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JDialog;
-import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
@@ -52,7 +51,7 @@ final class CellContentViewer {
         area.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
 
         JButton copy = new JButton("Copiar");
-        copy.addActionListener(e -> copyToClipboard(area.getText()));
+        copy.addActionListener(_ -> copyToClipboard(area.getText()));
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT));
         buttons.add(copy);
 

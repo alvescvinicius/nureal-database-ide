@@ -1,8 +1,8 @@
 package com.nureal.ide.core.dialect;
 
-import com.nureal.ide.core.connection.ConnectionProfile;
-
 import java.util.List;
+
+import com.nureal.ide.core.connection.ConnectionProfile;
 
 /**
  * Implementacao para MySQL. Le metadados via information_schema em UMA
@@ -40,15 +40,7 @@ public class MySqlDialect implements DatabaseDialect {
         return url.toString();
 
     }
-
-    private static void appendParameter(StringBuilder url, String key, String value) {
-
-        url.append(url.indexOf("?") >= 0 ? '&' : '?')
-                .append(key)
-                .append('=')
-                .append(value);
-    }
-
+    
     @Override
     public String schemasQuery() {
         return "SELECT SCHEMA_NAME FROM information_schema.SCHEMATA "

@@ -1,7 +1,6 @@
 package com.nureal.ide.ui;
 
 import javax.swing.JTable;
-import javax.swing.RowSorter;
 import javax.swing.RowSorter.SortKey;
 import javax.swing.SortOrder;
 import javax.swing.table.TableModel;
@@ -42,8 +41,6 @@ final class ColumnSorter {
 
     ColumnSorter(JTable table) {
         this.sorter = new TableRowSorter<>(table.getModel()) {
-            private static final long serialVersionUID = 1L;
-
             @Override
             public void toggleSortOrder(int column) {
                 // Ver o javadoc da classe: o JTable chama isto sozinho a

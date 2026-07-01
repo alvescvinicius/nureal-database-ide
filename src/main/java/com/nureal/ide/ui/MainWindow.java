@@ -383,13 +383,13 @@ public class MainWindow extends JFrame {
 		runButton.setIcon(Icons.get(IconType.RUN, 14, Color.WHITE));
 		runButton.setToolTipText("Executar (Ctrl+Enter ou F5)");
 		runButton.setEnabled(false);
-		runButton.addActionListener(e -> onRun());
+		runButton.addActionListener(_ -> onRun());
 		styleRunButton(); // Mantém o verde arredondado da Nureal
 
 		JButton formatButton = new JButton("Formatar");
 		formatButton.setIcon(Icons.get(IconType.FORMAT, 14, MUTED));
 		formatButton.setToolTipText("Formatar SQL (Ctrl+Shift+F)");
-		formatButton.addActionListener(e -> {
+		formatButton.addActionListener(_ -> {
 			SqlEditorPane editor = currentEditor();
 			if (editor != null) {
 				editor.formatText();
@@ -399,7 +399,7 @@ public class MainWindow extends JFrame {
 		JButton formatMenuButton = new JButton(new com.formdev.flatlaf.icons.FlatMenuArrowIcon());
 		formatMenuButton.setToolTipText("Presets e opcoes de formatacao");
 		formatMenuButton
-				.addActionListener(e -> buildFormatMenu().show(formatMenuButton, 0, formatMenuButton.getHeight()));
+				.addActionListener(_ -> buildFormatMenu().show(formatMenuButton, 0, formatMenuButton.getHeight()));
 
 		// Segmentação limpa do FlatLaf (une os dois botões mantendo o fundo padrão do
 		// tema)
@@ -430,19 +430,19 @@ public class MainWindow extends JFrame {
 		// --- Botões da Direita ---
 		JButton toggleSidebar = new JButton(Icons.get(IconType.PANEL_LEFT, 16, MUTED));
 		toggleSidebar.setToolTipText("Mostrar/ocultar painel lateral (Ctrl+B)");
-		toggleSidebar.addActionListener(e -> toggleSidebar());
+		toggleSidebar.addActionListener(_ -> toggleSidebar());
 
 		JButton toggleResults = new JButton(Icons.get(IconType.PANEL_BOTTOM, 16, MUTED));
 		toggleResults.setToolTipText("Mostrar/ocultar resultados (Ctrl+J)");
-		toggleResults.addActionListener(e -> toggleResults());
+		toggleResults.addActionListener(_ -> toggleResults());
 
 		JButton layoutButton = new JButton(Icons.get(IconType.SETTINGS, 16, MUTED));
 		layoutButton.setToolTipText("Layout, zoom e modo compacto");
-		layoutButton.addActionListener(e -> buildLayoutMenu().show(layoutButton, 0, layoutButton.getHeight()));
+		layoutButton.addActionListener(_ -> buildLayoutMenu().show(layoutButton, 0, layoutButton.getHeight()));
 
 		themeButton = new JButton(Icons.get(IconType.THEME_DARK, 16, MUTED));
 		themeButton.setToolTipText("Alternar tema claro/escuro");
-		themeButton.addActionListener(e -> toggleTheme());
+		themeButton.addActionListener(_ -> toggleTheme());
 
 		// Mantém os botões da direita planos/transparentes (estilo ícones discretos)
 		for (JButton btn : new JButton[] { toggleSidebar, toggleResults, layoutButton, themeButton }) {
@@ -477,18 +477,18 @@ public class MainWindow extends JFrame {
 
 		JMenuItem moveSidebar = new JMenuItem(
 				sidebarOnRight ? "Mover painel lateral para a esquerda" : "Mover painel lateral para a direita");
-		moveSidebar.addActionListener(a -> toggleSidebarSide());
+		moveSidebar.addActionListener(_ -> toggleSidebarSide());
 		menu.add(moveSidebar);
 
 		JMenuItem toggleOrientation = new JMenuItem(resultsVertical ? "Resultados embaixo do editor (horizontal)"
 				: "Resultados ao lado do editor (vertical)");
-		toggleOrientation.addActionListener(a -> toggleResultsOrientation());
+		toggleOrientation.addActionListener(_ -> toggleResultsOrientation());
 		menu.add(toggleOrientation);
 
 		menu.addSeparator();
 
 		JCheckBoxMenuItem compact = new JCheckBoxMenuItem("Modo compacto", compactMode);
-		compact.addActionListener(a -> toggleCompactMode());
+		compact.addActionListener(_ -> toggleCompactMode());
 		menu.add(compact);
 
 		menu.addSeparator();
@@ -498,12 +498,12 @@ public class MainWindow extends JFrame {
 			int pct = (int) Math.round(ZOOM_LEVELS[i] * 100);
 			String mark = (i == zoomIndex) ? "✓ " : "      ";
 			JMenuItem item = new JMenuItem(mark + pct + "%");
-			item.addActionListener(a -> setZoomIndex(idx));
+			item.addActionListener(_ -> setZoomIndex(idx));
 			zoomMenu.add(item);
 		}
 		zoomMenu.addSeparator();
 		JMenuItem reset = new JMenuItem("Redefinir (Ctrl+0)");
-		reset.addActionListener(a -> resetZoom());
+		reset.addActionListener(_ -> resetZoom());
 		zoomMenu.add(reset);
 		menu.add(zoomMenu);
 
@@ -533,7 +533,7 @@ public class MainWindow extends JFrame {
 
 		JCheckBoxMenuItem upper = new JCheckBoxMenuItem("Caixa alta para palavras-chave (SELECT, FROM...)",
 				formatState.upperKeywords());
-		upper.addActionListener(a -> {
+		upper.addActionListener(_ -> {
 			formatState = new FormatPreferences.State(formatState.style(), !formatState.upperKeywords(),
 					formatState.indentJson(), formatState.editorFontFamily());
 			saveFormatState();
@@ -542,7 +542,7 @@ public class MainWindow extends JFrame {
 
 		JCheckBoxMenuItem json = new JCheckBoxMenuItem("Indentar funcoes JSON (JSON_OBJECT/JSON_ARRAY)",
 				formatState.indentJson());
-		json.addActionListener(a -> {
+		json.addActionListener(_ -> {
 			formatState = new FormatPreferences.State(formatState.style(), formatState.upperKeywords(),
 					!formatState.indentJson(), formatState.editorFontFamily());
 			saveFormatState();
@@ -551,7 +551,7 @@ public class MainWindow extends JFrame {
 
 		menu.addSeparator();
 		JMenuItem chooseFont = new JMenuItem("Escolher fonte do editor...");
-		chooseFont.addActionListener(a -> chooseEditorFont());
+		chooseFont.addActionListener(_ -> chooseEditorFont());
 		menu.add(chooseFont);
 
 		return menu;
@@ -560,7 +560,7 @@ public class MainWindow extends JFrame {
 	private JMenuItem formatStyleItem(SqlFormatter.Style style, String label) {
 		String mark = (formatState.style() == style) ? "✓ " : "      ";
 		JMenuItem item = new JMenuItem(mark + label);
-		item.addActionListener(a -> {
+		item.addActionListener(_ -> {
 			formatState = new FormatPreferences.State(style, formatState.upperKeywords(), formatState.indentJson(),
 					formatState.editorFontFamily());
 			saveFormatState();
@@ -1024,7 +1024,7 @@ public class MainWindow extends JFrame {
 		refreshObjectsButton.setBorderPainted(false);
 		refreshObjectsButton.setContentAreaFilled(false);
 		refreshObjectsButton.setToolTipText("Atualizar objetos (Ctrl+R)");
-		refreshObjectsButton.addActionListener(e -> refreshObjectTree(true));
+		refreshObjectsButton.addActionListener(_ -> refreshObjectTree(true));
 
 		JPanel headerRow = new JPanel(new BorderLayout());
 		headerRow.setOpaque(false);
@@ -1050,10 +1050,10 @@ public class MainWindow extends JFrame {
 		editorTabs = new JTabbedPane();
 		editorTabs.putClientProperty("JTabbedPane.tabClosable", true);
 		editorTabs.putClientProperty("JTabbedPane.tabCloseCallback",
-				(BiConsumer<JTabbedPane, Integer>) (pane, index) -> closeQueryTab(index));
+				(BiConsumer<JTabbedPane, Integer>) (_, index) -> closeQueryTab(index));
 		// Selecionar a aba "+" abre uma nova query; qualquer outra troca salva a
 		// sessao.
-		editorTabs.addChangeListener(e -> {
+		editorTabs.addChangeListener(_ -> {
 			if (addingTab) {
 				return; // evita reentrancia: insertTab desloca a selecao da aba "+"
 			}
@@ -1184,11 +1184,11 @@ public class MainWindow extends JFrame {
 		}
 		JPopupMenu menu = new JPopupMenu();
 		JMenuItem rename = new JMenuItem("Renomear...");
-		rename.addActionListener(a -> renameTab(target));
+		rename.addActionListener(_ -> renameTab(target));
 		JMenuItem close = new JMenuItem("Fechar");
-		close.addActionListener(a -> closeTabComponent(target));
+		close.addActionListener(_ -> closeTabComponent(target));
 		JMenuItem closeOthers = new JMenuItem("Fechar as outras");
-		closeOthers.addActionListener(a -> closeOtherTabs(target));
+		closeOthers.addActionListener(_ -> closeOtherTabs(target));
 		menu.add(rename);
 		menu.addSeparator();
 		menu.add(close);
@@ -1379,7 +1379,7 @@ public class MainWindow extends JFrame {
 	/** Agenda um salvamento (debounce) ~1s apos a ultima alteracao. */
 	private void scheduleSave() {
 		if (autosaveTimer == null) {
-			autosaveTimer = new Timer(1000, e -> saveSession());
+			autosaveTimer = new Timer(1000, _ -> saveSession());
 			autosaveTimer.setRepeats(false);
 		}
 		autosaveTimer.restart();
@@ -1437,7 +1437,7 @@ public class MainWindow extends JFrame {
 		JButton orientationToggle = new JButton();
 		orientationToggle.setBorderPainted(false);
 		orientationToggle.setContentAreaFilled(false);
-		orientationToggle.addActionListener(e -> toggleResultsOrientation());
+		orientationToggle.addActionListener(_ -> toggleResultsOrientation());
 		updateOrientationToggleIcon(orientationToggle);
 		this.resultsOrientationButton = orientationToggle;
 
@@ -1497,7 +1497,7 @@ public class MainWindow extends JFrame {
 
 		JButton cancel = new JButton("Cancelar");
 		cancel.setAlignmentX(Component.CENTER_ALIGNMENT);
-		cancel.addActionListener(e -> cancelExecution());
+		cancel.addActionListener(_ -> cancelExecution());
 
 		JPanel card = new JPanel();
 		card.setLayout(new BoxLayout(card, BoxLayout.Y_AXIS));
@@ -2066,9 +2066,9 @@ public class MainWindow extends JFrame {
 
 		JPopupMenu menu = new JPopupMenu();
 		JMenuItem one = new JMenuItem("Exportar este resultado para Excel...");
-		one.addActionListener(a -> exportSingle(idx));
+		one.addActionListener(_ -> exportSingle(idx));
 		JMenuItem all = new JMenuItem("Exportar todos (uma aba por resultado)...");
-		all.addActionListener(a -> exportAll());
+		all.addActionListener(_ -> exportAll());
 		menu.add(one);
 		menu.add(all);
 		menu.show(resultTabs, e.getX(), e.getY());

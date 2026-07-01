@@ -57,7 +57,7 @@ public class MetadataService {
                             rs.getString("COLUMN_NAME"),
                             rs.getString("COLUMN_TYPE"),
                             rs.getInt("ORDINAL_POSITION"));
-                    columnsByObject.computeIfAbsent(object, k -> new ArrayList<>()).add(col);
+                    columnsByObject.computeIfAbsent(object, _ -> new ArrayList<>()).add(col);
                 }
             }
         }
@@ -161,7 +161,7 @@ public class MetadataService {
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     String name = rs.getString("INDEX_NAME");
-                    cols.computeIfAbsent(name, k -> new ArrayList<>())
+                    cols.computeIfAbsent(name, _ -> new ArrayList<>())
                             .add(rs.getString("COLUMN_NAME"));
                     unique.put(name, rs.getInt("NON_UNIQUE") == 0);
                     type.put(name, rs.getString("INDEX_TYPE"));
@@ -187,9 +187,9 @@ public class MetadataService {
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     String name = rs.getString("CONSTRAINT_NAME");
-                    cols.computeIfAbsent(name, k -> new ArrayList<>())
+                    cols.computeIfAbsent(name, _ -> new ArrayList<>())
                             .add(rs.getString("COLUMN_NAME"));
-                    refCols.computeIfAbsent(name, k -> new ArrayList<>())
+                    refCols.computeIfAbsent(name, _ -> new ArrayList<>())
                             .add(rs.getString("REFERENCED_COLUMN_NAME"));
                     refTable.put(name, rs.getString("REFERENCED_TABLE_NAME"));
                     onUpdate.put(name, rs.getString("UPDATE_RULE"));
