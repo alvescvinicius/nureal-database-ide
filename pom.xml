@@ -13,11 +13,11 @@
 	<description>IDE para desenvolvedores de banco de dados (MySQL primeiro,
 		multi-banco depois).</description>
 
-	<properties>
-		<maven.compiler.release>21</maven.compiler.release>
-		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-		<exec.mainClass>com.nureal.ide.App</exec.mainClass>
-	</properties>
+    <properties>
+        <maven.compiler.release>17</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <exec.mainClass>com.nureal.ide.App</exec.mainClass>
+    </properties>
 
 	<dependencies>
 		<!-- Look-and-Feel flat moderno (tema claro/escuro, sotaque verde) -->
