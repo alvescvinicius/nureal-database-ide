@@ -1,6 +1,7 @@
 package com.nureal.ide.ui;
 
 import com.nureal.ide.core.connection.ConnectionManager;
+import com.nureal.ide.core.log.AppLogger;
 import com.nureal.ide.core.metadata.MetadataService;
 import com.nureal.ide.core.metadata.model.TableDetails;
 
@@ -35,6 +36,17 @@ final class TableMetadataCache {
 
     private static String key(String schema, String table) {
         return ((schema == null ? "" : schema) + "." + table).toLowerCase(Locale.ROOT);
+    }
+
+    /**
+     * Descarta tudo o que ja foi carregado. Chamado apos DDL estrutural (ou
+     * refresh manual do navegador de objetos): sem isto, a tela de
+     * propriedades de uma tabela alterada (colunas/PK/indices/FKs) continua
+     * mostrando os dados de ANTES do ALTER/DROP ate o app ser reiniciado,
+     * mesmo que a arvore de objetos em si ja tenha sido atualizada.
+     */
+    void clear() {
+        cache.clear();
     }
 
     /**
@@ -75,6 +87,7 @@ final class TableMetadataCache {
                 try {
                     cache.put(cacheKey, get());
                 } catch (Exception ex) {
+                    AppLogger.warning("Falha ao carregar metadados da tabela " + cacheKey, ex);
                     cache.put(cacheKey, new TableDetails(List.of(), List.of(), List.of()));
                 }
                 if (onLoaded != null) {

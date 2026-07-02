@@ -43,15 +43,18 @@ public class ConnectionsPanel extends JPanel {
     private static final long serialVersionUID = 1L;
 	private final ConnectionStore store;
     private final Consumer<ConnectionProfile> connectAction;
+    private final Consumer<ConnectionProfile> disconnectAction;
     private final DefaultListModel<ConnectionProfile> model = new DefaultListModel<>();
     private final JList<ConnectionProfile> list = new JList<>(model);
     private final Set<String> connectedNames = new HashSet<>();
     private String connectingName;
 
-    public ConnectionsPanel(ConnectionStore store, Consumer<ConnectionProfile> connectAction) {
+    public ConnectionsPanel(ConnectionStore store, Consumer<ConnectionProfile> connectAction,
+            Consumer<ConnectionProfile> disconnectAction) {
         super(new BorderLayout(0, 8));
         this.store = store;
         this.connectAction = connectAction;
+        this.disconnectAction = disconnectAction;
         setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
 
         add(buildHeader(), BorderLayout.NORTH);
@@ -123,9 +126,16 @@ public class ConnectionsPanel extends JPanel {
         if (idx >= 0) {
             list.setSelectedIndex(idx);
         }
+        ConnectionProfile selected = list.getSelectedValue();
+        boolean connected = selected != null && connectedNames.contains(selected.name());
+
         JPopupMenu menu = new JPopupMenu();
         JMenuItem connect = new JMenuItem("Conectar");
+        connect.setEnabled(!connected);
         connect.addActionListener(a -> connectSelected());
+        JMenuItem disconnect = new JMenuItem("Desconectar");
+        disconnect.setEnabled(connected);
+        disconnect.addActionListener(a -> disconnectSelected());
         JMenuItem edit = new JMenuItem("Editar...");
         edit.setIcon(Icons.get(IconType.EDIT, 15, new Color(0x334155)));
         edit.addActionListener(a -> onEdit());
@@ -133,6 +143,7 @@ public class ConnectionsPanel extends JPanel {
         delete.setIcon(Icons.get(IconType.DELETE, 15, new Color(0x334155)));
         delete.addActionListener(a -> onDelete());
         menu.add(connect);
+        menu.add(disconnect);
         menu.addSeparator();
         menu.add(edit);
         menu.add(delete);
@@ -204,6 +215,13 @@ public class ConnectionsPanel extends JPanel {
         ConnectionProfile p = list.getSelectedValue();
         if (p != null) {
             connectAction.accept(p);
+        }
+    }
+
+    private void disconnectSelected() {
+        ConnectionProfile p = list.getSelectedValue();
+        if (p != null) {
+            disconnectAction.accept(p);
         }
     }
 

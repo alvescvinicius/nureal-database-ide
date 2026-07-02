@@ -3,13 +3,13 @@
 IDE para desenvolvedores de banco de dados. Desktop (Windows), começando por **MySQL**
 e evoluindo para multi-banco. Foco principal: **autocomplete ultrarrápido** ao editar SQL.
 
-## Status: protótipo em evolução (v0.3)
+## Status: protótipo em evolução (v0.4)
 
 O que já funciona:
 
 - **Gerenciador de conexões persistente**: conexões salvas em arquivo na pasta do
   usuário, listadas no painel esquerdo. Duplo-clique conecta. Nova/Editar/Excluir.
-- Conexão MySQL com senha opcional (salva ofuscada ou solicitada ao conectar)
+- Conexão MySQL com senha opcional (salva cifrada ou solicitada ao conectar)
 - Leitura da estrutura do banco em **uma única consulta** ao `information_schema`
 - Cache de metadados em memória (autocomplete nunca consulta o banco ao digitar)
 - **Autocomplete sensível ao contexto do cursor**:
@@ -17,6 +17,11 @@ O que já funciona:
   - após `alias.` ou `tabela.` → sugere as colunas daquela tabela (resolve o alias)
   - demais posições → palavras-chave + tabelas + colunas
 - Editor SQL com syntax highlighting; execução com F5; resultados em grade
+- **Formatador de SQL** (Ctrl+Shift+F) com 3 presets de estilo (RIVER, STANDARD,
+  COMMA_FIRST) e caixa de palavra-chave configurável
+- **Confirmação de segurança** antes de rodar comandos de risco (DELETE/UPDATE
+  sem WHERE, DROP, TRUNCATE, ALTER/CREATE/RENAME)
+- **Exportação dos resultados para Excel** (.xlsx, via Apache POI/SXSSF)
 - Browser de objetos (árvore de tabelas/colunas)
 
 ## Onde as conexões são salvas
@@ -25,8 +30,12 @@ O que já funciona:
 <pasta do usuário>/.nureal-ide/connections.conf
 ```
 
-> A senha, quando "Salvar senha" está marcado, fica apenas **ofuscada em Base64** —
-> isto **não é criptografia**. Próximo passo: integrar com o Windows Credential Manager.
+> A senha, quando "Salvar senha" está marcado, é cifrada com **AES-256/GCM**
+> usando uma chave própria desta instalação, gerada no primeiro uso e guardada em
+> `~/.nureal-ide/.connections.key` (permissões restritas ao dono do perfil).
+> Isto **não é** um cofre do sistema operacional (Windows Credential Manager/DPAPI):
+> quem tiver acesso total ao perfil do usuário pode, em teoria, achar a chave.
+> Próximo passo: mover a guarda da chave para o Windows Credential Manager (via DPAPI).
 
 ## Arquitetura
 
@@ -108,7 +117,6 @@ jpackage --type msi --name "Nureal Database IDE" --app-version 0.1.0 `
 1. Índice Trie por prefixo no cache de metadados (escala para milhares de colunas)
 2. Pool de conexões (HikariCP) e múltiplas abas/sessões
 3. Resultados em streaming (fetch size + grid virtualizado)
-4. Exportação dos resultados para Excel (Apache POI / SXSSF)
-5. Cofre de credenciais do SO para as senhas (Windows Credential Manager)
-6. Suporte multi-banco (Postgres, SQL Server, Oracle)
+4. Cofre de credenciais do SO para as senhas (Windows Credential Manager)
+5. Suporte multi-banco (Postgres, SQL Server, Oracle)
 ```

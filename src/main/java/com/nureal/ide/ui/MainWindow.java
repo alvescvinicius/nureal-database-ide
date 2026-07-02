@@ -93,6 +93,7 @@ import com.nureal.ide.core.dialect.MySqlDialect;
 import com.nureal.ide.core.export.ExcelExporter;
 import com.nureal.ide.core.format.FormatPreferences;
 import com.nureal.ide.core.format.SqlFormatter;
+import com.nureal.ide.core.log.AppLogger;
 import com.nureal.ide.core.metadata.MetadataCache;
 import com.nureal.ide.core.metadata.MetadataService;
 import com.nureal.ide.core.metadata.model.ColumnDetail;
@@ -234,6 +235,7 @@ public class MainWindow extends JFrame {
 		try {
 			state = uiPrefsStore.load();
 		} catch (Exception ex) {
+			AppLogger.warning("Falha ao carregar preferencias de UI; usando padrao", ex);
 			state = UiPreferences.State.defaults();
 		}
 		sidebarOnRight = state.sidebarOnRight();
@@ -250,6 +252,7 @@ public class MainWindow extends JFrame {
 		try {
 			formatState = formatPrefsStore.load();
 		} catch (Exception ex) {
+			AppLogger.warning("Falha ao carregar preferencias de formatacao; usando padrao", ex);
 			formatState = FormatPreferences.State.defaults();
 		}
 	}
@@ -258,6 +261,7 @@ public class MainWindow extends JFrame {
 		try {
 			formatPrefsStore.save(formatState);
 		} catch (Exception ex) {
+			AppLogger.warning("Falha ao salvar preferencias de formatacao", ex);
 			if (statusBar != null) {
 				statusBar.setText(" Aviso: nao foi possivel salvar as preferencias de formatacao: " + ex.getMessage());
 			}
@@ -895,6 +899,7 @@ public class MainWindow extends JFrame {
 		try {
 			uiPrefsStore.save(new UiPreferences.State(sidebarOnRight, resultsVertical, zoomIndex, compactMode));
 		} catch (Exception ex) {
+			AppLogger.warning("Falha ao salvar preferencias de UI", ex);
 			if (statusBar != null) {
 				statusBar.setText(" Aviso: nao foi possivel salvar as preferencias de UI: " + ex.getMessage());
 			}
@@ -963,7 +968,7 @@ public class MainWindow extends JFrame {
 	// ---------- Lado esquerdo ----------
 
 	private JComponent buildLeftSide() {
-		connectionsPanel = new ConnectionsPanel(connectionStore, this::connectTo);
+		connectionsPanel = new ConnectionsPanel(connectionStore, this::connectTo, this::disconnectFrom);
 		connectionsPanel.setRowHeight(scaledPx(54));
 		JSplitPane split = new JSplitPane(JSplitPane.VERTICAL_SPLIT, connectionsPanel, buildObjectBrowser());
 		split.setResizeWeight(0.5);
@@ -995,6 +1000,14 @@ public class MainWindow extends JFrame {
 		objectTree.addMouseListener(new MouseAdapter() {
 			@Override
 			public void mouseClicked(MouseEvent e) {
+				// Setinha de "trocar esquema" na ponta direita da linha do
+				// schema (raiz) — ver ObjectTreeCellRenderer#paintComponent.
+				// So no clique simples, antes de qualquer outra coisa: um
+				// duplo-clique ali nao deve contar como dois acionamentos.
+				if (e.getClickCount() == 1 && isSchemaSwitchArrowClick(e)) {
+					switchSchema();
+					return;
+				}
 				// So SCHEMA_PICK reage a duplo clique aqui — objetos
 				// abriveis (tabela/view/...) deixam o duplo clique 100%
 				// livre para o expand/recolher nativo do JTree. "Abrir
@@ -1054,16 +1067,27 @@ public class MainWindow extends JFrame {
 			}
 		});
 
+		JButton switchSchemaButton = new JButton(Icons.get(IconType.DATABASE, 13, MUTED));
+		switchSchemaButton.setBorderPainted(false);
+		switchSchemaButton.setContentAreaFilled(false);
+		switchSchemaButton.setToolTipText("Trocar esquema / ver todos os esquemas");
+		switchSchemaButton.addActionListener(e -> switchSchema());
+
 		JButton refreshObjectsButton = new JButton(Icons.get(IconType.REFRESH, 13, MUTED));
 		refreshObjectsButton.setBorderPainted(false);
 		refreshObjectsButton.setContentAreaFilled(false);
 		refreshObjectsButton.setToolTipText("Atualizar objetos (Ctrl+R)");
 		refreshObjectsButton.addActionListener(e -> refreshObjectTree(true));
 
+		JPanel headerButtons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
+		headerButtons.setOpaque(false);
+		headerButtons.add(switchSchemaButton);
+		headerButtons.add(refreshObjectsButton);
+
 		JPanel headerRow = new JPanel(new BorderLayout());
 		headerRow.setOpaque(false);
 		headerRow.add(sectionHeader("OBJETOS"), BorderLayout.WEST);
-		headerRow.add(refreshObjectsButton, BorderLayout.EAST);
+		headerRow.add(headerButtons, BorderLayout.EAST);
 
 		JPanel top = new JPanel(new BorderLayout(0, 8));
 		top.setOpaque(false);
@@ -1330,6 +1354,7 @@ public class MainWindow extends JFrame {
 		try {
 			savedSessions = sessionStore.load();
 		} catch (Exception ex) {
+			AppLogger.warning("Falha ao carregar sessoes salvas; iniciando vazio", ex);
 			savedSessions = new LinkedHashMap<>();
 		}
 		Workspace scratch = new Workspace(SCRATCH, null, connectionManager);
@@ -1478,8 +1503,9 @@ public class MainWindow extends JFrame {
 			currentSchema = null;
 			completionProvider.refresh(null);
 			objectSearch.setEnabled(false);
-			objectTree.setModel(new DefaultTreeModel(
-					new DefaultMutableTreeNode(w.profile == null ? "Sem conexao" : "Selecione um esquema")));
+			String label = (w.profile == null) ? "Sem conexao"
+					: (w.mgr.isConnected() ? "Selecione um esquema" : "Desconectado");
+			objectTree.setModel(new DefaultTreeModel(new DefaultMutableTreeNode(label)));
 		}
 		refreshConnectionIndicators();
 		runButton.setEnabled(w.mgr.isConnected());
@@ -1524,6 +1550,7 @@ public class MainWindow extends JFrame {
 		try {
 			sessionStore.save(sessions);
 		} catch (Exception ex) {
+			AppLogger.warning("Falha ao salvar a sessao", ex);
 			if (statusBar != null) {
 				statusBar.setText(" Aviso: nao foi possivel salvar a sessao: " + ex.getMessage());
 			}
@@ -1837,6 +1864,39 @@ public class MainWindow extends JFrame {
 		}.execute();
 	}
 
+	/**
+	 * Desconecta explicitamente (menu de contexto do ConnectionsPanel). Fecha
+	 * a conexao JDBC mas MANTEM o workspace — as abas de SQL abertas continuam
+	 * la, so sem conexao ativa (mesma logica do workspace "sem conexao" ja
+	 * usada pelo SCRATCH). Para reconectar, e so clicar/dar duplo-clique na
+	 * conexao de novo — se ela permitir varios esquemas, volta a perguntar
+	 * qual abrir.
+	 */
+	private void disconnectFrom(ConnectionProfile profile) {
+		Workspace w = workspaces.get(profile.name());
+		if (w == null || !w.mgr.isConnected()) {
+			return;
+		}
+		int ok = JOptionPane.showConfirmDialog(this,
+				"Desconectar de \"" + profile.name() + "\"?",
+				"Desconectar", JOptionPane.YES_NO_OPTION);
+		if (ok != JOptionPane.YES_OPTION) {
+			return;
+		}
+		if (activeWorkspace == w) {
+			closeOpenCursors();
+		}
+		w.mgr.close();
+		w.schema = null;
+		w.schemaList = null;
+		if (activeWorkspace == w) {
+			currentSchema = null;
+			activateWorkspace(w);
+		}
+		refreshConnectionIndicators();
+		statusBar.setText(" Desconectado de " + profile.name() + ".");
+	}
+
 	/** Monta a arvore com a lista de esquemas (duplo-clique abre o esquema). */
 	private void buildSchemaPicker(List<String> schemas) {
 		currentSchema = null;
@@ -1871,7 +1931,8 @@ public class MainWindow extends JFrame {
 					SchemaInfo schema = get();
 					if (activeWorkspace != null) {
 						activeWorkspace.schema = schema;
-						activeWorkspace.schemaList = null;
+						// mantem schemaList: e o que permite "Trocar esquema..." depois,
+						// sem precisar desconectar e reconectar (ver maybeShowObjectContextMenu).
 					}
 					metadataCache.set(schema);
 					completionProvider.refresh(schema);
@@ -2180,6 +2241,7 @@ public class MainWindow extends JFrame {
 					}
 				} catch (Exception ex) {
 					Throwable cause = (ex.getCause() != null) ? ex.getCause() : ex;
+					AppLogger.warning("Falha ao carregar mais linhas", ex);
 					c.exhausted = true;
 					c.close();
 					openCursors.remove(c);
@@ -2228,6 +2290,7 @@ public class MainWindow extends JFrame {
 					get();
 					statusBar.setText(" Todas as linhas carregadas (" + r.model().getRowCount() + ").");
 				} catch (Exception ex) {
+					AppLogger.warning("Falha ao carregar linhas", ex);
 					statusBar.setText(" Erro ao carregar linhas: " + ex.getMessage());
 				}
 				refresh.run();
@@ -2485,6 +2548,7 @@ public class MainWindow extends JFrame {
 		try {
 			return Class.forName(md.getColumnClassName(col));
 		} catch (Exception ex) {
+			AppLogger.fine("Nao foi possivel resolver a classe da coluna via metadata; usando Object", ex);
 			return Object.class;
 		}
 	}
@@ -2573,18 +2637,26 @@ public class MainWindow extends JFrame {
 					SchemaInfo schema = get();
 					if (activeWorkspace != null) {
 						activeWorkspace.schema = schema;
-						activeWorkspace.schemaList = null;
+						// mantem schemaList (ver openSchema) para "Trocar esquema..." continuar disponivel.
 					}
 					metadataCache.set(schema);
 					completionProvider.refresh(schema);
+					// Descarta detalhes de tabela (colunas/PK/indices/FKs) em cache: apos
+					// um DDL estrutural, a tela de propriedades nao pode continuar
+					// mostrando o estado ANTERIOR ao ALTER/DROP so porque a tabela ja
+					// tinha sido aberta antes nesta sessao.
+					tableMetadataCache.clear();
 					populateTree(schema);
 					if (statusBar != null) {
 						statusBar.setText(" Objetos atualizados (" + schema.tables().size() + " tabelas).");
 					}
 				} catch (Exception ex) {
-					Throwable c = (ex.getCause() != null) ? ex.getCause() : ex;
+					// Erro visivel de verdade (dialogo), nao so na status bar: um
+					// refresh que falha silenciosamente (manual ou automatico apos
+					// DDL) e indistinguivel de "nao fez nada" para quem esta usando.
+					showError("Falha ao atualizar objetos", ex);
 					if (statusBar != null) {
-						statusBar.setText(" Erro ao atualizar objetos: " + c.getMessage());
+						statusBar.setText(" Erro ao atualizar objetos.");
 					}
 				}
 			}
@@ -2732,10 +2804,76 @@ public class MainWindow extends JFrame {
 		objectTree.setSelectionRow(row);
 		TreePath path = objectTree.getPathForRow(row);
 		Object node = ((DefaultMutableTreeNode) path.getLastPathComponent()).getUserObject();
-		if (!(node instanceof ObjNode obj) || !isOpenableObject(obj.type())) {
+		if (!(node instanceof ObjNode obj)) {
+			return;
+		}
+		if (obj.type() == NodeType.SCHEMA) {
+			buildSchemaRootContextMenu().show(objectTree, e.getX(), e.getY());
+			return;
+		}
+		if (!isOpenableObject(obj.type())) {
 			return;
 		}
 		buildObjectContextMenu(obj).show(objectTree, e.getX(), e.getY());
+	}
+
+	/**
+	 * Menu de contexto da RAIZ da arvore (o schema aberto): hoje so tem
+	 * "Trocar esquema...", habilitado quando a conexao deu acesso a mais de
+	 * um esquema (login sem esquema fixo no cadastro — ver {@code pickSchema}
+	 * em {@code connectTo}). Sem isto, quem entra com um usuario multi-schema
+	 * e abre um esquema fica "preso" nele ate desconectar e reconectar.
+	 */
+	private JPopupMenu buildSchemaRootContextMenu() {
+		JPopupMenu menu = new JPopupMenu();
+		JMenuItem switchSchema = new JMenuItem("Trocar esquema...");
+		boolean canSwitch = activeWorkspace != null
+				&& activeWorkspace.schemaList != null
+				&& !activeWorkspace.schemaList.isEmpty();
+		switchSchema.setEnabled(canSwitch);
+		if (!canSwitch) {
+			switchSchema.setToolTipText("Esta conexao usa um esquema fixo definido no cadastro.");
+		}
+		switchSchema.addActionListener(a -> switchSchema());
+		menu.add(switchSchema);
+		return menu;
+	}
+
+	/**
+	 * Verdadeiro se o clique caiu em cima da setinha de "trocar esquema"
+	 * desenhada na ponta direita da linha do schema (raiz) — ver
+	 * {@link ObjectTreeCellRenderer#paintComponent}. So a linha 0 (raiz)
+	 * conta, e so quando ela de fato representa um schema aberto (a raiz
+	 * tambem e usada como texto simples "Sem conexao"/"Selecione um
+	 * esquema", sem essa seta).
+	 */
+	private boolean isSchemaSwitchArrowClick(MouseEvent e) {
+		if (objectTree.getRowForLocation(e.getX(), e.getY()) != 0) {
+			return false;
+		}
+		Object root = objectTree.getModel().getRoot();
+		Object userObj = (root instanceof DefaultMutableTreeNode n) ? n.getUserObject() : null;
+		if (!(userObj instanceof ObjNode obj) || obj.type() != NodeType.SCHEMA) {
+			return false;
+		}
+		int zoneWidth = ObjectTreeCellRenderer.SCHEMA_SWITCH_ICON_SIZE + ObjectTreeCellRenderer.SCHEMA_SWITCH_ICON_MARGIN + 8;
+		return e.getX() >= objectTree.getWidth() - zoneWidth;
+	}
+
+	/** Volta para a lista de esquemas da conexao ativa (ver {@link #buildSchemaPicker}). */
+	private void switchSchema() {
+		if (activeWorkspace == null || !activeWorkspace.mgr.isConnected()) {
+			statusBar.setText(" Conecte-se a uma base antes de trocar de esquema.");
+			return;
+		}
+		if (activeWorkspace.schemaList == null || activeWorkspace.schemaList.isEmpty()) {
+			statusBar.setText(" Esta conexao usa um esquema fixo definido no cadastro.");
+			return;
+		}
+		activeWorkspace.schema = null;
+		currentSchema = null;
+		buildSchemaPicker(activeWorkspace.schemaList);
+		statusBar.setText(" Selecione um esquema (" + activeWorkspace.schemaList.size() + " disponiveis).");
 	}
 
 	private JPopupMenu buildObjectContextMenu(ObjNode obj) {
@@ -2904,6 +3042,7 @@ public class MainWindow extends JFrame {
 					}
 				} catch (Exception ex) {
 					Throwable c = (ex.getCause() != null) ? ex.getCause() : ex;
+					AppLogger.warning("Falha ao carregar detalhes do objeto", ex);
 					statusBar.setText(" Erro ao carregar detalhes: " + c.getMessage());
 				}
 			}
@@ -2947,6 +3086,7 @@ public class MainWindow extends JFrame {
 					target.setText(get());
 				} catch (Exception ex) {
 					Throwable c = (ex.getCause() != null) ? ex.getCause() : ex;
+					AppLogger.warning("Falha ao carregar a definicao do objeto", ex);
 					target.setText("Erro ao carregar a definicao: " + c.getMessage());
 				}
 				target.setCaretPosition(0);
@@ -3008,6 +3148,7 @@ public class MainWindow extends JFrame {
 	 * colar num chamado de suporte etc.).
 	 */
 	private void showError(String title, Exception ex) {
+		AppLogger.warning(title, ex);
 		Throwable cause = (ex.getCause() != null) ? ex.getCause() : ex;
 		String message = (cause.getMessage() != null) ? cause.getMessage() : cause.toString();
 		JTextArea area = new JTextArea(message);

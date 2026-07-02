@@ -15,7 +15,10 @@ final class TemporalCellRenderer extends AbstractTypedCellRenderer {
     private static final long serialVersionUID = 1L;
 
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("dd/MM/yyyy");
-    private static final DateTimeFormatter DATETIME_FMT = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm");
+    // Sempre com segundos e milissegundos — sem isto, valores que so diferem
+    // nesses digitos (ex.: linhas geradas em lote no mesmo minuto) pareciam
+    // identicos na grade.
+    private static final DateTimeFormatter DATETIME_FMT = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm:ss.SSS");
 
     @Override
     int alignment(Object value) {

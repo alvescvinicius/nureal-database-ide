@@ -17,6 +17,8 @@ import java.util.EnumSet;
 import java.util.Set;
 import java.nio.file.attribute.PosixFilePermission;
 
+import com.nureal.ide.core.log.AppLogger;
+
 /**
  * Cofre local: gera (no primeiro uso) e guarda uma chave AES-256 propria
  * desta instalacao, em {@code ~/.nureal-ide/.connections.key}, e usa essa
@@ -145,6 +147,7 @@ public final class LocalVault {
             Files.setAttribute(keyFile, "dos:hidden", true);
         } catch (Exception notWindows) {
             // nao e NTFS/Windows: ignora, nao ha atributo "hidden" no POSIX puro
+            AppLogger.fine("Atributo dos:hidden indisponivel (esperado fora do Windows/NTFS)", notWindows);
         }
     }
 }

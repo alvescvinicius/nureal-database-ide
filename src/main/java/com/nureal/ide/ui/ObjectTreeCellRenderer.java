@@ -2,6 +2,7 @@ package com.nureal.ide.ui;
 
 import com.formdev.flatlaf.FlatLaf;
 
+import javax.swing.Icon;
 import javax.swing.JTree;
 import javax.swing.tree.DefaultMutableTreeNode;
 import javax.swing.tree.DefaultTreeCellRenderer;
@@ -9,6 +10,7 @@ import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Font;
+import java.awt.Graphics;
 import java.util.Locale;
 
 /**
@@ -25,10 +27,12 @@ import java.util.Locale;
  * {@code setShowsRootHandles(false)}) — a MESMA bolinha verde/ambar/cinza da
  * lista de conexoes (ver {@link ConnectionsPanel#statusDot}).</li>
  * <li>Categoria (Tabelas/Visualizacoes/Procedures/Functions/Triggers) e os
- * objetos dentro dela: SO o nome em negrito, na cor da categoria — nenhum
- * fundo. Uma categoria SEM nenhum objeto (contador "(0)") fica em cinza
- * mudo e sem negrito, para nao competir visualmente com as que tem
- * conteudo de verdade (ver {@link #applyCategoryColor}).</li>
+ * objetos dentro dela: SEM cor por categoria (removida a pedido do usuario —
+ * "gritava" demais) — texto no peso/cor padrao da arvore. O UNICO destaque e
+ * negrito num cinza medio (nunca preto forte) enquanto o galho estiver
+ * EXPANDIDO, ou seja, o "caminho" por onde se esta navegando agora (ver
+ * {@link #applyPathStyle}). Uma categoria SEM nenhum objeto (contador "(0)")
+ * fica sempre em cinza mudo e peso normal, nunca em negrito.</li>
  * <li>Fundo de linha so existe para a SELECAO (ver {@link #backgroundFor}) —
  * o MESMO cinza clarinho em QUALQUER linha, inclusive o schema. Cobre a
  * linha inteira via um truque padrao de JTree: o
@@ -42,6 +46,20 @@ import java.util.Locale;
 final class ObjectTreeCellRenderer extends DefaultTreeCellRenderer {
 
     private static final long serialVersionUID = 1L;
+
+    /**
+     * Tamanho/margem da setinha de "trocar esquema" desenhada na ponta
+     * direita da linha do schema (raiz) — visiveis aqui (pacote) porque
+     * {@code MainWindow} precisa dos MESMOS valores para saber se um clique
+     * caiu em cima dela (ver {@code MainWindow#isSchemaSwitchArrowClick}).
+     * A acao em si (trocar esquema no menu de contexto/botao do cabecalho)
+     * ja existia; esta seta e so mais um jeito de chegar nela, sem precisar
+     * do clique direito.
+     */
+    static final int SCHEMA_SWITCH_ICON_SIZE = 12;
+    static final int SCHEMA_SWITCH_ICON_MARGIN = 10;
+
+    private boolean paintSwitchArrow;
 
     ObjectTreeCellRenderer() {
         // openIcon/closedIcon/leafIcon sao os icones-padrao que o
@@ -67,28 +85,51 @@ final class ObjectTreeCellRenderer extends DefaultTreeCellRenderer {
 
         DefaultMutableTreeNode node = (value instanceof DefaultMutableTreeNode n) ? n : null;
         MainWindow.ObjNode obj = (node != null && node.getUserObject() instanceof MainWindow.ObjNode o) ? o : null;
+        boolean isSchema = obj != null && obj.type() == MainWindow.NodeType.SCHEMA;
         if (obj != null) {
             boolean emptyCategory = obj.type() == MainWindow.NodeType.CATEGORY && node.getChildCount() == 0;
-            style(obj, emptyCategory);
+            style(obj, emptyCategory, expanded);
         }
-        applyRowBackground(tree, selected);
+        paintSwitchArrow = isSchema;
+        // A linha do schema precisa da largura esticada SEMPRE (nao so quando
+        // selecionada) — sem isto nao ha como saber, em paintComponent, onde
+        // fica a "ponta direita" da linha pra desenhar a setinha.
+        applyRowBackground(tree, selected, isSchema);
         return this;
+    }
+
+    @Override
+    public void paintComponent(Graphics g) {
+        super.paintComponent(g);
+        if (!paintSwitchArrow) {
+            return;
+        }
+        Icon icon = Icons.get(IconType.CHEVRON_LEFT, SCHEMA_SWITCH_ICON_SIZE, pathColor());
+        int x = getWidth() - SCHEMA_SWITCH_ICON_MARGIN - SCHEMA_SWITCH_ICON_SIZE;
+        int y = (getHeight() - SCHEMA_SWITCH_ICON_SIZE) / 2;
+        icon.paintIcon(this, g, x, y);
     }
 
     /**
      * Fundo da linha — SO existe para a selecao (ver {@link #backgroundFor});
      * fora disso o label fica transparente, como um JLabel comum dentro de
      * um JTree. Quando ha cor, cobre a linha INTEIRA — ver javadoc da
-     * classe.
+     * classe. {@code stretchWidth}: forca a mesma largura esticada mesmo SEM
+     * selecao — usado so pela linha do schema, que precisa saber sua propria
+     * largura em {@link #paintComponent} pra desenhar a setinha na ponta
+     * direita (ver {@link #SCHEMA_SWITCH_ICON_SIZE}).
      */
-    private void applyRowBackground(JTree tree, boolean selected) {
+    private void applyRowBackground(JTree tree, boolean selected, boolean stretchWidth) {
         Color bg = backgroundFor(selected);
         if (bg == null) {
             setOpaque(false);
+        } else {
+            setOpaque(true);
+            setBackground(bg);
+        }
+        if (bg == null && !stretchWidth) {
             return;
         }
-        setOpaque(true);
-        setBackground(bg);
         Dimension pref = getPreferredSize();
         // Superestima a largura (arvore inteira, com folga) em vez de tentar
         // calcular a posicao X exata da celula (indentacao + icones variam
@@ -103,13 +144,13 @@ final class ObjectTreeCellRenderer extends DefaultTreeCellRenderer {
      * {@link #selectionBackground}) para QUALQUER linha, inclusive o schema
      * (raiz) — mesma barra para todo mundo. NAO selecionada: sempre
      * {@code null} — nenhuma categoria pinta fundo, so o texto (ver
-     * {@link #style}/{@link #applyCategoryColor}).
+     * {@link #style}/{@link #applyPathStyle}).
      */
     private static Color backgroundFor(boolean selected) {
         return selected ? selectionBackground() : null;
     }
 
-    private void style(MainWindow.ObjNode obj, boolean emptyCategory) {
+    private void style(MainWindow.ObjNode obj, boolean emptyCategory, boolean expanded) {
         switch (obj.type()) {
             case SCHEMA -> {
                 setIcon(ConnectionsPanel.statusDot(MainWindow.ACCENT));
@@ -120,19 +161,14 @@ final class ObjectTreeCellRenderer extends DefaultTreeCellRenderer {
                 // ex.: abertura de conexao/schema).
                 setText(obj.display().toUpperCase(Locale.ROOT));
             }
-            // Cabecalho da categoria: negrito + cor da categoria (e' um
-            // titulo de secao, pode pesar mais) — OU, quando ela nao tem
-            // nenhum objeto dentro (contador "(0)"), cinza mudo e peso
-            // normal, pra nao chamar atencao a toa.
-            case CATEGORY -> applyCategoryColor(obj.kind(), emptyCategory, true);
-            // Os proprios objetos abriveis (tabela/view/procedure/function/
-            // trigger): cor da categoria, mas SEM negrito — negrito em
-            // cada uma das linhas (o cabecalho ja e negrito) deixava tudo
-            // com o mesmo peso visual, uma "parede" de verde forte sem
-            // hierarquia entre o titulo da secao e os itens dentro dela.
-            // Cor sozinha (sem negrito) ja basta pra identificar a
-            // categoria, e fica bem mais leve de olhar numa lista longa.
-            case TABLE, VIEW, ROUTINE, TRIGGER -> applyCategoryColor(obj.kind(), false, false);
+            // Categoria e os proprios objetos abriveis (tabela/view/
+            // procedure/function/trigger): SEM cor por categoria (removida a
+            // pedido do usuario — ficava "gritando" demais). O unico
+            // destaque agora e peso da fonte, e so enquanto o galho estiver
+            // EXPANDIDO — ou seja, o "caminho" por onde estamos navegando
+            // agora fica em negrito; o resto usa o texto padrao da arvore.
+            case CATEGORY -> applyPathStyle(emptyCategory, expanded);
+            case TABLE, VIEW, ROUTINE, TRIGGER -> applyPathStyle(false, expanded);
             // Coluna: o texto (nome em negrito + tipo em cinza) e todo
             // montado via HTML em columnHtml — sem cor de categoria (fica
             // discreta de proposito, ja aninhada duas vezes).
@@ -144,27 +180,27 @@ final class ObjectTreeCellRenderer extends DefaultTreeCellRenderer {
     }
 
     /**
-     * Cor (+ opcionalmente negrito) do texto para uma categoria. {@code
-     * muted}: cinza e peso normal, ignora {@code bold} (categoria vazia,
-     * contador "(0)"). Caso contrario: cor propria da categoria (ver
-     * {@link #textColorFor}), em negrito so quando {@code bold} — usado
-     * para diferenciar o CABECALHO da categoria (negrito, "titulo de
-     * secao") dos objetos dentro dela (cor sozinha, sem negrito — ver
-     * {@link #style}).
+     * Estilo "caminho atual", sem cor por categoria: {@code muted} (categoria
+     * vazia, contador "(0)") sempre fica cinza mudo e peso normal — nunca ha
+     * nada pra expandir ali. Fora isso, so quando o galho esta EXPANDIDO
+     * ({@code expanded}) o texto vira negrito num cinza medio (nao um preto
+     * forte, ver {@link #pathColor}) — colapsado, fica no peso/cor padrao do
+     * JTree, sem nenhum destaque.
      */
-    private void applyCategoryColor(String kind, boolean muted, boolean bold) {
+    private void applyPathStyle(boolean muted, boolean expanded) {
         if (muted) {
             setForeground(GridTheme.MUTED_TEXT);
             return;
         }
-        Color text = textColorFor(kind);
-        if (text == null) {
-            return;
-        }
-        setForeground(text);
-        if (bold) {
+        if (expanded) {
+            setForeground(pathColor());
             setFont(getFont().deriveFont(Font.BOLD));
         }
+    }
+
+    /** Cinza medio para o "caminho atual" em negrito — deliberadamente NAO preto forte. */
+    private static Color pathColor() {
+        return FlatLaf.isLafDark() ? new Color(0xC7CBD1) : new Color(0x4B5563);
     }
 
     /** Nome da coluna em negrito + tipo em cinza mudo, ex.: <b>id</b> : bigint. */
@@ -187,29 +223,5 @@ final class ObjectTreeCellRenderer extends DefaultTreeCellRenderer {
      */
     private static Color selectionBackground() {
         return FlatLaf.isLafDark() ? new Color(0x3A3F47) : new Color(0xD8DCE3);
-    }
-
-    /**
-     * Cor de TEXTO de uma categoria, indexada pelo MESMO "kind" ja usado no
-     * resto da IDE para identificar o objeto ("TABLE", "VIEW", "PROCEDURE",
-     * "FUNCTION", "TRIGGER" — ver {@code MainWindow.ObjNode#kind}). Duas
-     * variantes: clara (tema padrao) e uma mais viva/clara (tema escuro,
-     * senao ficaria escura demais sobre fundo escuro), escolhida via
-     * {@link FlatLaf#isLafDark()} — reavaliada a cada pintura, entao segue
-     * o toggle de tema automaticamente, sem precisar recriar a arvore.
-     */
-    private static Color textColorFor(String kind) {
-        if (kind == null) {
-            return null;
-        }
-        boolean dark = FlatLaf.isLafDark();
-        return switch (kind) {
-            case "TABLE" -> dark ? new Color(0x5EEAD4) : new Color(0x0F766E);
-            case "VIEW" -> dark ? new Color(0xC4B5FD) : new Color(0x6D28D9);
-            case "PROCEDURE" -> dark ? new Color(0xFDBA74) : new Color(0xC2410C);
-            case "FUNCTION" -> dark ? new Color(0x86EFAC) : new Color(0x15803D);
-            case "TRIGGER" -> dark ? new Color(0xF9A8D4) : new Color(0xBE185D);
-            default -> null;
-        };
     }
 }

@@ -14,6 +14,7 @@ import org.fife.ui.rsyntaxtextarea.folding.FoldParserManager;
 
 import com.formdev.flatlaf.FlatLaf;
 import com.formdev.flatlaf.FlatLightLaf;
+import com.nureal.ide.core.log.AppLogger;
 import com.nureal.ide.ui.MainWindow;
 import com.nureal.ide.ui.SqlFoldParser;
 
@@ -25,6 +26,8 @@ import com.nureal.ide.ui.SqlFoldParser;
 public class App {
 
     public static void main(String[] args) {
+        AppLogger.init();
+
         // carrega as customizacoes em resources/com/nureal/ide/theme/FlatLaf.properties
         FlatLaf.registerCustomDefaultsSource("com.nureal.ide.theme");
 

@@ -6,6 +6,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 
+import com.nureal.ide.core.log.AppLogger;
+
 /**
  * Persiste as preferencias de formatacao de SQL e a fonte do editor em
  *   ~/.nureal-ide/format.conf
@@ -104,6 +106,7 @@ public class FormatPreferences {
         try {
             return SqlFormatter.Style.valueOf(s.trim());
         } catch (Exception ex) {
+            AppLogger.fine("Valor de estilo de formatacao invalido no arquivo de preferencias: " + s, ex);
             return DEFAULT_STYLE;
         }
     }

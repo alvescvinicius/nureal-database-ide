@@ -10,6 +10,8 @@ import java.awt.datatransfer.StringSelection;
 import java.sql.Blob;
 import java.sql.Clob;
 
+import com.nureal.ide.core.log.AppLogger;
+
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JDialog;
@@ -106,6 +108,7 @@ final class CellContentViewer {
                     area.setText(looksLikeJson(text) ? prettyPrintJson(text) : text);
                     area.setCaretPosition(0);
                 } catch (Exception ex) {
+                    AppLogger.warning("Falha ao ler o CLOB", ex);
                     area.setText("Falha ao ler o CLOB: " + ex.getMessage());
                 }
             }
@@ -130,6 +133,7 @@ final class CellContentViewer {
                 try {
                     area.setText(get());
                 } catch (Exception ex) {
+                    AppLogger.warning("Falha ao ler o BLOB", ex);
                     area.setText("Falha ao ler o BLOB: " + ex.getMessage());
                 }
                 area.setCaretPosition(0);
