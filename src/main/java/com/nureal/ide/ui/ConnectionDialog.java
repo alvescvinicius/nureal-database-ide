@@ -26,8 +26,11 @@ public final class ConnectionDialog {
                 BorderLayout.NORTH);
         panel.add(password, BorderLayout.CENTER);
 
+        // Centraliza na JANELA do chamador, nao no componente exato passado
+        // (que pode ser um painel pequeno como ConnectionsPanel, nao a janela
+        // inteira) — ver DialogUtil.
         int result = JOptionPane.showConfirmDialog(
-                parent, panel, "Senha - " + profile.name(),
+                DialogUtil.owner(parent), panel, "Senha - " + profile.name(),
                 JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
 
         if (result != JOptionPane.OK_OPTION) {

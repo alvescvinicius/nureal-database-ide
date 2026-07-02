@@ -131,7 +131,8 @@ final class ResultHeaderContextMenu {
 
     private static void promptFilter(JTable table, ResultContextMenu.FilterController filter,
             int modelColumn, String columnName) {
-        String value = JOptionPane.showInputDialog(table, "Filtrar \"" + columnName + "\" contendo:");
+        // Centraliza na JANELA (nao na grade em si) — ver DialogUtil.
+        String value = JOptionPane.showInputDialog(DialogUtil.owner(table), "Filtrar \"" + columnName + "\" contendo:");
         if (value != null) {
             filter.filterByValue(modelColumn, value);
         }

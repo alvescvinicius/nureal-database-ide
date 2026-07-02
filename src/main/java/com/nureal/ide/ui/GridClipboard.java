@@ -318,7 +318,8 @@ final class GridClipboard {
 
     /** Pergunta o nome da tabela (default "tabela"). null = cancelado. */
     private static String promptTableName(Component parent) {
-        String name = JOptionPane.showInputDialog(parent, "Nome da tabela:", "tabela");
+        // Centraliza na JANELA (nao na grade em si) — ver DialogUtil.
+        String name = JOptionPane.showInputDialog(DialogUtil.owner(parent), "Nome da tabela:", "tabela");
         if (name == null) {
             return null;
         }

@@ -3,21 +3,31 @@ package com.nureal.ide.ui;
 import com.nureal.ide.core.metadata.model.ForeignKeyInfo;
 import com.nureal.ide.core.metadata.model.IndexInfo;
 
+import javax.swing.AbstractAction;
 import javax.swing.BorderFactory;
 import javax.swing.JComponent;
+import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
+import javax.swing.JRootPane;
 import javax.swing.JTable;
+import javax.swing.KeyStroke;
+import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 import javax.swing.table.JTableHeader;
 import java.awt.Font;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
+import java.awt.Window;
+import java.awt.event.ActionEvent;
+import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.event.MouseMotionAdapter;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -129,10 +139,48 @@ final class ColumnMetadataPopup {
      * com os mesmos metadados — usado pelo item de menu "Informacoes da
      * coluna" (menu de contexto da celula e do cabecalho), para quem quiser
      * ler com calma ou selecionar/copiar o texto.
+     *
+     * NAO-MODAL de proposito: e um JDialog comum (nao um
+     * {@code JOptionPane.showMessageDialog}, que bloqueia e so fecha no OK)
+     * para poder fechar sozinho quando o usuario clica fora dele — igual um
+     * popup, so que sem perder a selecao/copia de texto. O fechamento usa
+     * {@code windowLostFocus}: como o dialogo nao e modal, clicar em
+     * QUALQUER outra janela (a principal, outro dialogo, etc.) tira o foco
+     * da janela do dialogo e dispara o fechamento; clicar DENTRO dele (para
+     * selecionar um valor, por exemplo) so move o foco entre campos da MESMA
+     * janela, o que nao conta como perda de foco da janela. Esc tambem
+     * fecha, como reforco.
      */
     static void showDialog(java.awt.Component parent, ColumnMetadata meta) {
-        javax.swing.JOptionPane.showMessageDialog(parent, buildContent(meta, true),
-                "Informacoes da coluna: " + meta.label(), javax.swing.JOptionPane.PLAIN_MESSAGE);
+        Window owner = SwingUtilities.getWindowAncestor(parent);
+        JDialog dialog = new JDialog(owner, "Informacoes da coluna: " + meta.label(),
+                JDialog.ModalityType.MODELESS);
+        dialog.setResizable(false);
+        dialog.getContentPane().add(buildContent(meta, true));
+        dialog.pack();
+        // Centralizado na JANELA (owner), nao no componente que disparou o
+        // menu (uma celula/cabecalho especifico dentro da grade) — senao o
+        // dialogo aparece em qualquer canto da tela, dependendo de onde a
+        // celula estava. Ver DialogUtil para o mesmo padrao em todo o app.
+        dialog.setLocationRelativeTo(owner);
+
+        dialog.addWindowFocusListener(new WindowAdapter() {
+            @Override
+            public void windowLostFocus(WindowEvent e) {
+                dialog.dispose();
+            }
+        });
+
+        JRootPane root = dialog.getRootPane();
+        root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), "close-dialog");
+        root.getActionMap().put("close-dialog", new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                dialog.dispose();
+            }
+        });
+
+        dialog.setVisible(true);
     }
 
     /** Monta o painel com os metadados formatados (popup de hover — texto NAO selecionavel, por design). */

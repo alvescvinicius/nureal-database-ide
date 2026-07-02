@@ -42,8 +42,8 @@ final class CellContentViewer {
     }
 
     static void show(Component parent, String columnName, Object rawValue) {
-        JDialog dialog = new JDialog(SwingUtilities.getWindowAncestor(parent),
-                "Conteudo completo: " + columnName, JDialog.ModalityType.MODELESS);
+        java.awt.Window owner = SwingUtilities.getWindowAncestor(parent);
+        JDialog dialog = new JDialog(owner, "Conteudo completo: " + columnName, JDialog.ModalityType.MODELESS);
         dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
 
         JTextArea area = new JTextArea();
@@ -62,7 +62,11 @@ final class CellContentViewer {
         dialog.add(new JScrollPane(area), BorderLayout.CENTER);
         dialog.add(buttons, BorderLayout.SOUTH);
         dialog.setSize(new Dimension(640, 480));
-        dialog.setLocationRelativeTo(parent);
+        // Centralizado na JANELA (owner), nao na celula que disparou o menu
+        // "Ver conteudo completo" — senao o dialogo aparece perto daquela
+        // celula especifica, em qualquer canto da grade/tela. Mesmo padrao de
+        // ColumnMetadataPopup (ver DialogUtil para os JOptionPane).
+        dialog.setLocationRelativeTo(owner);
 
         loadContent(rawValue, area, copy);
         dialog.setVisible(true);

@@ -20,6 +20,7 @@ import java.awt.event.MouseEvent;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.io.File;
+import java.io.IOException;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
@@ -103,6 +104,7 @@ import com.nureal.ide.core.metadata.model.IndexInfo;
 import com.nureal.ide.core.metadata.model.SchemaInfo;
 import com.nureal.ide.core.metadata.model.TableDetails;
 import com.nureal.ide.core.metadata.model.TableInfo;
+import com.nureal.ide.core.queries.SavedQueryStore;
 import com.nureal.ide.core.safety.SqlRiskAnalyzer;
 import com.nureal.ide.core.session.SessionStore;
 import com.nureal.ide.core.sql.SqlStatementSplitter;
@@ -144,6 +146,7 @@ public class MainWindow extends JFrame {
 	private final SqlCompletionProvider completionProvider = new SqlCompletionProvider(dialect.keywords());
 	private final ConnectionStore connectionStore = new ConnectionStore();
 	private final SessionStore sessionStore = new SessionStore();
+	private final SavedQueryStore savedQueryStore = new SavedQueryStore();
 	private Timer autosaveTimer;
 
 	private JTabbedPane editorTabs;
@@ -164,12 +167,14 @@ public class MainWindow extends JFrame {
 	private JPanel resultsCards;
 	private JTree objectTree;
 	private ConnectionsPanel connectionsPanel;
+	private SavedQueriesPanel savedQueriesPanel;
 	private JTextField objectSearch;
 	private SchemaInfo currentSchema;
 	private JLabel statusBar;
 	private JLabel connStatusLabel;
 	private JProgressBar connProgress;
 	private JButton runButton;
+	private JButton saveQueryButton;
 	private JButton themeButton;
 	private JComponent resultsOverlay;
 	private SwingWorker<List<QueryResult>, Void> runWorker;
@@ -398,17 +403,38 @@ public class MainWindow extends JFrame {
 		gbc.insets = new Insets(0, 4, 0, 0);
 		mainBar.add(formatMenuButton, gbc);
 
+		// Salvar a aba atual como query (biblioteca gerenciada pelo app — ver
+		// SavedQueryStore): mesmo estilo outline do Formatar, acao secundaria.
+		// Desabilitado quando a aba atual esta vazia (ver updateSaveButtonState) —
+		// antes o clique era aceito mas nao fazia nada alem de um aviso na barra
+		// de status, o que parecia um bug de "salvar nao funciona".
+		saveQueryButton = new JButton("Salvar");
+		saveQueryButton.setIcon(Icons.get(IconType.SAVE, 13, MUTED));
+		saveQueryButton.setToolTipText("Salvar como query (Ctrl+S)");
+		saveQueryButton.addActionListener(e -> onSaveQuery());
+		saveQueryButton.setIconTextGap(6);
+		saveQueryButton.setMargin(new Insets(6, 12, 6, 12));
+		saveQueryButton.putClientProperty("JButton.buttonType", "roundRect");
+		saveQueryButton.putClientProperty(FlatClientProperties.STYLE, "arc: 8; borderWidth: 1");
+		Dimension saveDim = saveQueryButton.getPreferredSize();
+		saveQueryButton.setPreferredSize(new Dimension(saveDim.width, rowHeight));
+
+		gbc.gridx = 3;
+		gbc.insets = new Insets(0, 10, 0, 0);
+		mainBar.add(saveQueryButton, gbc);
+
 		// --- O ESPAÇADOR INVISÍVEL ---
 		// Ele joga tudo o que vier a partir daqui totalmente para a direita
-		gbc.gridx = 3;
+		gbc.gridx = 4;
 		gbc.weightx = 1.0;
+		gbc.insets = new Insets(0, 0, 0, 0);
 		mainBar.add(Box.createHorizontalGlue(), gbc);
 
 		// --- Separador sutil antes do grupo de icones de layout/tema ---
 		JSeparator divider = new JSeparator(SwingConstants.VERTICAL);
 		divider.setPreferredSize(new Dimension(1, 18));
 		divider.setForeground(new Color(0xE2E5EA));
-		gbc.gridx = 4;
+		gbc.gridx = 5;
 		gbc.weightx = 0.0;
 		gbc.insets = new Insets(0, 6, 0, 10);
 		mainBar.add(divider, gbc);
@@ -441,16 +467,20 @@ public class MainWindow extends JFrame {
 		// Adiciona os botões da direita sequencialmente
 		gbc.insets = new Insets(0, 3, 0, 3); // Pequeno espaço entre os ícones
 
-		gbc.gridx = 5;
-		mainBar.add(toggleSidebar, gbc);
 		gbc.gridx = 6;
-		mainBar.add(toggleResults, gbc);
+		mainBar.add(toggleSidebar, gbc);
 		gbc.gridx = 7;
-		mainBar.add(layoutButton, gbc);
+		mainBar.add(toggleResults, gbc);
 		gbc.gridx = 8;
+		mainBar.add(layoutButton, gbc);
+		gbc.gridx = 9;
 		mainBar.add(themeButton, gbc);
 
 		toolbarBar = mainBar;
+		// initWorkspaces() ja rodou (ver buildEditorArea) quando chegamos aqui,
+		// entao editorTabs ja tem a aba inicial — reflete o estado real dela no
+		// botao Salvar desde o primeiro desenho, em vez de nascer sempre habilitado.
+		updateSaveButtonState();
 		return mainBar;
 	}
 
@@ -711,6 +741,7 @@ public class MainWindow extends JFrame {
 		bindGlobalAction(rp, "control SUBTRACT", "zoom-ui-out2", this::zoomOut);
 		bindGlobalAction(rp, "control 0", "zoom-ui-reset", this::resetZoom);
 		bindGlobalAction(rp, "control R", "refresh-objects", () -> refreshObjectTree(true));
+		bindGlobalAction(rp, "control S", "save-query", this::onSaveQuery);
 	}
 
 	private static void bindGlobalAction(JComponent rp, String keyStroke, String name, Runnable action) {
@@ -882,7 +913,7 @@ public class MainWindow extends JFrame {
 			objectTree.setRowHeight(scaledPx(22));
 		}
 		if (connectionsPanel != null) {
-			connectionsPanel.setRowHeight(scaledPx(54));
+			connectionsPanel.setRowHeight(scaledPx(ConnectionsPanel.DEFAULT_ROW_HEIGHT));
 		}
 		// Reconstroi as abas de resultado (tabela, gutter e cabecalho usam
 		// tamanhos fixos definidos na hora da criacao do JTable).
@@ -969,8 +1000,18 @@ public class MainWindow extends JFrame {
 
 	private JComponent buildLeftSide() {
 		connectionsPanel = new ConnectionsPanel(connectionStore, this::connectTo, this::disconnectFrom);
-		connectionsPanel.setRowHeight(scaledPx(54));
-		JSplitPane split = new JSplitPane(JSplitPane.VERTICAL_SPLIT, connectionsPanel, buildObjectBrowser());
+		connectionsPanel.setRowHeight(scaledPx(ConnectionsPanel.DEFAULT_ROW_HEIGHT));
+		savedQueriesPanel = new SavedQueriesPanel(savedQueryStore, this::openSavedQuery);
+
+		// "Conexoes" e "Queries salvas" dividem o mesmo espaco de cima via abas
+		// (nao um segundo split — ja tem split demais nesse canto da tela). O
+		// navegador de objetos continua sempre visivel embaixo, nao importa
+		// qual das duas abas esta selecionada.
+		JTabbedPane topTabs = new JTabbedPane();
+		topTabs.addTab("Conexoes", connectionsPanel);
+		topTabs.addTab("Queries salvas", savedQueriesPanel);
+
+		JSplitPane split = new JSplitPane(JSplitPane.VERTICAL_SPLIT, topTabs, buildObjectBrowser());
 		split.setResizeWeight(0.5);
 		split.setBorder(BorderFactory.createEmptyBorder());
 		split.setPreferredSize(new Dimension(248, 100));
@@ -1130,6 +1171,7 @@ public class MainWindow extends JFrame {
 			} else {
 				scheduleSave();
 				showResultsForActiveEditor();
+				updateSaveButtonState();
 			}
 		});
 		// Botao direito no titulo da aba: fechar / fechar as outras.
@@ -1197,16 +1239,19 @@ public class MainWindow extends JFrame {
 			@Override
 			public void insertUpdate(DocumentEvent e) {
 				scheduleSave();
+				updateSaveButtonState();
 			}
 
 			@Override
 			public void removeUpdate(DocumentEvent e) {
 				scheduleSave();
+				updateSaveButtonState();
 			}
 
 			@Override
 			public void changedUpdate(DocumentEvent e) {
 				scheduleSave();
+				updateSaveButtonState();
 			}
 		});
 		addingTab = true;
@@ -1219,6 +1264,11 @@ public class MainWindow extends JFrame {
 			addingTab = false;
 		}
 		scheduleSave();
+		// addingTab suprime o listener de troca de aba acima (evita reentrancia
+		// com a aba "+"), entao o estado do botao Salvar precisa ser atualizado
+		// aqui na mao — sem isto, uma aba nova (sempre vazia) mostrava "Salvar"
+		// habilitado ate o usuario clicar em outra aba e voltar.
+		updateSaveButtonState();
 		return true;
 	}
 
@@ -1252,11 +1302,17 @@ public class MainWindow extends JFrame {
 		JPopupMenu menu = new JPopupMenu();
 		JMenuItem rename = new JMenuItem("Renomear...");
 		rename.addActionListener(a -> renameTab(target));
+		JMenuItem saveQuery = new JMenuItem("Salvar como query...");
+		saveQuery.addActionListener(a -> {
+			editorTabs.setSelectedComponent(target);
+			onSaveQuery();
+		});
 		JMenuItem close = new JMenuItem("Fechar");
 		close.addActionListener(a -> closeTabComponent(target));
 		JMenuItem closeOthers = new JMenuItem("Fechar as outras");
 		closeOthers.addActionListener(a -> closeOtherTabs(target));
 		menu.add(rename);
+		menu.add(saveQuery);
 		menu.addSeparator();
 		menu.add(close);
 		menu.add(closeOthers);
@@ -1365,6 +1421,9 @@ public class MainWindow extends JFrame {
 		}
 		workspaces.put(SCRATCH, scratch);
 		activeWorkspace = scratch;
+		if (savedQueriesPanel != null) {
+			savedQueriesPanel.setActiveConnection(null);
+		}
 		rebuildEditorTabs(scratch.tabs, scratch.selectedTab, scratch.tabResults);
 	}
 
@@ -1491,6 +1550,9 @@ public class MainWindow extends JFrame {
 		saveActiveTabs();
 		activeWorkspace = w;
 		connectionManager = w.mgr;
+		if (savedQueriesPanel != null) {
+			savedQueriesPanel.setActiveConnection(w.profile == null ? null : w.profile.name());
+		}
 		rebuildEditorTabs(w.tabs, w.selectedTab, w.tabResults);
 		if (w.schema != null) {
 			metadataCache.set(w.schema);
@@ -2098,6 +2160,87 @@ public class MainWindow extends JFrame {
 		};
 		runWorker = worker;
 		worker.execute();
+	}
+
+	// ---------- Queries salvas (biblioteca gerenciada pelo app — ver SavedQueryStore) ----------
+
+	/**
+	 * Mantem o botao "Salvar" (e por extensao o Ctrl+S, que chama {@link #onSaveQuery()}
+	 * de qualquer forma) desabilitado quando a aba atual nao tem SQL — sem
+	 * conteudo nao ha o que salvar. Chamado sempre que a aba selecionada
+	 * muda, o texto do editor muda, ou uma aba nova e criada (sempre vazia).
+	 * Antes disto o botao ficava sempre clicavel e so avisava na barra de
+	 * status ao clicar numa aba vazia, o que parecia (com razao) um "Salvar
+	 * que nao funciona".
+	 */
+	private void updateSaveButtonState() {
+		if (saveQueryButton == null) {
+			return;
+		}
+		SqlEditorPane editor = currentEditor();
+		boolean hasContent = editor != null && editor.fullText() != null && !editor.fullText().isBlank();
+		saveQueryButton.setEnabled(hasContent);
+	}
+
+	/**
+	 * Salva a aba atual como query: se ela ja esta ligada a uma query salva
+	 * (reaberta do painel, ou ja salva antes nesta sessao), SOBRESCREVE sem
+	 * perguntar nada — se nao, pede so o titulo. Acionado pelo botao
+	 * "Salvar" da barra, por Ctrl+S ou pelo menu de contexto da aba.
+	 */
+	private void onSaveQuery() {
+		SqlEditorPane editor = currentEditor();
+		if (editor == null) {
+			return;
+		}
+		String sql = editor.fullText();
+		if (sql == null || sql.isBlank()) {
+			statusBar.setText(" Nada para salvar: a aba esta vazia.");
+			updateSaveButtonState();
+			return;
+		}
+		try {
+			String existingId = editor.getSavedQueryId();
+			if (existingId != null) {
+				savedQueryStore.updateSql(existingId, sql);
+				statusBar.setText(" Query atualizada.");
+			} else {
+				int idx = editorTabs.indexOfComponent(editor);
+				String suggested = (idx >= 0) ? editorTabs.getTitleAt(idx) : "";
+				String title = JOptionPane.showInputDialog(this, "Nome da query:", suggested);
+				if (title == null || title.trim().isEmpty()) {
+					return;
+				}
+				SavedQueryStore.Query created = savedQueryStore.create(title.trim(), sql, currentConnectionLabel());
+				editor.setSavedQueryId(created.id());
+				statusBar.setText(" Query salva: " + title.trim());
+			}
+			if (savedQueriesPanel != null) {
+				savedQueriesPanel.reload();
+			}
+		} catch (IOException ex) {
+			showError("Falha ao salvar a query", ex);
+		}
+	}
+
+	/**
+	 * Abre uma query salva (duplo-clique no painel "Queries salvas") numa
+	 * aba NOVA, ja ligada ao id dela — salvar de novo sobrescreve direto.
+	 */
+	private void openSavedQuery(SavedQueryStore.Query query) {
+		if (!addQueryTab(query.title(), query.sql())) {
+			return;
+		}
+		SqlEditorPane editor = currentEditor();
+		if (editor != null) {
+			editor.setSavedQueryId(query.id());
+		}
+		statusBar.setText(" Query aberta: " + query.title());
+	}
+
+	/** Nome da conexao ativa, ou {@code null} no workspace "sem conexao" (SCRATCH). */
+	private String currentConnectionLabel() {
+		return (activeWorkspace != null && activeWorkspace.profile != null) ? activeWorkspace.profile.name() : null;
 	}
 
 	/**

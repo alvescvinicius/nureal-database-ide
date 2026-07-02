@@ -56,6 +56,12 @@ public class SqlEditorPane extends JPanel {
     private int fontSize = BASE_FONT_SIZE;
     private String fontFamily; // null/vazio = escolha automatica
 
+    // Id da query salva (ver SavedQueryStore) a que esta aba esta "ligada" —
+    // null enquanto a aba nunca foi salva OU foi aberta sem vir de uma query
+    // salva. Uma vez definido, salvar de novo SOBRESCREVE em vez de perguntar
+    // o titulo (ver MainWindow#onSaveQuery).
+    private String savedQueryId;
+
     private final SearchContext searchContext = new SearchContext();
     private JPanel findBar;
     private JTextField findField;
@@ -201,6 +207,20 @@ public class SqlEditorPane extends JPanel {
     public boolean hasSelection() {
         String selected = textArea.getSelectedText();
         return selected != null && !selected.isBlank();
+    }
+
+    /** Texto INTEIRO da aba (ignora selecao) — usado ao salvar como query. */
+    public String fullText() {
+        return textArea.getText();
+    }
+
+    /** Id da query salva a que esta aba esta ligada, ou {@code null} se nenhuma. */
+    public String getSavedQueryId() {
+        return savedQueryId;
+    }
+
+    public void setSavedQueryId(String savedQueryId) {
+        this.savedQueryId = savedQueryId;
     }
 
     /** Ajusta o tamanho da fonte do editor (preservando o peso semibold). */

@@ -110,7 +110,8 @@ final class ResultContextMenu {
         fc.setDialogTitle("Exportar " + extension.toUpperCase(java.util.Locale.ROOT));
         fc.setSelectedFile(new File("resultado." + extension));
         fc.setFileFilter(new FileNameExtensionFilter(extension.toUpperCase(java.util.Locale.ROOT), extension));
-        if (fc.showSaveDialog(table) != JFileChooser.APPROVE_OPTION) {
+        // Centraliza na JANELA (nao na grade em si) — ver DialogUtil.
+        if (fc.showSaveDialog(DialogUtil.owner(table)) != JFileChooser.APPROVE_OPTION) {
             return;
         }
         File file = fc.getSelectedFile();
@@ -124,7 +125,7 @@ final class ResultContextMenu {
                 GridExporter.exportJson(table, file.toPath());
             }
         } catch (IOException ex) {
-            JOptionPane.showMessageDialog(table, "Falha ao exportar: " + ex.getMessage(),
+            JOptionPane.showMessageDialog(DialogUtil.owner(table), "Falha ao exportar: " + ex.getMessage(),
                     "Exportar", JOptionPane.ERROR_MESSAGE);
         }
     }

@@ -16,8 +16,11 @@ import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
+import javax.swing.JTextField;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingConstants;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
@@ -29,8 +32,11 @@ import java.awt.RenderingHints;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.function.Consumer;
 
@@ -41,12 +47,24 @@ import java.util.function.Consumer;
 public class ConnectionsPanel extends JPanel {
 
     private static final long serialVersionUID = 1L;
+
+    /**
+     * Altura padrao (nao-escalada) do cartao de conexao — reduzida de 54 para
+     * 34 quando o cartao passou a mostrar so o nome (ver {@link ConnectionRenderer}),
+     * sem a segunda linha "usuario@host:porta/schema". Usada por
+     * {@code MainWindow#refreshDynamicSizing}/{@code #buildLeftSide} como base
+     * do zoom, em vez de um numero magico repetido em dois lugares.
+     */
+    static final int DEFAULT_ROW_HEIGHT = 34;
+
 	private final ConnectionStore store;
     private final Consumer<ConnectionProfile> connectAction;
     private final Consumer<ConnectionProfile> disconnectAction;
     private final DefaultListModel<ConnectionProfile> model = new DefaultListModel<>();
     private final JList<ConnectionProfile> list = new JList<>(model);
+    private final JTextField search = new JTextField();
     private final Set<String> connectedNames = new HashSet<>();
+    private List<ConnectionProfile> all = new ArrayList<>();
     private String connectingName;
 
     public ConnectionsPanel(ConnectionStore store, Consumer<ConnectionProfile> connectAction,
@@ -83,16 +101,44 @@ public class ConnectionsPanel extends JPanel {
         novo.putClientProperty("JButton.buttonType", "roundRect");
         novo.putClientProperty(FlatClientProperties.STYLE, "arc: 8; borderWidth: 1");
 
-        JPanel header = new JPanel(new BorderLayout());
+        JPanel titleRow = new JPanel(new BorderLayout());
+        titleRow.setOpaque(false);
+        titleRow.add(title, BorderLayout.WEST);
+        titleRow.add(novo, BorderLayout.EAST);
+
+        // Busca por nome/host/schema — pedido explicito do usuario, que tem
+        // ~15 conexoes salvas na empresa e precisava de um jeito rapido de
+        // achar a certa em vez de rolar a lista inteira (mesmo padrao visual
+        // do campo de busca do SavedQueriesPanel).
+        search.putClientProperty("JTextField.placeholderText", "Buscar por nome, host ou schema...");
+        search.putClientProperty("JTextField.showClearButton", true);
+        search.getDocument().addDocumentListener(new DocumentListener() {
+            @Override
+            public void insertUpdate(DocumentEvent e) {
+                applyFilter();
+            }
+
+            @Override
+            public void removeUpdate(DocumentEvent e) {
+                applyFilter();
+            }
+
+            @Override
+            public void changedUpdate(DocumentEvent e) {
+                applyFilter();
+            }
+        });
+
+        JPanel header = new JPanel(new BorderLayout(0, 6));
         header.setOpaque(false);
-        header.add(title, BorderLayout.WEST);
-        header.add(novo, BorderLayout.EAST);
+        header.add(titleRow, BorderLayout.NORTH);
+        header.add(search, BorderLayout.SOUTH);
         return header;
     }
 
     private JComponent buildList() {
         list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-        list.setFixedCellHeight(54);
+        list.setFixedCellHeight(DEFAULT_ROW_HEIGHT);
         list.setCellRenderer(new ConnectionRenderer());
         list.addMouseListener(new MouseAdapter() {
             @Override
@@ -152,62 +198,118 @@ public class ConnectionsPanel extends JPanel {
 
     /** Recarrega a lista a partir do arquivo. */
     public void reload() {
-        model.clear();
         try {
-            List<ConnectionProfile> saved = store.load();
-            for (ConnectionProfile p : saved) {
-                model.addElement(p);
-            }
+            all = new ArrayList<>(store.load());
         } catch (IOException e) {
-            JOptionPane.showMessageDialog(this,
+            all = new ArrayList<>();
+            // Centraliza na JANELA (nao neste painel, que fica na lateral) —
+            // ver DialogUtil.
+            JOptionPane.showMessageDialog(DialogUtil.owner(this),
                     "Nao foi possivel ler as conexoes:\n" + e.getMessage(),
                     "Conexoes", JOptionPane.WARNING_MESSAGE);
         }
+        applyFilter();
     }
 
     private void persist() {
         try {
-            store.save(java.util.Collections.list(model.elements()));
+            store.save(all);
         } catch (IOException e) {
-            JOptionPane.showMessageDialog(this,
+            JOptionPane.showMessageDialog(DialogUtil.owner(this),
                     "Nao foi possivel salvar as conexoes:\n" + e.getMessage(),
                     "Conexoes", JOptionPane.ERROR_MESSAGE);
         }
     }
 
+    /**
+     * Filtra {@link #all} pela busca (nome/host/schema) e reordena com as
+     * conectadas SEMPRE primeiro — pedido explicito do usuario, que tem
+     * varias conexoes salvas e quer achar/ver as ativas rapido, sem depender
+     * da ordem em que foram cadastradas. Preserva a selecao atual quando ela
+     * continua visivel apos o filtro.
+     */
+    private void applyFilter() {
+        ConnectionProfile previouslySelected = list.getSelectedValue();
+        String f = search.getText() == null ? "" : search.getText().trim().toLowerCase(Locale.ROOT);
+        List<ConnectionProfile> filtered = new ArrayList<>();
+        for (ConnectionProfile p : all) {
+            if (f.isEmpty() || matches(p, f)) {
+                filtered.add(p);
+            }
+        }
+        filtered.sort(Comparator.comparing((ConnectionProfile p) -> !connectedNames.contains(p.name())));
+        model.clear();
+        for (ConnectionProfile p : filtered) {
+            model.addElement(p);
+        }
+        if (previouslySelected != null) {
+            list.setSelectedValue(previouslySelected, false);
+        }
+    }
+
+    private static boolean matches(ConnectionProfile p, String f) {
+        return p.name().toLowerCase(Locale.ROOT).contains(f)
+                || p.host().toLowerCase(Locale.ROOT).contains(f)
+                || p.schema().toLowerCase(Locale.ROOT).contains(f);
+    }
+
     private void onNew() {
-        ConnectionProfile created = ConnectionEditDialog.show(this, null);
+        ConnectionProfile created = ConnectionEditDialog.show(this, null, name -> nameTaken(name, null));
         if (created != null) {
-            model.addElement(created);
+            all.add(created);
             persist();
+            applyFilter();
             list.setSelectedValue(created, true);
         }
     }
 
     private void onEdit() {
-        int idx = list.getSelectedIndex();
-        if (idx < 0) {
+        ConnectionProfile selected = list.getSelectedValue();
+        if (selected == null) {
             return;
         }
-        ConnectionProfile edited = ConnectionEditDialog.show(this, model.get(idx));
+        ConnectionProfile edited = ConnectionEditDialog.show(this, selected, name -> nameTaken(name, selected));
         if (edited != null) {
-            model.set(idx, edited);
+            int idx = all.indexOf(selected);
+            if (idx >= 0) {
+                all.set(idx, edited);
+            }
             persist();
+            applyFilter();
+            list.setSelectedValue(edited, true);
         }
     }
 
+    /**
+     * {@code true} se alguma conexao (diferente de {@code excluding}, usado
+     * ao editar para nao acusar o proprio registro) ja usa {@code name} —
+     * comparacao sem diferenciar maiusculas/minusculas, pois o nome e o que
+     * identifica a conexao na UI (lista, indicador de "conectado" etc.).
+     */
+    private boolean nameTaken(String name, ConnectionProfile excluding) {
+        for (ConnectionProfile p : all) {
+            if (p == excluding) {
+                continue;
+            }
+            if (p.name().equalsIgnoreCase(name)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private void onDelete() {
-        int idx = list.getSelectedIndex();
-        if (idx < 0) {
+        ConnectionProfile p = list.getSelectedValue();
+        if (p == null) {
             return;
         }
-        ConnectionProfile p = model.get(idx);
-        int ok = JOptionPane.showConfirmDialog(this,
+        int ok = JOptionPane.showConfirmDialog(DialogUtil.owner(this),
                 "Excluir a conexao \"" + p.name() + "\"?",
                 "Excluir conexao", JOptionPane.YES_NO_OPTION);
         if (ok == JOptionPane.YES_OPTION) {
-            model.remove(idx);
+            all.remove(p);
             persist();
+            applyFilter();
         }
     }
 
@@ -232,14 +334,18 @@ public class ConnectionsPanel extends JPanel {
         list.repaint();
     }
 
-    /** Define o conjunto de conexoes atualmente conectadas (bolinha verde). */
+    /**
+     * Define o conjunto de conexoes atualmente conectadas (bolinha verde) —
+     * tambem reordena a lista para trazer as conectadas para o topo (ver
+     * {@link #applyFilter()}).
+     */
     public void setConnectedNames(Set<String> names) {
         connectedNames.clear();
         if (names != null) {
             connectedNames.addAll(names);
         }
         connectingName = null;
-        list.repaint();
+        applyFilter();
     }
 
     /** Marca qual conexao esta conectando (bolinha ambar). */
@@ -279,7 +385,13 @@ public class ConnectionsPanel extends JPanel {
         };
     }
 
-    /** Renderiza cada conexao como um cartao: status + nome em destaque + destino. */
+    /**
+     * Renderiza cada conexao como uma linha compacta: status + so o nome
+     * dado pelo usuario (sem a segunda linha "usuario@host:porta/schema") —
+     * pedido explicito de quem tem muitas conexoes salvas (~15 na empresa) e
+     * queria ver mais linhas de uma vez sem rolar. O destino completo continua
+     * disponivel via tooltip, para quem precisar conferir sem abrir "Editar".
+     */
     private final class ConnectionRenderer extends javax.swing.DefaultListCellRenderer {
         private static final long serialVersionUID = 1L;
 
@@ -289,7 +401,7 @@ public class ConnectionsPanel extends JPanel {
                 boolean isSelected, boolean cellHasFocus) {
             super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
             setHorizontalAlignment(SwingConstants.LEFT);
-            setBorder(BorderFactory.createEmptyBorder(6, 12, 6, 12));
+            setBorder(BorderFactory.createEmptyBorder(4, 12, 4, 12));
             setIconTextGap(10);
             if (value instanceof ConnectionProfile p) {
                 Color dotColor;
@@ -301,19 +413,11 @@ public class ConnectionsPanel extends JPanel {
                     dotColor = new Color(0xC4C9D1);
                 }
                 setIcon(statusDot(dotColor));
-                String sub = p.user() + "@" + p.host() + ":" + p.port() + "/" + p.schema();
-                String subColor = isSelected ? "#E5F5EC" : "#6B7280";
-                String family = getFont().getFamily();
-                setText("<html><div style='font-family:" + family + ";line-height:1.5'><b>"
-                        + escape(p.name())
-                        + "</b><br><span style='color:" + subColor + ";font-size:10px'>"
-                        + escape(sub) + "</span></div></html>");
+                setText(p.name());
+                setFont(getFont().deriveFont(connectedNames.contains(p.name()) ? Font.BOLD : Font.PLAIN));
+                setToolTipText(p.user() + "@" + p.host() + ":" + p.port() + "/" + p.schema());
             }
             return this;
-        }
-
-        private static String escape(String s) {
-            return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
         }
     }
 }
