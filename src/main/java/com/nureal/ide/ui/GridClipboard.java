@@ -84,20 +84,22 @@ final class GridClipboard {
         setClipboard(GridExporter.toTabSeparated(t, rows, allColumns(t), false));
     }
 
-    static void copyColumn(JTable t) {
-        int c = t.getSelectedColumn();
-        if (c < 0) {
-            return;
-        }
-        StringBuilder sb = new StringBuilder();
-        int rows = t.getRowCount();
-        for (int r = 0; r < rows; r++) {
-            if (r > 0) {
-                sb.append('\n');
+    /**
+     * Copia os dados de uma ou mais colunas — TODAS as linhas atualmente
+     * visiveis (respeita filtro/ordenacao), nao so as selecionadas — usada
+     * pelo menu do CABECALHO ("Copiar dados da coluna"). Se o usuario tiver
+     * varias colunas selecionadas (Ctrl+clique nos cabecalhos), copia todas
+     * lado a lado (TAB); senao, usa a coluna sob o clique direito.
+     */
+    static void copyColumnsData(JTable t, int fallbackViewColumn) {
+        int[] cols = t.getSelectedColumns();
+        if (cols.length == 0) {
+            if (fallbackViewColumn < 0) {
+                return;
             }
-            sb.append(cellText(t, r, c));
+            cols = new int[] { fallbackViewColumn };
         }
-        setClipboard(sb.toString());
+        setClipboard(GridExporter.toTabSeparated(t, allRows(t), cols, false));
     }
 
     /** Copia a selecao atual (linhas x colunas selecionadas) com uma linha de cabecalho, separada por TAB. */
@@ -122,13 +124,18 @@ final class GridClipboard {
         setClipboard(GridExporter.toJson(t, rows, cols));
     }
 
-    /** Gera INSERT INTO <tabela> (cols) VALUES (...) para as linhas selecionadas. */
+    /**
+     * Gera INSERT INTO <tabela> (cols) VALUES (...) para as linhas
+     * selecionadas. A tabela e detectada AUTOMATICAMENTE a partir da consulta
+     * (ver {@link #resolveTableName}) sempre que possivel — so pergunta ao
+     * usuario quando a origem e ambigua ou desconhecida.
+     */
     static void copyAsInsert(JTable t, Component parent) {
         int[] rows = t.getSelectedRows();
         if (rows.length == 0) {
             return;
         }
-        String table = promptTableName(parent);
+        String table = resolveTableName(t, parent);
         if (table == null) {
             return;
         }
@@ -138,7 +145,7 @@ final class GridClipboard {
             if (c > 0) {
                 colList.append(", ");
             }
-            colList.append(t.getColumnName(c));
+            colList.append(columnNameFor(t, c));
         }
         StringBuilder sb = new StringBuilder();
         for (int ri = 0; ri < rows.length; ri++) {
@@ -158,14 +165,17 @@ final class GridClipboard {
         setClipboard(sb.toString());
     }
 
-    /** Gera UPDATE <tabela> SET ... WHERE <1a coluna> = ... para as linhas selecionadas. */
+    /**
+     * Gera UPDATE <tabela> SET ... WHERE <1a coluna> = ... para as linhas
+     * selecionadas. Mesma deteccao automatica de tabela de {@link #copyAsInsert}.
+     */
     static void copyAsUpdate(JTable t, Component parent) {
         int[] rows = t.getSelectedRows();
         int cols = t.getColumnCount();
         if (rows.length == 0 || cols == 0) {
             return;
         }
-        String table = promptTableName(parent);
+        String table = resolveTableName(t, parent);
         if (table == null) {
             return;
         }
@@ -173,24 +183,57 @@ final class GridClipboard {
         for (int ri = 0; ri < rows.length; ri++) {
             sb.append("UPDATE ").append(table).append(" SET ");
             if (cols == 1) {
-                sb.append(t.getColumnName(0)).append(" = ")
+                sb.append(columnNameFor(t, 0)).append(" = ")
                         .append(sqlValue(t.getValueAt(rows[ri], 0)));
             } else {
                 for (int c = 1; c < cols; c++) { // 1a coluna vira chave no WHERE
                     if (c > 1) {
                         sb.append(", ");
                     }
-                    sb.append(t.getColumnName(c)).append(" = ")
+                    sb.append(columnNameFor(t, c)).append(" = ")
                             .append(sqlValue(t.getValueAt(rows[ri], c)));
                 }
             }
-            sb.append(" WHERE ").append(t.getColumnName(0)).append(" = ")
+            sb.append(" WHERE ").append(columnNameFor(t, 0)).append(" = ")
                     .append(sqlValue(t.getValueAt(rows[ri], 0))).append(";");
             if (ri < rows.length - 1) {
                 sb.append('\n');
             }
         }
         setClipboard(sb.toString());
+    }
+
+    /**
+     * Copia os valores das linhas selecionadas, na coluna ativa (mesmo lead
+     * de selecao usado por {@link #copyCell}), como uma lista SQL pronta
+     * para colar direto num WHERE: {@code IN (1, 2, 3)} / {@code IN ('a', 'b')}.
+     */
+    static void copyAsIn(JTable t) {
+        int[] rows = t.getSelectedRows();
+        int col = t.getColumnModel().getSelectionModel().getLeadSelectionIndex();
+        if (rows.length == 0 || col < 0 || col >= t.getColumnCount()) {
+            return;
+        }
+        setClipboard(toInClause(t, rows, col));
+    }
+
+    /** Como {@link #copyAsIn}, mas para TODAS as linhas visiveis da coluna — usada pelo menu do cabecalho. */
+    static void copyColumnAsIn(JTable t, int viewColumn) {
+        if (viewColumn < 0 || viewColumn >= t.getColumnCount() || t.getRowCount() == 0) {
+            return;
+        }
+        setClipboard(toInClause(t, allRows(t), viewColumn));
+    }
+
+    private static String toInClause(JTable t, int[] rows, int col) {
+        StringBuilder sb = new StringBuilder("IN (");
+        for (int i = 0; i < rows.length; i++) {
+            if (i > 0) {
+                sb.append(", ");
+            }
+            sb.append(sqlValue(t.getValueAt(rows[i], col)));
+        }
+        return sb.append(')').toString();
     }
 
     private static int[] selectedOrAllRows(JTable t) {
@@ -205,6 +248,59 @@ final class GridClipboard {
 
     private static int[] allColumns(JTable t) {
         return sequence(t.getColumnCount());
+    }
+
+    private static int[] allRows(JTable t) {
+        return sequence(t.getRowCount());
+    }
+
+    /**
+     * Tenta descobrir, a partir da origem JDBC de cada coluna (ver
+     * {@link ResultTableModel#sourceTable}), a UNICA tabela fisica de onde os
+     * dados vieram — o caso comum de {@code SELECT ... FROM tabela} (com ou
+     * sem WHERE/alias de coluna). Se as colunas vierem de tabelas diferentes
+     * (JOIN) ou a origem for desconhecida (expressao, funcao, agregacao),
+     * devolve {@code null}: melhor perguntar do que arriscar gerar um
+     * INSERT/UPDATE para a tabela errada.
+     */
+    private static String detectSourceTable(JTable t) {
+        if (!(t.getModel() instanceof ResultTableModel model)) {
+            return null;
+        }
+        String table = null;
+        for (int c = 0; c < t.getColumnCount(); c++) {
+            String src = model.sourceTable(t.convertColumnIndexToModel(c));
+            if (src == null || src.isBlank()) {
+                continue;
+            }
+            if (table == null) {
+                table = src;
+            } else if (!table.equals(src)) {
+                return null;
+            }
+        }
+        return table;
+    }
+
+    /**
+     * Nome da tabela para o INSERT/UPDATE: detectado automaticamente sempre
+     * que possivel (ver {@link #detectSourceTable}) — so pergunta ao usuario
+     * quando a consulta nao deixa isso claro (JOIN, expressao, etc.).
+     */
+    private static String resolveTableName(JTable t, Component parent) {
+        String detected = detectSourceTable(t);
+        return (detected != null) ? detected : promptTableName(parent);
+    }
+
+    /** Nome FISICO da coluna (sem alias) quando o driver informa; senao usa o rotulo exibido. */
+    private static String columnNameFor(JTable t, int viewCol) {
+        if (t.getModel() instanceof ResultTableModel model) {
+            String real = model.realColumnName(t.convertColumnIndexToModel(viewCol));
+            if (real != null && !real.isBlank()) {
+                return real;
+            }
+        }
+        return t.getColumnName(viewCol);
     }
 
     private static int[] sequence(int n) {
@@ -244,7 +340,8 @@ final class GridClipboard {
         return "'" + v.toString().replace("'", "''") + "'";
     }
 
-    private static void setClipboard(String text) {
+    /** Visibilidade de pacote: reaproveitado por {@code MainWindow} para copiar a selecao da arvore de objetos. */
+    static void setClipboard(String text) {
         Toolkit.getDefaultToolkit().getSystemClipboard()
                 .setContents(new StringSelection(text), null);
     }

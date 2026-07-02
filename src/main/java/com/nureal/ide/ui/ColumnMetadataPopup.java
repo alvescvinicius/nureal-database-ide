@@ -4,6 +4,7 @@ import com.nureal.ide.core.metadata.model.ForeignKeyInfo;
 import com.nureal.ide.core.metadata.model.IndexInfo;
 
 import javax.swing.BorderFactory;
+import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
@@ -52,7 +53,7 @@ final class ColumnMetadataPopup {
         this.table = table;
         this.header = header;
         this.metadataSource = metadataSource;
-        this.showTimer = new Timer(SHOW_DELAY_MS, k -> showForPoint(lastPoint));
+        this.showTimer = new Timer(SHOW_DELAY_MS, e -> showForPoint(lastPoint));
         this.showTimer.setRepeats(false);
     }
 
@@ -130,12 +131,24 @@ final class ColumnMetadataPopup {
      * ler com calma ou selecionar/copiar o texto.
      */
     static void showDialog(java.awt.Component parent, ColumnMetadata meta) {
-        javax.swing.JOptionPane.showMessageDialog(parent, buildContent(meta),
+        javax.swing.JOptionPane.showMessageDialog(parent, buildContent(meta, true),
                 "Informacoes da coluna: " + meta.label(), javax.swing.JOptionPane.PLAIN_MESSAGE);
     }
 
-    /** Monta o painel com os metadados formatados — reutilizado pelo popup de hover e pelo dialogo "Informacoes da coluna". */
+    /** Monta o painel com os metadados formatados (popup de hover — texto NAO selecionavel, por design). */
     static JPanel buildContent(ColumnMetadata meta) {
+        return buildContent(meta, false);
+    }
+
+    /**
+     * @param selectable quando {@code true} (dialogo persistente "Informacoes
+     *                   da coluna"), cada valor vira um campo de texto
+     *                   selecionavel — da pra marcar e Ctrl+C. Quando
+     *                   {@code false} (popup de hover), continua puro texto
+     *                   (JLabel), reforcando que ali e so para bater o olho,
+     *                   nao para copiar (ver javadoc da classe).
+     */
+    private static JPanel buildContent(ColumnMetadata meta, boolean selectable) {
         JPanel content = new JPanel(new GridBagLayout());
         content.setBorder(BorderFactory.createEmptyBorder(10, 12, 10, 12));
 
@@ -145,40 +158,40 @@ final class ColumnMetadataPopup {
         gc.anchor = GridBagConstraints.NORTHWEST;
         gc.insets = new Insets(1, 0, 1, 12);
 
-        JLabel title = new JLabel(meta.label());
+        JComponent title = textPart(meta.label(), selectable);
         title.setFont(title.getFont().deriveFont(Font.BOLD, 13f));
         gc.gridwidth = 2;
         content.add(title, gc);
         gc.gridwidth = 1;
         gc.gridy++;
 
-        addRow(content, gc, "Tipo SQL", displaySqlType(meta));
-        addRow(content, gc, "Tipo Java", meta.javaType() == null ? "—" : meta.javaType().getSimpleName());
-        addRow(content, gc, "Nullable", meta.jdbcMeta().nullable() ? "Sim" : "Nao");
-        addRow(content, gc, "Precisao", String.valueOf(meta.jdbcMeta().precision()));
-        addRow(content, gc, "Escala", String.valueOf(meta.jdbcMeta().scale()));
-        addRow(content, gc, "Tamanho", String.valueOf(meta.jdbcMeta().displaySize()));
-        addRow(content, gc, "Auto increment", meta.jdbcMeta().autoIncrement() ? "Sim" : "Nao");
+        addRow(content, gc, "Tipo SQL", displaySqlType(meta), selectable);
+        addRow(content, gc, "Tipo Java", meta.javaType() == null ? "—" : meta.javaType().getSimpleName(), selectable);
+        addRow(content, gc, "Nullable", meta.jdbcMeta().nullable() ? "Sim" : "Nao", selectable);
+        addRow(content, gc, "Precisao", String.valueOf(meta.jdbcMeta().precision()), selectable);
+        addRow(content, gc, "Escala", String.valueOf(meta.jdbcMeta().scale()), selectable);
+        addRow(content, gc, "Tamanho", String.valueOf(meta.jdbcMeta().displaySize()), selectable);
+        addRow(content, gc, "Auto increment", meta.jdbcMeta().autoIncrement() ? "Sim" : "Nao", selectable);
         addRow(content, gc, "Schema",
-                (meta.schema() == null || meta.schema().isBlank()) ? "—" : meta.schema());
+                (meta.schema() == null || meta.schema().isBlank()) ? "—" : meta.schema(), selectable);
         addRow(content, gc, "Tabela de origem",
-                (meta.sourceTable() == null || meta.sourceTable().isBlank()) ? "—" : meta.sourceTable());
+                (meta.sourceTable() == null || meta.sourceTable().isBlank()) ? "—" : meta.sourceTable(), selectable);
 
         if (!meta.schemaLoaded()) {
-            addRow(content, gc, "Chave primaria", "carregando...");
+            addRow(content, gc, "Chave primaria", "carregando...", selectable);
         } else {
-            addRow(content, gc, "Chave primaria", meta.primaryKey() ? "Sim" : "Nao");
+            addRow(content, gc, "Chave primaria", meta.primaryKey() ? "Sim" : "Nao", selectable);
             if (meta.hasForeignKey()) {
                 ForeignKeyInfo fk = meta.foreignKey();
-                addRow(content, gc, "Chave estrangeira", fk.name());
-                addRow(content, gc, "Tabela relacionada", fk.referencedTable());
-                addRow(content, gc, "Coluna relacionada", String.join(", ", fk.referencedColumns()));
+                addRow(content, gc, "Chave estrangeira", fk.name(), selectable);
+                addRow(content, gc, "Tabela relacionada", fk.referencedTable(), selectable);
+                addRow(content, gc, "Coluna relacionada", String.join(", ", fk.referencedColumns()), selectable);
             }
             if (meta.hasIndexes()) {
-                addRow(content, gc, "Indices", indexSummary(meta.indexes()));
+                addRow(content, gc, "Indices", indexSummary(meta.indexes()), selectable);
             }
             if (meta.hasComment()) {
-                addRow(content, gc, "Comentario", meta.comment());
+                addRow(content, gc, "Comentario", meta.comment(), selectable);
             }
         }
         return content;
@@ -195,18 +208,29 @@ final class ColumnMetadataPopup {
                 .collect(Collectors.joining(", "));
     }
 
-    private static void addRow(JPanel panel, GridBagConstraints gc, String label, String value) {
+    private static void addRow(JPanel panel, GridBagConstraints gc, String label, String value, boolean selectable) {
         JLabel labelComp = new JLabel(label + ":");
         labelComp.setForeground(GridTheme.MUTED_TEXT);
         labelComp.setFont(labelComp.getFont().deriveFont(11f));
         gc.gridx = 0;
         panel.add(labelComp, gc);
 
-        JLabel valueComp = new JLabel(value);
+        JComponent valueComp = textPart(value, selectable);
         valueComp.setFont(valueComp.getFont().deriveFont(11f));
         gc.gridx = 1;
         panel.add(valueComp, gc);
 
         gc.gridy++;
+    }
+
+    /**
+     * {@code selectable=false}: JLabel comum (popup de hover, ver
+     * {@link #buildContent(ColumnMetadata)}). {@code selectable=true}: um
+     * "rotulo" selecionavel/copiavel com Ctrl+C (ver {@link SelectableLabel}).
+     * Usado pelo dialogo persistente "Informacoes da coluna" (ver
+     * {@link #showDialog}), que existe justamente para isso.
+     */
+    private static JComponent textPart(String value, boolean selectable) {
+        return selectable ? SelectableLabel.of(value) : new JLabel(value);
     }
 }

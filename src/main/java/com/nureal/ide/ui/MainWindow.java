@@ -11,7 +11,10 @@ import java.awt.Font;
 import java.awt.Graphics;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
+import java.awt.Insets;
 import java.awt.event.ActionEvent;
+import java.awt.event.InputEvent;
+import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.event.WindowAdapter;
@@ -23,6 +26,7 @@ import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -36,6 +40,7 @@ import java.util.function.BiConsumer;
 import javax.swing.AbstractAction;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
+import javax.swing.ButtonGroup;
 import javax.swing.BoxLayout;
 import javax.swing.DefaultListCellRenderer;
 import javax.swing.JButton;
@@ -50,10 +55,12 @@ import javax.swing.JList;
 import javax.swing.JMenu;
 import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
+import javax.swing.JRadioButtonMenuItem;
 import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
 import javax.swing.JProgressBar;
 import javax.swing.JScrollPane;
+import javax.swing.JSeparator;
 import javax.swing.JSplitPane;
 import javax.swing.JTabbedPane;
 import javax.swing.JTable;
@@ -61,6 +68,7 @@ import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.JTree;
 import javax.swing.KeyStroke;
+import javax.swing.SwingConstants;
 import javax.swing.SwingWorker;
 import javax.swing.Timer;
 import javax.swing.UIManager;
@@ -72,6 +80,7 @@ import javax.swing.tree.DefaultMutableTreeNode;
 import javax.swing.tree.DefaultTreeModel;
 import javax.swing.tree.TreePath;
 
+import com.formdev.flatlaf.FlatClientProperties;
 import com.formdev.flatlaf.FlatDarkLaf;
 import com.formdev.flatlaf.FlatLaf;
 import com.formdev.flatlaf.FlatLightLaf;
@@ -153,7 +162,6 @@ public class MainWindow extends JFrame {
 	private JTabbedPane resultTabs;
 	private JPanel resultsCards;
 	private JTree objectTree;
-	private JButton refreshObjectsButton;
 	private ConnectionsPanel connectionsPanel;
 	private JTextField objectSearch;
 	private SchemaInfo currentSchema;
@@ -169,6 +177,15 @@ public class MainWindow extends JFrame {
 	private boolean dark = false;
 	private List<QueryResult> lastResults = new ArrayList<>();
 	private final List<ResultCursor> openCursors = new ArrayList<>();
+	/**
+	 * Ultimo conjunto de resultados de CADA aba de SQL — cada aba tem os
+	 * seus proprios resultados, independentes das outras (ver
+	 * {@code showResultsForActiveEditor}, chamado ao trocar de aba). Uma aba
+	 * sem entrada aqui ainda nao rodou nenhuma query nesta sessao (mostra o
+	 * estado vazio). Entrada removida quando a aba fecha (ver
+	 * {@code closeQueryTab}).
+	 */
+	private final Map<SqlEditorPane, List<QueryResult>> resultsByTab = new LinkedHashMap<>();
 
 	// ---------- Layout flexivel / zoom / modo compacto ----------
 
@@ -196,11 +213,14 @@ public class MainWindow extends JFrame {
 		loadFormatPrefs();
 		buildUi();
 		registerWindowShortcuts();
-		// Salva a sessao ao fechar (alem do autosave continuo durante a digitacao).
+		// Salva a sessao e fecha as conexoes JDBC ao fechar (alem do autosave
+		// continuo durante a digitacao) — sem isso, as conexoes de todos os
+		// workspaces ficavam abertas ate o processo encerrar de vez.
 		addWindowListener(new WindowAdapter() {
 			@Override
 			public void windowClosing(WindowEvent e) {
 				saveSession();
+				closeAllConnections();
 			}
 		});
 	}
@@ -287,88 +307,17 @@ public class MainWindow extends JFrame {
 	}
 
 	// ---------- Barras ----------
-	/*
-	 * private JComponent buildToolbar() { // Criamos barras de ferramentas nativas
-	 * do FlatLaf em vez de JPanels com FlowLayout JToolBar leftToolBar = new
-	 * JToolBar(); leftToolBar.setFloatable(false);
-	 * leftToolBar.putClientProperty("JToolBar.style", "flat"); // Estilo limpo e
-	 * moderno
-	 * 
-	 * JToolBar rightToolBar = new JToolBar(); rightToolBar.setFloatable(false);
-	 * rightToolBar.putClientProperty("JToolBar.style", "flat");
-	 * 
-	 * // --- Botão Executar --- runButton = new JButton("Executar"); // Subimos
-	 * para tamanho 15 para melhor leitura do SVG
-	 * runButton.setIcon(Icons.get(IconType.RUN, 15, Color.WHITE));
-	 * runButton.setToolTipText("Executar (Ctrl+Enter ou F5)");
-	 * runButton.setEnabled(false); runButton.addActionListener(e -> onRun());
-	 * styleRunButton(); // Mantém seu estilo customizado/verde nele
-	 * 
-	 * // --- Grupo Formatar (Segmented Button com FlatLaf) --- JButton formatButton
-	 * = new JButton("Formatar"); formatButton.setIcon(Icons.get(IconType.FORMAT,
-	 * 15, MUTED)); formatButton.setToolTipText("Formatar SQL (Ctrl+Shift+F)");
-	 * formatButton.addActionListener(e -> { SqlEditorPane editor = currentEditor();
-	 * if (editor != null) { editor.formatText(); } });
-	 * 
-	 * // Substituímos o caractere "▾" pelo ícone oficial de seta do FlatLaf,
-	 * corrigindo o erro visual JButton formatMenuButton = new JButton(new
-	 * com.formdev.flatlaf.icons.FlatMenuArrowIcon());
-	 * formatMenuButton.setToolTipText("Presets e opcoes de formatacao");
-	 * formatMenuButton.addActionListener(e -> buildFormatMenu().show(
-	 * formatMenuButton, 0, formatMenuButton.getHeight()));
-	 * 
-	 * // Propriedades mágicas do FlatLaf que transformam os dois botões em um bloco
-	 * unido moderno: formatButton.putClientProperty("JButton.segmentPosition",
-	 * "first"); formatMenuButton.putClientProperty("JButton.segmentPosition",
-	 * "last");
-	 * 
-	 * // Adicionamos os componentes da esquerda leftToolBar.add(runButton);
-	 * leftToolBar.addSeparator(new java.awt.Dimension(8, 0)); // Espaçamento
-	 * elegante entre os blocos leftToolBar.add(formatButton);
-	 * leftToolBar.add(formatMenuButton);
-	 * 
-	 * // --- Componentes da Direita --- JButton toggleSidebar = new
-	 * JButton(Icons.get(IconType.PANEL_LEFT, 16, MUTED));
-	 * toggleSidebar.setToolTipText("Mostrar/ocultar painel lateral (Ctrl+B)");
-	 * toggleSidebar.addActionListener(e -> toggleSidebar());
-	 * 
-	 * JButton toggleResults = new JButton(Icons.get(IconType.PANEL_BOTTOM, 16,
-	 * MUTED)); toggleResults.setToolTipText("Mostrar/ocultar resultados (Ctrl+J)");
-	 * toggleResults.addActionListener(e -> toggleResults());
-	 * 
-	 * themeButton = new JButton(Icons.get(IconType.THEME_DARK, 16, MUTED));
-	 * themeButton.setToolTipText("Alternar tema claro/escuro");
-	 * themeButton.addActionListener(e -> toggleTheme());
-	 * 
-	 * JButton layoutButton = new JButton(Icons.get(IconType.SETTINGS, 16, MUTED));
-	 * layoutButton.setToolTipText("Layout, zoom e modo compacto");
-	 * layoutButton.addActionListener(e -> buildLayoutMenu().show( layoutButton, 0,
-	 * layoutButton.getHeight()));
-	 * 
-	 * // Adicionamos os componentes da direita (com pequenos separadores invisíveis
-	 * se desejar) rightToolBar.add(toggleSidebar); rightToolBar.addSeparator(new
-	 * java.awt.Dimension(4, 0)); rightToolBar.add(toggleResults);
-	 * rightToolBar.addSeparator(new java.awt.Dimension(4, 0));
-	 * rightToolBar.add(layoutButton); rightToolBar.addSeparator(new
-	 * java.awt.Dimension(4, 0)); rightToolBar.add(themeButton);
-	 * 
-	 * // Painel mestre que segura as duas barras nas extremidades JPanel bar = new
-	 * JPanel(new BorderLayout()); bar.setBorder(BorderFactory.createEmptyBorder(6,
-	 * 12, 6, 12)); // Reduzido levemente para um look mais compacto
-	 * bar.add(leftToolBar, BorderLayout.WEST); bar.add(rightToolBar,
-	 * BorderLayout.EAST);
-	 * 
-	 * toolbarBar = bar; return bar; }
-	 */
 
 	private JComponent buildToolbar() {
 		// JPanel totalmente transparente (sem o fundo mais claro que você não gostou)
 		JPanel mainBar = new JPanel(new GridBagLayout());
 		mainBar.setOpaque(false);
 
-		// Margem cirúrgica: 6px acima/abaixo, 0px na esquerda para colar na linha da
-		// aba
-		mainBar.setBorder(BorderFactory.createEmptyBorder(6, 0, 6, 12));
+		// 8px acima/abaixo — o MESMO valor do padding do painel CONEXOES (ver
+		// ConnectionsPanel, createEmptyBorder(8,8,8,8)), para as duas linhas
+		// (cabecalho do sidebar e esta barra) ficarem na mesma altura visual,
+		// lado a lado. 0px na esquerda para colar na linha da aba.
+		mainBar.setBorder(BorderFactory.createEmptyBorder(8, 0, 8, 12));
 
 		GridBagConstraints gbc = new GridBagConstraints();
 		// O segredo do alinhamento: força todos os elementos a compartilharem a mesma
@@ -383,83 +332,118 @@ public class MainWindow extends JFrame {
 		runButton.setIcon(Icons.get(IconType.RUN, 14, Color.WHITE));
 		runButton.setToolTipText("Executar (Ctrl+Enter ou F5)");
 		runButton.setEnabled(false);
-		runButton.addActionListener(k -> onRun());
-		styleRunButton(); // Mantém o verde arredondado da Nureal
+		runButton.addActionListener(e -> onRun());
+		runButton.setIconTextGap(6);
+		runButton.setMargin(new Insets(6, 14, 6, 12));
+		runButton.putClientProperty(FlatClientProperties.STYLE,
+				"arc: 8; focusWidth: 0; innerFocusWidth: 0; borderWidth: 0");
+		styleRunButton(); // Mantém o verde da Nureal
 
+		// Sem icone aqui de proposito: o icone de "linhas" ficava estranho colado
+		// ao texto "Formatar" nesse tamanho — so texto. Estilo OUTLINE (contorno,
+		// sem preenchimento) — igual ao "Nova" do painel CONEXOES (ver
+		// ConnectionsPanel#buildHeader) — em vez de um segundo botao solido do
+		// lado do Executar: fica claro que Executar e a acao primaria, e o
+		// conjunto Formatar+seta e mais leve/discreto (mesma leitura de "acao
+		// secundaria" nos dois lugares da UI).
 		JButton formatButton = new JButton("Formatar");
-		formatButton.setIcon(Icons.get(IconType.FORMAT, 14, MUTED));
 		formatButton.setToolTipText("Formatar SQL (Ctrl+Shift+F)");
-		formatButton.addActionListener(k -> {
+		formatButton.addActionListener(e -> {
 			SqlEditorPane editor = currentEditor();
 			if (editor != null) {
 				editor.formatText();
 			}
 		});
+		formatButton.setMargin(new Insets(6, 12, 6, 12));
+		formatButton.putClientProperty("JButton.buttonType", "roundRect");
+		formatButton.putClientProperty(FlatClientProperties.STYLE, "arc: 8; borderWidth: 1");
 
 		JButton formatMenuButton = new JButton(new com.formdev.flatlaf.icons.FlatMenuArrowIcon());
 		formatMenuButton.setToolTipText("Presets e opcoes de formatacao");
 		formatMenuButton
-				.addActionListener(k -> buildFormatMenu().show(formatMenuButton, 0, formatMenuButton.getHeight()));
+				.addActionListener(e -> buildFormatMenu().show(formatMenuButton, 0, formatMenuButton.getHeight()));
+		formatMenuButton.setMargin(new Insets(6, 8, 6, 8));
+		formatMenuButton.putClientProperty("JButton.buttonType", "roundRect");
+		formatMenuButton.putClientProperty(FlatClientProperties.STYLE, "arc: 8; borderWidth: 1");
 
-		// Segmentação limpa do FlatLaf (une os dois botões mantendo o fundo padrão do
-		// tema)
-		formatButton.putClientProperty("JButton.segmentPosition", "first");
-		formatMenuButton.putClientProperty("JButton.segmentPosition", "last");
+		// O icone minusculo da seta rende um "preferred height" menor que o do
+		// texto "Executar"/"Formatar" — sem isto os tres ficam com alturas
+		// ligeiramente diferentes mesmo com a mesma margem vertical. Forca os
+		// tres a MESMA altura (a maior das tres), so a largura continua livre.
+		int rowHeight = Math.max(runButton.getPreferredSize().height,
+				Math.max(formatButton.getPreferredSize().height, formatMenuButton.getPreferredSize().height));
+		for (JButton b : new JButton[] { runButton, formatButton, formatMenuButton }) {
+			Dimension d = b.getPreferredSize();
+			b.setPreferredSize(new Dimension(d.width, rowHeight));
+		}
 
 		// Adiciona os botões esquerdos um a um aplicando pequenos recuos à direita
 		// (insets)
 		gbc.gridx = 0;
 		gbc.weightx = 0.0;
-		gbc.insets = new java.awt.Insets(0, 0, 0, 8); // Colado na esquerda, espaço de 8px após o Executar
+		gbc.insets = new Insets(0, 0, 0, 10); // Colado na esquerda, espaço apos o Executar
 		mainBar.add(runButton, gbc);
 
 		gbc.gridx = 1;
-		gbc.insets = new java.awt.Insets(0, 0, 0, 0);
+		gbc.insets = new Insets(0, 0, 0, 0);
 		mainBar.add(formatButton, gbc);
 
 		gbc.gridx = 2;
-		gbc.insets = new java.awt.Insets(0, 0, 0, 0);
+		// So uma pequena margem cinza entre "Formatar" e a seta de opcoes — nao
+		// colados de vez (como um segmented button ficaria), so proximos.
+		gbc.insets = new Insets(0, 4, 0, 0);
 		mainBar.add(formatMenuButton, gbc);
 
 		// --- O ESPAÇADOR INVISÍVEL ---
 		// Ele joga tudo o que vier a partir daqui totalmente para a direita
 		gbc.gridx = 3;
 		gbc.weightx = 1.0;
-		mainBar.add(javax.swing.Box.createHorizontalGlue(), gbc);
+		mainBar.add(Box.createHorizontalGlue(), gbc);
 
-		// --- Botões da Direita ---
+		// --- Separador sutil antes do grupo de icones de layout/tema ---
+		JSeparator divider = new JSeparator(SwingConstants.VERTICAL);
+		divider.setPreferredSize(new Dimension(1, 18));
+		divider.setForeground(new Color(0xE2E5EA));
+		gbc.gridx = 4;
+		gbc.weightx = 0.0;
+		gbc.insets = new Insets(0, 6, 0, 10);
+		mainBar.add(divider, gbc);
+
+		// --- Botões da Direita (icones discretos, mesma linguagem visual) ---
 		JButton toggleSidebar = new JButton(Icons.get(IconType.PANEL_LEFT, 16, MUTED));
 		toggleSidebar.setToolTipText("Mostrar/ocultar painel lateral (Ctrl+B)");
-		toggleSidebar.addActionListener(k -> toggleSidebar());
+		toggleSidebar.addActionListener(e -> toggleSidebar());
 
 		JButton toggleResults = new JButton(Icons.get(IconType.PANEL_BOTTOM, 16, MUTED));
 		toggleResults.setToolTipText("Mostrar/ocultar resultados (Ctrl+J)");
-		toggleResults.addActionListener(k -> toggleResults());
+		toggleResults.addActionListener(e -> toggleResults());
 
 		JButton layoutButton = new JButton(Icons.get(IconType.SETTINGS, 16, MUTED));
 		layoutButton.setToolTipText("Layout, zoom e modo compacto");
-		layoutButton.addActionListener(k -> buildLayoutMenu().show(layoutButton, 0, layoutButton.getHeight()));
+		layoutButton.addActionListener(e -> buildLayoutMenu().show(layoutButton, 0, layoutButton.getHeight()));
 
 		themeButton = new JButton(Icons.get(IconType.THEME_DARK, 16, MUTED));
 		themeButton.setToolTipText("Alternar tema claro/escuro");
-		themeButton.addActionListener(k -> toggleTheme());
+		themeButton.addActionListener(e -> toggleTheme());
 
-		// Mantém os botões da direita planos/transparentes (estilo ícones discretos)
+		// Icones planos, quadrados e com o mesmo arco do resto da barra — o
+		// realce ao passar o mouse (hover) vem de graca do buttonType do FlatLaf.
 		for (JButton btn : new JButton[] { toggleSidebar, toggleResults, layoutButton, themeButton }) {
 			btn.putClientProperty("JButton.buttonType", "toolBarButton");
+			btn.putClientProperty(FlatClientProperties.STYLE, "arc: 8");
+			btn.setMargin(new Insets(5, 5, 5, 5));
 		}
 
 		// Adiciona os botões da direita sequencialmente
-		gbc.weightx = 0.0;
-		gbc.insets = new java.awt.Insets(0, 4, 0, 4); // Pequeno espaço entre os ícones
+		gbc.insets = new Insets(0, 3, 0, 3); // Pequeno espaço entre os ícones
 
-		gbc.gridx = 4;
-		mainBar.add(toggleSidebar, gbc);
 		gbc.gridx = 5;
-		mainBar.add(toggleResults, gbc);
+		mainBar.add(toggleSidebar, gbc);
 		gbc.gridx = 6;
-		mainBar.add(layoutButton, gbc);
+		mainBar.add(toggleResults, gbc);
 		gbc.gridx = 7;
+		mainBar.add(layoutButton, gbc);
+		gbc.gridx = 8;
 		mainBar.add(themeButton, gbc);
 
 		toolbarBar = mainBar;
@@ -477,18 +461,18 @@ public class MainWindow extends JFrame {
 
 		JMenuItem moveSidebar = new JMenuItem(
 				sidebarOnRight ? "Mover painel lateral para a esquerda" : "Mover painel lateral para a direita");
-		moveSidebar.addActionListener(k -> toggleSidebarSide());
+		moveSidebar.addActionListener(a -> toggleSidebarSide());
 		menu.add(moveSidebar);
 
 		JMenuItem toggleOrientation = new JMenuItem(resultsVertical ? "Resultados embaixo do editor (horizontal)"
 				: "Resultados ao lado do editor (vertical)");
-		toggleOrientation.addActionListener(k -> toggleResultsOrientation());
+		toggleOrientation.addActionListener(a -> toggleResultsOrientation());
 		menu.add(toggleOrientation);
 
 		menu.addSeparator();
 
 		JCheckBoxMenuItem compact = new JCheckBoxMenuItem("Modo compacto", compactMode);
-		compact.addActionListener(k -> toggleCompactMode());
+		compact.addActionListener(a -> toggleCompactMode());
 		menu.add(compact);
 
 		menu.addSeparator();
@@ -498,12 +482,12 @@ public class MainWindow extends JFrame {
 			int pct = (int) Math.round(ZOOM_LEVELS[i] * 100);
 			String mark = (i == zoomIndex) ? "✓ " : "      ";
 			JMenuItem item = new JMenuItem(mark + pct + "%");
-			item.addActionListener(k -> setZoomIndex(idx));
+			item.addActionListener(a -> setZoomIndex(idx));
 			zoomMenu.add(item);
 		}
 		zoomMenu.addSeparator();
 		JMenuItem reset = new JMenuItem("Redefinir (Ctrl+0)");
-		reset.addActionListener(k -> resetZoom());
+		reset.addActionListener(a -> resetZoom());
 		zoomMenu.add(reset);
 		menu.add(zoomMenu);
 
@@ -516,24 +500,18 @@ public class MainWindow extends JFrame {
 	private JPopupMenu buildFormatMenu() {
 		JPopupMenu menu = new JPopupMenu();
 
-		JLabel presetsLabel = new JLabel("  Presets");
-		presetsLabel.setEnabled(false);
-		presetsLabel.setFont(presetsLabel.getFont().deriveFont(Font.BOLD, 10f));
-		menu.add(presetsLabel);
-
-		menu.add(formatStyleItem(SqlFormatter.Style.RIVER, "Oracle (Alinhado a direita)"));
-		menu.add(formatStyleItem(SqlFormatter.Style.STANDARD, "Standard (Indentado por tab)"));
-		menu.add(formatStyleItem(SqlFormatter.Style.COMMA_FIRST, "Commas First (Virgulas no inicio)"));
+		menu.add(formatMenuHeader("Presets"));
+		ButtonGroup presets = new ButtonGroup();
+		menu.add(presetItem(presets, SqlFormatter.Style.RIVER, "Oracle (Alinhado a direita)"));
+		menu.add(presetItem(presets, SqlFormatter.Style.STANDARD, "Standard (Indentado por tab)"));
+		menu.add(presetItem(presets, SqlFormatter.Style.COMMA_FIRST, "Commas First (Virgulas no inicio)"));
 
 		menu.addSeparator();
-		JLabel optionsLabel = new JLabel("  Configuracoes");
-		optionsLabel.setEnabled(false);
-		optionsLabel.setFont(optionsLabel.getFont().deriveFont(Font.BOLD, 10f));
-		menu.add(optionsLabel);
+		menu.add(formatMenuHeader("Configuracoes"));
 
 		JCheckBoxMenuItem upper = new JCheckBoxMenuItem("Caixa alta para palavras-chave (SELECT, FROM...)",
 				formatState.upperKeywords());
-		upper.addActionListener(k -> {
+		upper.addActionListener(a -> {
 			formatState = new FormatPreferences.State(formatState.style(), !formatState.upperKeywords(),
 					formatState.indentJson(), formatState.editorFontFamily());
 			saveFormatState();
@@ -542,7 +520,7 @@ public class MainWindow extends JFrame {
 
 		JCheckBoxMenuItem json = new JCheckBoxMenuItem("Indentar funcoes JSON (JSON_OBJECT/JSON_ARRAY)",
 				formatState.indentJson());
-		json.addActionListener(k -> {
+		json.addActionListener(a -> {
 			formatState = new FormatPreferences.State(formatState.style(), formatState.upperKeywords(),
 					!formatState.indentJson(), formatState.editorFontFamily());
 			saveFormatState();
@@ -551,16 +529,30 @@ public class MainWindow extends JFrame {
 
 		menu.addSeparator();
 		JMenuItem chooseFont = new JMenuItem("Escolher fonte do editor...");
-		chooseFont.addActionListener(k -> chooseEditorFont());
+		chooseFont.addActionListener(a -> chooseEditorFont());
 		menu.add(chooseFont);
 
 		return menu;
 	}
 
-	private JMenuItem formatStyleItem(SqlFormatter.Style style, String label) {
-		String mark = (formatState.style() == style) ? "✓ " : "      ";
-		JMenuItem item = new JMenuItem(mark + label);
-		item.addActionListener(k -> {
+	/** Cabecalho de secao do menu de formatacao — mesmo estilo de "OBJETOS"/"CONEXOES" do resto da IDE. */
+	private JComponent formatMenuHeader(String text) {
+		JLabel label = sectionHeader(text);
+		label.setBorder(BorderFactory.createEmptyBorder(4, 12, 4, 12));
+		return label;
+	}
+
+	/**
+	 * Item de preset de formatacao: {@link JRadioButtonMenuItem} de verdade
+	 * (marcador nativo do FlatLaf), nao mais um caractere unicode de check
+	 * grudado no texto — em algumas fontes esse caractere nao existia e
+	 * aparecia como um quadrado vazio ("tofu"). Radio button tambem descreve
+	 * melhor a escolha: os tres presets sao mutuamente exclusivos.
+	 */
+	private JRadioButtonMenuItem presetItem(ButtonGroup group, SqlFormatter.Style style, String label) {
+		JRadioButtonMenuItem item = new JRadioButtonMenuItem(label, formatState.style() == style);
+		group.add(item);
+		item.addActionListener(a -> {
 			formatState = new FormatPreferences.State(style, formatState.upperKeywords(), formatState.indentJson(),
 					formatState.editorFontFamily());
 			saveFormatState();
@@ -983,16 +975,58 @@ public class MainWindow extends JFrame {
 	private JComponent buildObjectBrowser() {
 		objectTree = new JTree(new DefaultTreeModel(new DefaultMutableTreeNode("Sem conexao")));
 		objectTree.setRootVisible(true);
-		objectTree.setShowsRootHandles(true);
+		// false: some SO o "punho" (triangulo) de expandir/recolher da RAIZ —
+		// os filhos (categorias, tabelas, colunas) continuam com o triangulo
+		// normal. Na raiz, o lugar do triangulo passa a ser a bolinha de
+		// status da conexao (ver ObjectTreeCellRenderer). Expandir/recolher a
+		// raiz continua funcionando por duplo-clique (comportamento nativo do
+		// JTree, independente do triangulo estar visivel).
+		objectTree.setShowsRootHandles(false);
+		// FlatLaf pinta por conta propria uma selecao "wide" (linha inteira,
+		// verde generico do L&F, sem nocao de categoria) por cima de
+		// qualquer coisa que o renderer desenhe. Desligando aqui: quem manda
+		// no fundo de cada linha (categoria OU selecao) e 100% o
+		// ObjectTreeCellRenderer (ver seu javadoc — ele proprio se estica
+		// para cobrir a linha inteira, sem depender de nada fora dele).
+		objectTree.putClientProperty("JTree.paintSelection", false);
 		objectTree.setRowHeight(scaledPx(22));
 		objectTree.setBorder(BorderFactory.createEmptyBorder(4, 8, 4, 4));
 		objectTree.setCellRenderer(new ObjectTreeCellRenderer());
 		objectTree.addMouseListener(new MouseAdapter() {
 			@Override
 			public void mouseClicked(MouseEvent e) {
+				// So SCHEMA_PICK reage a duplo clique aqui — objetos
+				// abriveis (tabela/view/...) deixam o duplo clique 100%
+				// livre para o expand/recolher nativo do JTree. "Abrir
+				// propriedades" desses objetos e via clique direito (ver
+				// maybeShowObjectContextMenu abaixo).
 				if (e.getClickCount() == 2) {
 					openSelectedObjectProperties();
 				}
+			}
+
+			@Override
+			public void mousePressed(MouseEvent e) {
+				maybeShowObjectContextMenu(e);
+			}
+
+			@Override
+			public void mouseReleased(MouseEvent e) {
+				maybeShowObjectContextMenu(e);
+			}
+		});
+		// Ctrl+C copia o(s) nome(s) da(s) linha(s) selecionada(s) — a arvore
+		// nao e um campo de texto, entao nao tem selecao de CARACTERES, mas
+		// selecionar uma ou mais linhas e copiar o nome delas e um pedido
+		// razoavel (e explicito) do usuario.
+		objectTree.getInputMap(JComponent.WHEN_FOCUSED).put(
+				KeyStroke.getKeyStroke(KeyEvent.VK_C, InputEvent.CTRL_DOWN_MASK), "copy-object-name");
+		objectTree.getActionMap().put("copy-object-name", new AbstractAction() {
+			private static final long serialVersionUID = 1L;
+
+			@Override
+			public void actionPerformed(ActionEvent e) {
+				copySelectedObjectNames();
 			}
 		});
 
@@ -1020,11 +1054,11 @@ public class MainWindow extends JFrame {
 			}
 		});
 
-		refreshObjectsButton = new JButton(Icons.get(IconType.REFRESH, 13, MUTED));
+		JButton refreshObjectsButton = new JButton(Icons.get(IconType.REFRESH, 13, MUTED));
 		refreshObjectsButton.setBorderPainted(false);
 		refreshObjectsButton.setContentAreaFilled(false);
 		refreshObjectsButton.setToolTipText("Atualizar objetos (Ctrl+R)");
-		refreshObjectsButton.addActionListener(k -> refreshObjectTree(true));
+		refreshObjectsButton.addActionListener(e -> refreshObjectTree(true));
 
 		JPanel headerRow = new JPanel(new BorderLayout());
 		headerRow.setOpaque(false);
@@ -1048,12 +1082,20 @@ public class MainWindow extends JFrame {
 
 	private JComponent buildEditorArea() {
 		editorTabs = new JTabbedPane();
+		// Sem isto, o FlatLaf reserva um respiro antes da primeira aba (a area
+		// de abas tem um inset esquerdo proprio, independente do painel que a
+		// contem) — a primeira aba ficava alguns pixels mais a direita que o
+		// botao "Executar" da barra logo acima, mesmo os dois partindo de
+		// x=0 no layout. Zerar o inset alinha a aba com a barra de ferramentas.
+		editorTabs.putClientProperty("JTabbedPane.tabAreaInsets", new Insets(0, 0, 0, 0));
 		editorTabs.putClientProperty("JTabbedPane.tabClosable", true);
 		editorTabs.putClientProperty("JTabbedPane.tabCloseCallback",
 				(BiConsumer<JTabbedPane, Integer>) (k, index) -> closeQueryTab(index));
 		// Selecionar a aba "+" abre uma nova query; qualquer outra troca salva a
-		// sessao.
-		editorTabs.addChangeListener(k -> {
+		// sessao E redesenha RESULTADOS com o que essa aba tinha da ultima
+		// vez (cada aba de SQL tem seus proprios resultados — ver
+		// resultsByTab/showResultsForActiveEditor).
+		editorTabs.addChangeListener(e -> {
 			if (addingTab) {
 				return; // evita reentrancia: insertTab desloca a selecao da aba "+"
 			}
@@ -1063,6 +1105,7 @@ public class MainWindow extends JFrame {
 				}
 			} else {
 				scheduleSave();
+				showResultsForActiveEditor();
 			}
 		});
 		// Botao direito no titulo da aba: fechar / fechar as outras.
@@ -1184,11 +1227,11 @@ public class MainWindow extends JFrame {
 		}
 		JPopupMenu menu = new JPopupMenu();
 		JMenuItem rename = new JMenuItem("Renomear...");
-		rename.addActionListener(k -> renameTab(target));
+		rename.addActionListener(a -> renameTab(target));
 		JMenuItem close = new JMenuItem("Fechar");
-		close.addActionListener(k -> closeTabComponent(target));
+		close.addActionListener(a -> closeTabComponent(target));
 		JMenuItem closeOthers = new JMenuItem("Fechar as outras");
-		closeOthers.addActionListener(k -> closeOtherTabs(target));
+		closeOthers.addActionListener(a -> closeOtherTabs(target));
 		menu.add(rename);
 		menu.addSeparator();
 		menu.add(close);
@@ -1242,7 +1285,8 @@ public class MainWindow extends JFrame {
 	}
 
 	private void closeQueryTab(int index) {
-		if (editorTabs.getComponentAt(index) == plusTab) {
+		Component target = editorTabs.getComponentAt(index);
+		if (target == plusTab) {
 			return;
 		}
 		if (realTabCount() <= 1) {
@@ -1257,6 +1301,11 @@ public class MainWindow extends JFrame {
 			}
 		}
 		editorTabs.removeTabAt(index);
+		// Os resultados dessa aba morrem com ela — nao fazem mais sentido
+		// sem a aba de SQL que os gerou (ver resultsByTab).
+		if (target instanceof SqlEditorPane sep) {
+			resultsByTab.remove(sep);
+		}
 		scheduleSave();
 	}
 
@@ -1291,11 +1340,32 @@ public class MainWindow extends JFrame {
 		}
 		workspaces.put(SCRATCH, scratch);
 		activeWorkspace = scratch;
-		rebuildEditorTabs(scratch.tabs, scratch.selectedTab);
+		rebuildEditorTabs(scratch.tabs, scratch.selectedTab, scratch.tabResults);
 	}
 
-	/** Reconstroi as abas do editor a partir do conteudo salvo (titulo + SQL). */
-	private void rebuildEditorTabs(List<SessionStore.Tab> tabs, int selected) {
+	/**
+	 * Reconstroi as abas do editor a partir do conteudo salvo (titulo + SQL)
+	 * e restaura os resultados de cada uma, se houver (ver
+	 * {@code Workspace#tabResults}) — usado tanto na inicializacao quanto ao
+	 * trocar de workspace/conexao (ver {@code activateWorkspace}): trocar de
+	 * conexao e voltar tem que devolver os resultados que cada aba tinha
+	 * antes da troca, nao uma tela vazia.
+	 */
+	private void rebuildEditorTabs(List<SessionStore.Tab> tabs, int selected, Map<Integer, List<QueryResult>> savedResults) {
+		// As abas antigas (de outro workspace/conexao, ou recarregadas do
+		// disco) vao ser descartadas e substituidas por instancias NOVAS de
+		// SqlEditorPane (mesmo titulo/SQL, objeto diferente) — os resultados
+		// guardados para as antigas (ver resultsByTab) nunca mais seriam
+		// encontrados por uma instancia nova, entao ficariam so ocupando
+		// memoria a toa. Ja foram (ou nao) salvos no workspace de origem por
+		// saveActiveTabs ANTES desta chamada — aqui e so limpeza da chave
+		// antiga, mesma regra de "resultado morre com a aba" de closeQueryTab.
+		for (int i = 0; i < editorTabs.getTabCount(); i++) {
+			Component c = editorTabs.getComponentAt(i);
+			if (c instanceof SqlEditorPane sep) {
+				resultsByTab.remove(sep);
+			}
+		}
 		editorTabs.removeAll();
 		plusTab = null;
 		if (tabs == null || tabs.isEmpty()) {
@@ -1307,9 +1377,36 @@ public class MainWindow extends JFrame {
 			}
 		}
 		addPlusTab();
+		// Restaura os resultados salvos (indexados por POSICAO da aba, ver
+		// Workspace#tabResults) nas instancias NOVAS de SqlEditorPane recem
+		// criadas acima — tem que ser DEPOIS de cria-las (para termos as
+		// instancias certas como chave) e ANTES do showResultsForActiveEditor
+		// no final (para ele ja encontrar o resultado, se houver).
+		if (savedResults != null && !savedResults.isEmpty()) {
+			int tabIndex = 0;
+			for (int i = 0; i < editorTabs.getTabCount(); i++) {
+				Component c = editorTabs.getComponentAt(i);
+				if (c == plusTab) {
+					continue;
+				}
+				if (c instanceof SqlEditorPane sep) {
+					List<QueryResult> saved = savedResults.get(tabIndex);
+					if (saved != null) {
+						resultsByTab.put(sep, saved);
+					}
+				}
+				tabIndex++;
+			}
+		}
 		if (selected >= 0 && selected < editorTabs.getTabCount() && editorTabs.getComponentAt(selected) != plusTab) {
 			editorTabs.setSelectedIndex(selected);
 		}
+		// Chamada explicita (nao so via ChangeListener): se o indice
+		// selecionado no fim da reconstrucao for igual ao que ja estava
+		// selecionado, o JTabbedPane nao dispara ChangeEvent nenhum, e o
+		// painel de RESULTADOS ficaria mostrando o estado da aba antiga (de
+		// outro workspace/sessao) por engano.
+		showResultsForActiveEditor();
 	}
 
 	/** Captura o conteudo atual das abas do editor (titulo + SQL). */
@@ -1324,23 +1421,52 @@ public class MainWindow extends JFrame {
 		return list;
 	}
 
-	/** Salva as abas atuais do editor no workspace ativo. */
+	/** Salva as abas atuais do editor (SQL + resultados) no workspace ativo. */
 	private void saveActiveTabs() {
 		if (activeWorkspace != null && editorTabs != null) {
 			activeWorkspace.tabs = collectTabs();
 			activeWorkspace.selectedTab = Math.max(editorTabs.getSelectedIndex(), 0);
+			activeWorkspace.tabResults = snapshotTabResults();
 		}
 	}
 
 	/**
-	 * Ativa um workspace: guarda as abas do ativo, troca a conexao corrente,
-	 * reconstroi as abas do alvo e atualiza navegador/autocomplete/indicadores.
+	 * Guarda os resultados ATUAIS de cada aba de SQL (ver resultsByTab),
+	 * indexados por POSICAO (nao pela instancia de SqlEditorPane — ver
+	 * javadoc de {@code Workspace#tabResults}). Chamado ao SAIR de um
+	 * workspace (ver {@code saveActiveTabs}), para que
+	 * {@code rebuildEditorTabs} consiga devolve-los quando o usuario voltar.
+	 */
+	private Map<Integer, List<QueryResult>> snapshotTabResults() {
+		Map<Integer, List<QueryResult>> snapshot = new HashMap<>();
+		int tabIndex = 0;
+		for (int i = 0; i < editorTabs.getTabCount(); i++) {
+			Component c = editorTabs.getComponentAt(i);
+			if (c == plusTab) {
+				continue;
+			}
+			if (c instanceof SqlEditorPane sep) {
+				List<QueryResult> results = resultsByTab.get(sep);
+				if (results != null) {
+					snapshot.put(tabIndex, results);
+				}
+			}
+			tabIndex++;
+		}
+		return snapshot;
+	}
+
+	/**
+	 * Ativa um workspace: guarda as abas do ativo (SQL + resultados),
+	 * troca a conexao corrente, reconstroi as abas do alvo (restaurando os
+	 * resultados que ele tinha da ultima vez que esteve ativo) e atualiza
+	 * navegador/autocomplete/indicadores.
 	 */
 	private void activateWorkspace(Workspace w) {
 		saveActiveTabs();
 		activeWorkspace = w;
 		connectionManager = w.mgr;
-		rebuildEditorTabs(w.tabs, w.selectedTab);
+		rebuildEditorTabs(w.tabs, w.selectedTab, w.tabResults);
 		if (w.schema != null) {
 			metadataCache.set(w.schema);
 			completionProvider.refresh(w.schema);
@@ -1379,7 +1505,7 @@ public class MainWindow extends JFrame {
 	/** Agenda um salvamento (debounce) ~1s apos a ultima alteracao. */
 	private void scheduleSave() {
 		if (autosaveTimer == null) {
-			autosaveTimer = new Timer(1000, k -> saveSession());
+			autosaveTimer = new Timer(1000, e -> saveSession());
 			autosaveTimer.setRepeats(false);
 		}
 		autosaveTimer.restart();
@@ -1407,6 +1533,26 @@ public class MainWindow extends JFrame {
 	private SqlEditorPane currentEditor() {
 		Component c = editorTabs.getSelectedComponent();
 		return (c instanceof SqlEditorPane sep) ? sep : null;
+	}
+
+	/**
+	 * Redesenha o painel de RESULTADOS com o que a aba de SQL atualmente
+	 * selecionada tinha da ULTIMA vez que rodou algo (ver
+	 * {@code resultsByTab}, preenchido em {@code onRun}) — nunca o que outra
+	 * aba rodou. Aba que ainda nao rodou nada nesta sessao: estado vazio.
+	 * Chamado sempre que a selecao de {@code editorTabs} muda para uma aba
+	 * real (ver {@code buildEditorArea}).
+	 */
+	private void showResultsForActiveEditor() {
+		SqlEditorPane editor = currentEditor();
+		List<QueryResult> results = (editor == null) ? null : resultsByTab.get(editor);
+		if (results == null) {
+			lastResults = new ArrayList<>();
+			resultTabs.removeAll();
+			showEmptyState();
+			return;
+		}
+		showResults(results);
 	}
 
 	// ---------- Resultados ----------
@@ -1437,7 +1583,7 @@ public class MainWindow extends JFrame {
 		JButton orientationToggle = new JButton();
 		orientationToggle.setBorderPainted(false);
 		orientationToggle.setContentAreaFilled(false);
-		orientationToggle.addActionListener(k -> toggleResultsOrientation());
+		orientationToggle.addActionListener(e -> toggleResultsOrientation());
 		updateOrientationToggleIcon(orientationToggle);
 		this.resultsOrientationButton = orientationToggle;
 
@@ -1497,7 +1643,7 @@ public class MainWindow extends JFrame {
 
 		JButton cancel = new JButton("Cancelar");
 		cancel.setAlignmentX(Component.CENTER_ALIGNMENT);
-		cancel.addActionListener(k -> cancelExecution());
+		cancel.addActionListener(e -> cancelExecution());
 
 		JPanel card = new JPanel();
 		card.setLayout(new BoxLayout(card, BoxLayout.Y_AXIS));
@@ -1697,9 +1843,9 @@ public class MainWindow extends JFrame {
 		objectSearch.setEnabled(false);
 		objectSearch.setText("");
 		DefaultMutableTreeNode root = new DefaultMutableTreeNode(
-				new ObjNode(NodeType.SCHEMA, "Esquemas", "Esquemas", null, null));
+				new ObjNode(NodeType.SCHEMA, "Esquemas", "Esquemas", null, null, null));
 		for (String s : schemas) {
-			root.add(new DefaultMutableTreeNode(new ObjNode(NodeType.SCHEMA_PICK, s, s, null, null)));
+			root.add(new DefaultMutableTreeNode(new ObjNode(NodeType.SCHEMA_PICK, s, s, null, null, null)));
 		}
 		objectTree.setModel(new DefaultTreeModel(root));
 		objectTree.expandPath(new TreePath(root.getPath()));
@@ -1868,7 +2014,16 @@ public class MainWindow extends JFrame {
 				runButton.setEnabled(true);
 				try {
 					List<QueryResult> results = get();
-					showResults(results);
+					// Resultado pertence a ABA que rodou (editor), nao a
+					// "aba selecionada agora" — o usuario pode ter trocado
+					// de aba enquanto a query rodava. So redesenha o painel
+					// de RESULTADOS se aquela aba ainda for a selecionada;
+					// senao, so guarda (ver showResultsForActiveEditor,
+					// chamado quando o usuario voltar pra ela).
+					resultsByTab.put(editor, results);
+					if (editor == currentEditor()) {
+						showResults(results);
+					}
 					if (ranStructuralDdl(statements, results)) {
 						refreshObjectTree(false);
 					}
@@ -1901,6 +2056,15 @@ public class MainWindow extends JFrame {
 		return false;
 	}
 
+	/**
+	 * Redesenha as abas de RESULTADOS a partir de {@code results} — chamada
+	 * tanto logo apos uma execucao quanto para REDESENHAR (zoom/modo
+	 * compacto, ver refreshDynamicSizing, ou troca de aba de SQL, ver
+	 * showResultsForActiveEditor) um conjunto ja existente. Por isso o
+	 * {@code openCursors.contains(...)} abaixo: sem ele, reexibir o MESMO
+	 * resultado (o mesmo objeto {@code ResultCursor}) duas vezes duplicaria
+	 * a entrada na lista de cursores abertos.
+	 */
 	private void showResults(List<QueryResult> results) {
 		this.lastResults = results;
 		resultTabs.removeAll();
@@ -1909,7 +2073,7 @@ public class MainWindow extends JFrame {
 		for (QueryResult r : results) {
 			JComponent content;
 			if (r.model() != null) {
-				if (r.cursor() != null && !r.cursor().exhausted) {
+				if (r.cursor() != null && !r.cursor().exhausted && !openCursors.contains(r.cursor())) {
 					openCursors.add(r.cursor());
 				}
 				content = buildGridPanel(r);
@@ -1951,10 +2115,7 @@ public class MainWindow extends JFrame {
 		ResultStatusBar resultStatusBar = new ResultStatusBar(PAGE_SIZE);
 		Runnable refresh = () -> resultStatusBar.refresh(r.model().getRowCount(), r.execMs(), r.fetchMs(),
 				r.cursor() != null && !r.cursor().exhausted);
-		resultStatusBar.onLoadMore(() -> {
-			loadPage(r, PAGE_SIZE);
-			refresh.run();
-		});
+		resultStatusBar.onLoadMore(() -> loadPage(r, PAGE_SIZE, refresh));
 		resultStatusBar.onLoadAll(() -> loadAll(r, refresh));
 		resultStatusBar.onExportThis(() -> exportResult(r));
 		resultStatusBar.onExportAll(this::exportAll);
@@ -1979,25 +2140,54 @@ public class MainWindow extends JFrame {
 		}
 	}
 
-	/** Le ate {@code max} linhas do cursor para o modelo (na EDT). */
-	private void loadPage(QueryResult r, int max) {
+	/**
+	 * Le ate {@code max} linhas do cursor em segundo plano (a leitura do
+	 * ResultSet e a mutacao do TableModel NUNCA podem rodar fora da EDT — mesmo
+	 * padrao seguro de {@link #loadAll}, so que limitado a uma pagina em vez de
+	 * ate o fim do cursor) e entao chama {@code refresh}.
+	 */
+	private void loadPage(QueryResult r, int max, Runnable refresh) {
 		ResultCursor c = r.cursor();
 		if (c == null || c.exhausted) {
 			return;
 		}
-		try {
-			int read = appendPage(r.model(), c.rs, max);
-			if (read < max) {
-				c.exhausted = true;
-				c.close();
-				openCursors.remove(c);
+		new SwingWorker<List<Vector<Object>>, Void>() {
+			@Override
+			protected List<Vector<Object>> doInBackground() throws SQLException {
+				int cols = r.model().getColumnCount();
+				List<Vector<Object>> rows = new ArrayList<>();
+				while (rows.size() < max && c.rs.next()) {
+					Vector<Object> row = new Vector<>(cols);
+					for (int i = 1; i <= cols; i++) {
+						row.add(c.rs.getObject(i));
+					}
+					rows.add(row);
+				}
+				return rows;
 			}
-		} catch (SQLException ex) {
-			c.exhausted = true;
-			c.close();
-			openCursors.remove(c);
-			statusBar.setText(" Erro ao carregar mais linhas: " + ex.getMessage());
-		}
+
+			@Override
+			protected void done() {
+				try {
+					List<Vector<Object>> rows = get();
+					for (Vector<Object> row : rows) {
+						r.model().addRow(row);
+					}
+					if (rows.size() < max) {
+						c.exhausted = true;
+						c.close();
+						openCursors.remove(c);
+					}
+				} catch (Exception ex) {
+					Throwable cause = (ex.getCause() != null) ? ex.getCause() : ex;
+					c.exhausted = true;
+					c.close();
+					openCursors.remove(c);
+					statusBar.setText(" Erro ao carregar mais linhas: " + cause.getMessage());
+				}
+				refresh.run();
+			}
+		}.execute();
 	}
 
 	/** Le todas as linhas restantes do cursor em segundo plano. */
@@ -2052,6 +2242,14 @@ public class MainWindow extends JFrame {
 		openCursors.clear();
 	}
 
+	/** Fecha cursores abertos e as conexoes JDBC de TODOS os workspaces (ao fechar a janela). */
+	private void closeAllConnections() {
+		closeOpenCursors();
+		for (Workspace w : workspaces.values()) {
+			w.mgr.close();
+		}
+	}
+
 	// ---------- Exportacao ----------
 
 	private void maybeShowTabMenu(MouseEvent e) {
@@ -2066,9 +2264,9 @@ public class MainWindow extends JFrame {
 
 		JPopupMenu menu = new JPopupMenu();
 		JMenuItem one = new JMenuItem("Exportar este resultado para Excel...");
-		one.addActionListener(k -> exportSingle(idx));
+		one.addActionListener(a -> exportSingle(idx));
 		JMenuItem all = new JMenuItem("Exportar todos (uma aba por resultado)...");
-		all.addActionListener(k -> exportAll());
+		all.addActionListener(a -> exportAll());
 		menu.add(one);
 		menu.add(all);
 		menu.show(resultTabs, e.getX(), e.getY());
@@ -2404,7 +2602,7 @@ public class MainWindow extends JFrame {
 		SchemaInfo schema = currentSchema;
 
 		DefaultMutableTreeNode root = new DefaultMutableTreeNode(
-				new ObjNode(NodeType.SCHEMA, schema.name(), schema.name(), null, null));
+				new ObjNode(NodeType.SCHEMA, schema.name(), schema.name(), null, null, null));
 
 		addTableCategory(root, "Tabelas", schema.tables(), NodeType.TABLE, "TABLE", f, filtering);
 		addTableCategory(root, "Visualizacoes", schema.views(), NodeType.VIEW, "VIEW", f, filtering);
@@ -2428,20 +2626,25 @@ public class MainWindow extends JFrame {
 			if (filtering && !contains(t.name(), f) && !anyColumnMatches(t, f)) {
 				continue;
 			}
-			DefaultMutableTreeNode tn = new DefaultMutableTreeNode(new ObjNode(type, t.name(), t.name(), kind, t));
+			DefaultMutableTreeNode tn = new DefaultMutableTreeNode(new ObjNode(type, t.name(), t.name(), kind, t, null));
 			// Ao buscar, a arvore mostra so o objeto; as colunas ficam na tela
 			// de propriedades (duplo-clique). No modo normal, expande as colunas.
 			if (!filtering) {
 				for (ColumnInfo c : t.columns()) {
+					// "kind" (TABLE/VIEW) propagado para a coluna: e o que o
+					// ObjectTreeCellRenderer usa pra saber de qual categoria
+					// colorida a coluna faz parte (a cor "desce" ate ela).
 					tn.add(new DefaultMutableTreeNode(
-							new ObjNode(NodeType.COLUMN, c.name() + " : " + c.type(), c.name(), null, null)));
+							new ObjNode(NodeType.COLUMN, c.name() + " : " + c.type(), c.name(), kind, null, c.type())));
 				}
 			}
 			cat.add(tn);
 			shown++;
 		}
 		if (!filtering || shown > 0) {
-			cat.setUserObject(new ObjNode(NodeType.CATEGORY, label + " (" + items.size() + ")", label, null, null));
+			// "kind" tambem no cabecalho da categoria — a cor cobre a linha
+			// "Tabelas (4)" inteira, nao so os itens dentro dela.
+			cat.setUserObject(new ObjNode(NodeType.CATEGORY, label + " (" + items.size() + ")", label, kind, null, null));
 			root.add(cat);
 		}
 	}
@@ -2463,11 +2666,11 @@ public class MainWindow extends JFrame {
 			if (filtering && !contains(name, f)) {
 				continue;
 			}
-			cat.add(new DefaultMutableTreeNode(new ObjNode(type, name, name, kind, null)));
+			cat.add(new DefaultMutableTreeNode(new ObjNode(type, name, name, kind, null, null)));
 			shown++;
 		}
 		if (!filtering || shown > 0) {
-			cat.setUserObject(new ObjNode(NodeType.CATEGORY, label + " (" + items.size() + ")", label, null, null));
+			cat.setUserObject(new ObjNode(NodeType.CATEGORY, label + " (" + items.size() + ")", label, kind, null, null));
 			root.add(cat);
 		}
 	}
@@ -2490,20 +2693,105 @@ public class MainWindow extends JFrame {
 		}
 	}
 
-	/** Abre a tela de propriedades do objeto selecionado (duplo-clique). */
+	/**
+	 * Duplo-clique numa linha da arvore de objetos. So trata SCHEMA_PICK
+	 * (item de uma lista de escolha de schema, folha sem filhos — nao ha
+	 * conflito com expandir/recolher). Objetos abriveis (tabela/view/
+	 * procedure/function/trigger) NAO abrem mais propriedades por duplo
+	 * clique — esse gesto ficou reservado 100% para o expand/recolher
+	 * nativo do JTree (ver o MouseListener em buildObjectBrowser). Abrir
+	 * propriedades desses objetos agora e so pelo clique direito (ver
+	 * {@link #maybeShowObjectContextMenu}).
+	 */
 	private void openSelectedObjectProperties() {
 		TreePath path = objectTree.getSelectionPath();
 		if (path == null) {
 			return;
 		}
 		Object node = ((DefaultMutableTreeNode) path.getLastPathComponent()).getUserObject();
-		if (node instanceof ObjNode obj) {
-			if (obj.type() == NodeType.SCHEMA_PICK) {
-				openSchema(obj.name());
-			} else if (obj.kind() != null) {
-				showObjectProperties(obj);
-			}
+		if (node instanceof ObjNode obj && obj.type() == NodeType.SCHEMA_PICK) {
+			openSchema(obj.name());
 		}
+	}
+
+	/**
+	 * Menu de contexto (clique direito) da arvore de objetos — so aparece
+	 * para um objeto de fato "de banco" (tabela/view/procedure/function/
+	 * trigger, ver {@link #isOpenableObject}), nunca para schema, categoria
+	 * ou coluna. Substitui a antiga setinha fixa no fim da linha (poluia o
+	 * visual) como forma de abrir "Propriedades".
+	 */
+	private void maybeShowObjectContextMenu(MouseEvent e) {
+		if (!e.isPopupTrigger()) {
+			return;
+		}
+		int row = objectTree.getRowForLocation(e.getX(), e.getY());
+		if (row < 0) {
+			return;
+		}
+		objectTree.setSelectionRow(row);
+		TreePath path = objectTree.getPathForRow(row);
+		Object node = ((DefaultMutableTreeNode) path.getLastPathComponent()).getUserObject();
+		if (!(node instanceof ObjNode obj) || !isOpenableObject(obj.type())) {
+			return;
+		}
+		buildObjectContextMenu(obj).show(objectTree, e.getX(), e.getY());
+	}
+
+	private JPopupMenu buildObjectContextMenu(ObjNode obj) {
+		JPopupMenu menu = new JPopupMenu();
+		JMenuItem properties = new JMenuItem("Propriedades...");
+		properties.addActionListener(a -> showObjectProperties(obj));
+		menu.add(properties);
+		JMenuItem rename = new JMenuItem("Renomear...");
+		rename.setEnabled(false);
+		rename.setToolTipText("Ainda nao implementado — reservado para uma proxima versao");
+		menu.add(rename);
+		menu.addSeparator();
+		JMenuItem copyName = new JMenuItem("Copiar nome (Ctrl+C)");
+		copyName.addActionListener(a -> copySelectedObjectNames());
+		menu.add(copyName);
+		return menu;
+	}
+
+	/**
+	 * Copia o(s) nome(s) da(s) linha(s) selecionada(s) na arvore de objetos
+	 * para a area de transferencia — atalho Ctrl+C (ver
+	 * {@code buildObjectBrowser}) e item "Copiar nome" do menu de contexto.
+	 * A arvore nao tem selecao de texto (nao e um campo editavel), entao
+	 * "copiar o que esta selecionado" aqui significa o(s) nome(s) da(s)
+	 * linha(s) — uma por linha, se mais de uma estiver selecionada.
+	 */
+	private void copySelectedObjectNames() {
+		TreePath[] paths = objectTree.getSelectionPaths();
+		if (paths == null || paths.length == 0) {
+			return;
+		}
+		StringBuilder sb = new StringBuilder();
+		for (TreePath path : paths) {
+			Object node = ((DefaultMutableTreeNode) path.getLastPathComponent()).getUserObject();
+			String text = (node instanceof ObjNode obj) ? obj.name() : String.valueOf(node);
+			if (sb.length() > 0) {
+				sb.append('\n');
+			}
+			sb.append(text);
+		}
+		GridClipboard.setClipboard(sb.toString());
+	}
+
+	/**
+	 * Verdadeiro para os tipos de no que representam um objeto de banco de
+	 * verdade (abrivel via "Informacoes"/DDL): tabela, view, procedure/
+	 * function (ROUTINE) e trigger. NAO inclui CATEGORY nem COLUMN — desde
+	 * que a cor de categoria passou a "descer" ate eles (ver
+	 * {@link ObjectTreeCellRenderer}), os dois tambem carregam um
+	 * {@code kind} nao nulo (reaproveitado so para escolher a cor), o que
+	 * sozinho nao bastaria mais pra decidir se o duplo-clique deve abrir a
+	 * tela de propriedades.
+	 */
+	private static boolean isOpenableObject(NodeType type) {
+		return type == NodeType.TABLE || type == NodeType.VIEW
+				|| type == NodeType.ROUTINE || type == NodeType.TRIGGER;
 	}
 
 	/**
@@ -2516,9 +2804,13 @@ public class MainWindow extends JFrame {
 		dialog.setLocationRelativeTo(this);
 		dialog.setLayout(new BorderLayout());
 
-		JLabel title = new JLabel(obj.name());
+		// SelectableLabel (nao JLabel comum): o nome do objeto e o "kind ·
+		// schema" ficam selecionaveis/copiaveis com Ctrl+C — pedido
+		// explicito do usuario ("qualquer texto aqui dentro pode ser
+		// selecionado... ate nas propriedades").
+		JComponent title = SelectableLabel.of(obj.name());
 		title.setFont(title.getFont().deriveFont(Font.BOLD, 14f));
-		JLabel sub = new JLabel(prettyKind(obj.kind()) + "  ·  " + currentSchema.name());
+		JComponent sub = SelectableLabel.of(prettyKind(obj.kind()) + "  ·  " + currentSchema.name());
 		sub.setForeground(MUTED);
 		JPanel head = new JPanel(new BorderLayout());
 		head.setBorder(BorderFactory.createEmptyBorder(10, 12, 8, 12));
@@ -2695,18 +2987,39 @@ public class MainWindow extends JFrame {
 
 	/**
 	 * No da arvore: tipo, texto exibido, nome cru do objeto, o tipo para o DDL
-	 * (kind, null para schema/categoria/coluna) e a tabela associada quando houver.
+	 * (kind, null para schema/categoria/coluna), a tabela associada quando
+	 * houver e o tipo SQL da coluna (columnType, so preenchido para
+	 * NodeType.COLUMN — usado pelo {@link ObjectTreeCellRenderer} para
+	 * destacar o nome em negrito e mostrar o tipo em cinza a parte).
 	 */
-	record ObjNode(NodeType type, String display, String name, String kind, TableInfo table) {
+	record ObjNode(NodeType type, String display, String name, String kind, TableInfo table, String columnType) {
 		@Override
 		public String toString() {
 			return display;
 		}
 	}
 
+	/**
+	 * Mostra o erro num JTextArea (nao editavel, mas SELECIONAVEL/copiavel
+	 * com Ctrl+C — ao contrario da String simples que
+	 * {@code JOptionPane.showMessageDialog} renderia como um JLabel comum),
+	 * mesmo padrao ja usado em {@link #confirmRiskyStatements}: mensagem de
+	 * erro e exatamente o tipo de texto que da vontade de copiar (pesquisar,
+	 * colar num chamado de suporte etc.).
+	 */
 	private void showError(String title, Exception ex) {
 		Throwable cause = (ex.getCause() != null) ? ex.getCause() : ex;
-		JOptionPane.showMessageDialog(this, cause.getMessage(), title, JOptionPane.ERROR_MESSAGE);
+		String message = (cause.getMessage() != null) ? cause.getMessage() : cause.toString();
+		JTextArea area = new JTextArea(message);
+		area.setEditable(false);
+		area.setOpaque(false);
+		area.setLineWrap(true);
+		area.setWrapStyleWord(true);
+		area.setFont(UIManager.getFont("Label.font"));
+		JScrollPane scroll = new JScrollPane(area);
+		scroll.setPreferredSize(new Dimension(480, 160));
+		scroll.setBorder(BorderFactory.createEmptyBorder());
+		JOptionPane.showMessageDialog(this, scroll, title, JOptionPane.ERROR_MESSAGE);
 	}
 
 	/**
@@ -2720,6 +3033,18 @@ public class MainWindow extends JFrame {
 		List<String> schemaList; // lista de esquemas (schema em branco)
 		List<SessionStore.Tab> tabs = new ArrayList<>();
 		int selectedTab = 0;
+		/**
+		 * Ultimos resultados de cada aba de SQL deste workspace, indexados
+		 * pela POSICAO da aba (0-based, mesma ordem de {@code tabs} —
+		 * indice, nao a instancia de SqlEditorPane: ao trocar de workspace e
+		 * voltar, {@code rebuildEditorTabs} cria instancias NOVAS de
+		 * SqlEditorPane a partir do texto salvo em {@code tabs}, entao a
+		 * instancia antiga (chave usada em {@code MainWindow#resultsByTab}
+		 * enquanto este workspace estava ativo) nao serve mais de chave).
+		 * Preenchido em {@code saveActiveTabs} (ao SAIR deste workspace) e
+		 * consumido em {@code rebuildEditorTabs} (ao VOLTAR pra ele).
+		 */
+		Map<Integer, List<QueryResult>> tabResults = new HashMap<>();
 
 		Workspace(String name, ConnectionProfile profile, ConnectionManager mgr) {
 			this.name = name;

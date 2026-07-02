@@ -1,14 +1,5 @@
 package com.nureal.ide.ui;
 
-import javax.swing.BorderFactory;
-import javax.swing.JButton;
-import javax.swing.JDialog;
-import javax.swing.JPanel;
-import javax.swing.JScrollPane;
-import javax.swing.JTextArea;
-import javax.swing.SwingUtilities;
-import javax.swing.SwingWorker;
-import javax.swing.WindowConstants;
 import java.awt.BorderLayout;
 import java.awt.Component;
 import java.awt.Dimension;
@@ -18,6 +9,16 @@ import java.awt.Toolkit;
 import java.awt.datatransfer.StringSelection;
 import java.sql.Blob;
 import java.sql.Clob;
+
+import javax.swing.BorderFactory;
+import javax.swing.JButton;
+import javax.swing.JDialog;
+import javax.swing.JPanel;
+import javax.swing.JScrollPane;
+import javax.swing.JTextArea;
+import javax.swing.SwingUtilities;
+import javax.swing.SwingWorker;
+import javax.swing.WindowConstants;
 
 /**
  * Visualizador de conteudo completo de uma celula — item "Ver conteudo
@@ -51,7 +52,7 @@ final class CellContentViewer {
         area.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
 
         JButton copy = new JButton("Copiar");
-        copy.addActionListener(k -> copyToClipboard(area.getText()));
+        copy.addActionListener(e -> copyToClipboard(area.getText()));
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT));
         buttons.add(copy);
 

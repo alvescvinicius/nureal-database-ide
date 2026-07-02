@@ -66,6 +66,7 @@ final class ResultContextMenu {
         menu.add(item("Copiar linha", () -> GridClipboard.copyRows(table)));
         menu.add(item("Copiar como INSERT", () -> GridClipboard.copyAsInsert(table, table)));
         menu.add(item("Copiar como UPDATE", () -> GridClipboard.copyAsUpdate(table, table)));
+        menu.add(item("Copiar como IN", () -> GridClipboard.copyAsIn(table)));
         menu.add(item("Copiar como JSON", () -> GridClipboard.copyAsJson(table)));
         menu.add(item("Copiar como CSV", () -> GridClipboard.copyAsCsv(table)));
         menu.addSeparator();
@@ -130,7 +131,7 @@ final class ResultContextMenu {
 
     private static JMenuItem item(String text, Runnable action) {
         JMenuItem item = new JMenuItem(text);
-        item.addActionListener(k -> action.run());
+        item.addActionListener(e -> action.run());
         return item;
     }
 

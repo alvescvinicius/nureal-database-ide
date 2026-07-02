@@ -57,18 +57,18 @@ final class RowNumberGutter {
             return l;
         };
         list.setCellRenderer(renderer);
-        model.addTableModelListener(k -> {
+        model.addTableModelListener(e -> {
             list.revalidate();
             list.repaint();
         });
         // mantem a numeracao/destaque em sincronia com ordenacao/filtro/selecao
         if (table.getRowSorter() != null) {
-            table.getRowSorter().addRowSorterListener(k -> {
+            table.getRowSorter().addRowSorterListener(e -> {
                 list.revalidate();
                 list.repaint();
             });
         }
-        table.getSelectionModel().addListSelectionListener(k -> list.repaint());
+        table.getSelectionModel().addListSelectionListener(e -> list.repaint());
 
         list.addMouseListener(new MouseAdapter() {
             @Override

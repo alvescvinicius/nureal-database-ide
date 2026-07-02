@@ -1,5 +1,6 @@
 package com.nureal.ide.ui;
 
+import com.formdev.flatlaf.FlatClientProperties;
 import com.nureal.ide.core.connection.ConnectionProfile;
 import com.nureal.ide.core.connection.ConnectionStore;
 
@@ -22,6 +23,7 @@ import java.awt.Color;
 import java.awt.Component;
 import java.awt.Font;
 import java.awt.Graphics;
+import java.awt.Insets;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.event.MouseAdapter;
@@ -65,8 +67,18 @@ public class ConnectionsPanel extends JPanel {
         title.setForeground(new java.awt.Color(0x6B7280));
 
         JButton novo = new JButton("Nova");
-        novo.setIcon(Icons.get(IconType.NEW, 15, new Color(0x334155)));
-        novo.addActionListener(k -> onNew());
+        novo.setIcon(Icons.get(IconType.NEW, 13, new Color(0x334155)));
+        novo.setToolTipText("Nova conexao");
+        novo.addActionListener(e -> onNew());
+        novo.setIconTextGap(6);
+        novo.setMargin(new Insets(4, 10, 4, 10));
+        novo.setFont(novo.getFont().deriveFont(12f));
+        // Botao secundario com contorno (nao preenchido) — mesma linguagem de
+        // arco discreto usada na barra de ferramentas do editor (ver
+        // MainWindow#buildToolbar), so que aqui em versao "outline", ja que
+        // esta ao lado do titulo da secao, nao de uma acao primaria.
+        novo.putClientProperty("JButton.buttonType", "roundRect");
+        novo.putClientProperty(FlatClientProperties.STYLE, "arc: 8; borderWidth: 1");
 
         JPanel header = new JPanel(new BorderLayout());
         header.setOpaque(false);
@@ -113,13 +125,13 @@ public class ConnectionsPanel extends JPanel {
         }
         JPopupMenu menu = new JPopupMenu();
         JMenuItem connect = new JMenuItem("Conectar");
-        connect.addActionListener(k -> connectSelected());
+        connect.addActionListener(a -> connectSelected());
         JMenuItem edit = new JMenuItem("Editar...");
         edit.setIcon(Icons.get(IconType.EDIT, 15, new Color(0x334155)));
-        edit.addActionListener(k -> onEdit());
+        edit.addActionListener(a -> onEdit());
         JMenuItem delete = new JMenuItem("Excluir");
         delete.setIcon(Icons.get(IconType.DELETE, 15, new Color(0x334155)));
-        delete.addActionListener(k -> onDelete());
+        delete.addActionListener(a -> onDelete());
         menu.add(connect);
         menu.addSeparator();
         menu.add(edit);
@@ -218,8 +230,14 @@ public class ConnectionsPanel extends JPanel {
         list.repaint();
     }
 
-    /** Pequeno circulo de status (verde = conectado, cinza = desconectado). */
-    private static Icon statusDot(Color color) {
+    /**
+     * Pequeno circulo de status (verde = conectado, ambar = conectando, cinza
+     * = desconectado). Visibilidade de pacote (nao private): reaproveitado
+     * por {@link ObjectTreeCellRenderer} para a MESMA bolinha na raiz da
+     * arvore de objetos (schema), garantindo o mesmo indicador visual da
+     * conexao em dois lugares diferentes da UI.
+     */
+    static Icon statusDot(Color color) {
         return new Icon() {
             @Override
             public int getIconWidth() {

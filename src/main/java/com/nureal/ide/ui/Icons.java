@@ -69,7 +69,7 @@ final class Icons {
             FlatSVGIcon svgIcon = new FlatSVGIcon("com/nureal/ide/icon/refresh.svg", size, size);
             
             // Aplica a cor dinâmica recebida por parâmetro (ex: a cor MUTED que você definiu)
-            svgIcon.setColorFilter(new FlatSVGIcon.ColorFilter(k -> color));
+            svgIcon.setColorFilter(new FlatSVGIcon.ColorFilter(c -> color));
             return svgIcon;
         }
 

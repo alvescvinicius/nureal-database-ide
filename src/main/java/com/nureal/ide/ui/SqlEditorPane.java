@@ -268,20 +268,20 @@ public class SqlEditorPane extends JPanel {
         Color iconColor = new Color(0x6B7280);
         JButton prev = new JButton(Icons.get(IconType.CHEVRON_LEFT, 12, iconColor));
         prev.setToolTipText("Anterior (Shift+Enter)");
-        prev.addActionListener(k -> findPrevious());
+        prev.addActionListener(e -> findPrevious());
         JButton next = new JButton(Icons.get(IconType.CHEVRON_RIGHT, 12, iconColor));
         next.setToolTipText("Proximo (Enter)");
-        next.addActionListener(k -> findNext());
+        next.addActionListener(e -> findNext());
         JButton replaceOne = new JButton("Substituir");
-        replaceOne.addActionListener(k -> replaceOne());
+        replaceOne.addActionListener(e -> replaceOne());
         JButton replaceAll = new JButton("Substituir tudo");
-        replaceAll.addActionListener(k -> replaceAll());
+        replaceAll.addActionListener(e -> replaceAll());
         JButton close = new JButton(Icons.get(IconType.CLOSE, 12, iconColor));
         close.setToolTipText("Fechar (Esc)");
-        close.addActionListener(k -> hideFindBar());
+        close.addActionListener(e -> hideFindBar());
 
-        findField.addActionListener(k -> findNext());
-        replaceField.addActionListener(k -> replaceOne());
+        findField.addActionListener(e -> findNext());
+        replaceField.addActionListener(e -> replaceOne());
         bindKey(findField, "shift ENTER", this::findPrevious);
         bindKey(findField, "ESCAPE", this::hideFindBar);
         bindKey(replaceField, "ESCAPE", this::hideFindBar);

@@ -50,7 +50,7 @@ final class ResultStatusBar {
         JPopupMenu exportMenu = new JPopupMenu();
         exportMenu.add(exportThisItem);
         exportMenu.add(exportAllItem);
-        exportButton.addActionListener(k -> exportMenu.show(exportButton, 0, exportButton.getHeight()));
+        exportButton.addActionListener(e -> exportMenu.show(exportButton, 0, exportButton.getHeight()));
 
         JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 3));
         left.add(info);
@@ -68,19 +68,19 @@ final class ResultStatusBar {
     }
 
     void onLoadMore(Runnable action) {
-        loadMoreButton.addActionListener(k -> action.run());
+        loadMoreButton.addActionListener(e -> action.run());
     }
 
     void onLoadAll(Runnable action) {
-        loadAllButton.addActionListener(k -> action.run());
+        loadAllButton.addActionListener(e -> action.run());
     }
 
     void onExportThis(Runnable action) {
-        exportThisItem.addActionListener(k -> action.run());
+        exportThisItem.addActionListener(e -> action.run());
     }
 
     void onExportAll(Runnable action) {
-        exportAllItem.addActionListener(k -> action.run());
+        exportAllItem.addActionListener(e -> action.run());
     }
 
     /** Atualiza o texto de contagem/tempos e mostra/esconde os botoes de paginacao. */

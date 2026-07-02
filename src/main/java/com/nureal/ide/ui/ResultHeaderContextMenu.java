@@ -69,6 +69,10 @@ final class ResultHeaderContextMenu {
         menu.add(item("Limpar filtro", filter::clearFilter));
         menu.addSeparator();
 
+        menu.add(item("Copiar dados da coluna", () -> GridClipboard.copyColumnsData(table, viewColumn)));
+        menu.add(item("Copiar coluna como IN", () -> GridClipboard.copyColumnAsIn(table, viewColumn)));
+        menu.addSeparator();
+
         menu.add(item("AutoFit", () -> runAndNotify(() -> ColumnAutoFit.packColumn(table, viewColumn), onLayoutChanged)));
         menu.add(item("AutoFit Todas", () -> runAndNotify(() -> ColumnAutoFit.packColumns(table), onLayoutChanged)));
         // Saida deliberada para o caso em que uma largura JA FOI SALVA para
@@ -112,7 +116,7 @@ final class ResultHeaderContextMenu {
         showMenu.addSeparator();
         for (String name : hidden) {
             JCheckBoxMenuItem item = new JCheckBoxMenuItem(name, false);
-            item.addActionListener(k -> runAndNotify(() -> ColumnVisibility.show(table, name), onLayoutChanged));
+            item.addActionListener(e -> runAndNotify(() -> ColumnVisibility.show(table, name), onLayoutChanged));
             showMenu.add(item);
         }
         return showMenu;
@@ -135,7 +139,7 @@ final class ResultHeaderContextMenu {
 
     private static JMenuItem item(String text, Runnable action) {
         JMenuItem item = new JMenuItem(text);
-        item.addActionListener(k -> action.run());
+        item.addActionListener(e -> action.run());
         return item;
     }
 }

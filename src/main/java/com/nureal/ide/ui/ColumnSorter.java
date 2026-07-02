@@ -1,12 +1,13 @@
 package com.nureal.ide.ui;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import javax.swing.JTable;
 import javax.swing.RowSorter.SortKey;
 import javax.swing.SortOrder;
 import javax.swing.table.TableModel;
 import javax.swing.table.TableRowSorter;
-import java.util.ArrayList;
-import java.util.List;
 
 /**
  * Ordenacao "estilo Excel" da grade de resultados: DUAS setinhas
@@ -41,6 +42,7 @@ final class ColumnSorter {
 
     ColumnSorter(JTable table) {
         this.sorter = new TableRowSorter<>(table.getModel()) {
+
             @Override
             public void toggleSortOrder(int column) {
                 // Ver o javadoc da classe: o JTable chama isto sozinho a
