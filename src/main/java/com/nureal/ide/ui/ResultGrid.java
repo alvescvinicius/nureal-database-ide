@@ -101,11 +101,19 @@ final class ResultGrid extends JPanel {
         // mostraria tooltip mesmo com o metodo sobrescrito corretamente.
         javax.swing.ToolTipManager.sharedInstance().registerComponent(table);
         styleTable(table, scale);
+
+        // Resolver de metadados (PK/FK/indices/comentario) desta grade
+        // especifica — guardado como client property ANTES de instalar os
+        // renderers para que AbstractTypedCellRenderer consiga destacar
+        // colunas que sao chave primaria/estrangeira de verdade (ver
+        // RendererFactory#KEY_METADATA_RESOLVER), o mesmo resolver usado pelo
+        // indicador de FK do cabecalho e pelo popup de metadados.
+        ColumnMetadataResolver resolver = new ColumnMetadataResolver(metadataCache, connectionManager, schema);
+        table.putClientProperty(RendererFactory.KEY_METADATA_RESOLVER, resolver);
         RendererFactory.installOn(table, model);
 
         this.sorter = new ColumnSorter(table);
 
-        ColumnMetadataResolver resolver = new ColumnMetadataResolver(metadataCache, connectionManager, schema);
         ColumnHeaderRenderer.MetadataSource metadataSource =
                 col -> resolver.resolve(model, col, () -> table.getTableHeader().repaint());
 

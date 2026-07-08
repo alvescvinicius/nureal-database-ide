@@ -12,9 +12,10 @@ import java.util.List;
  *   ~/.nureal-ide/ui.conf
  *
  * Guarda: lado do painel lateral (esquerda/direita), orientacao do split de
- * resultados (horizontal/vertical), nivel de zoom da interface e modo
- * compacto (densidade). Formato simples chave=valor, igual ao das outras
- * stores do projeto (ConnectionStore, SessionStore).
+ * resultados (horizontal/vertical), nivel de zoom da interface, modo
+ * compacto (densidade) e se o keep-alive de conexao esta ligado. Formato
+ * simples chave=valor, igual ao das outras stores do projeto (ConnectionStore,
+ * SessionStore).
  */
 public class UiPreferences {
 
@@ -40,10 +41,10 @@ public class UiPreferences {
 
     /** Estado imutavel das preferencias de UI. */
     public record State(boolean sidebarOnRight, boolean resultsVertical,
-                         int zoomIndex, boolean compactMode) {
+                         int zoomIndex, boolean compactMode, boolean keepAliveEnabled) {
 
         public static State defaults() {
-            return new State(false, false, DEFAULT_ZOOM_INDEX, false);
+            return new State(false, false, DEFAULT_ZOOM_INDEX, false, false);
         }
     }
 
@@ -56,6 +57,7 @@ public class UiPreferences {
         boolean resultsVertical = false;
         int zoomIndex = DEFAULT_ZOOM_INDEX;
         boolean compactMode = false;
+        boolean keepAliveEnabled = false;
 
         List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);
         for (String raw : lines) {
@@ -74,12 +76,13 @@ public class UiPreferences {
                 case "resultsVertical" -> resultsVertical = Boolean.parseBoolean(value);
                 case "zoomIndex" -> zoomIndex = parseIndex(value);
                 case "compactMode" -> compactMode = Boolean.parseBoolean(value);
+                case "keepAliveEnabled" -> keepAliveEnabled = Boolean.parseBoolean(value);
                 default -> {
                     // ignora chaves desconhecidas (versoes futuras)
                 }
             }
         }
-        return new State(sidebarOnRight, resultsVertical, zoomIndex, compactMode);
+        return new State(sidebarOnRight, resultsVertical, zoomIndex, compactMode, keepAliveEnabled);
     }
 
     /** Grava as preferencias, criando a pasta se necessario. */
@@ -94,6 +97,7 @@ public class UiPreferences {
         sb.append("resultsVertical=").append(state.resultsVertical()).append('\n');
         sb.append("zoomIndex=").append(state.zoomIndex()).append('\n');
         sb.append("compactMode=").append(state.compactMode()).append('\n');
+        sb.append("keepAliveEnabled=").append(state.keepAliveEnabled()).append('\n');
         Files.write(file, sb.toString().getBytes(StandardCharsets.UTF_8));
     }
 

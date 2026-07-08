@@ -3,12 +3,11 @@ package com.nureal.ide.ui;
 import com.nureal.ide.core.autocomplete.SqlCompletionProvider;
 import com.nureal.ide.core.format.SqlFormatter;
 import org.fife.ui.autocomplete.AutoCompletion;
-import org.fife.ui.rsyntaxtextarea.AbstractTokenMakerFactory;
+import org.fife.ui.rsyntaxtextarea.RSyntaxDocument;
 import org.fife.ui.rsyntaxtextarea.RSyntaxTextArea;
 import org.fife.ui.rsyntaxtextarea.Style;
 import org.fife.ui.rsyntaxtextarea.SyntaxConstants;
 import org.fife.ui.rsyntaxtextarea.SyntaxScheme;
-import org.fife.ui.rsyntaxtextarea.TokenMakerFactory;
 import org.fife.ui.rsyntaxtextarea.TokenTypes;
 import org.fife.ui.rtextarea.RTextScrollPane;
 import org.fife.ui.rtextarea.SearchContext;
@@ -56,21 +55,6 @@ public class SqlEditorPane extends JPanel {
     private static final int MIN_FONT_SIZE = 8;
     private static final int MAX_FONT_SIZE = 42;
 
-    static {
-        // Troca o TokenMaker padrao de SQL do RSyntaxTextArea pelo nosso
-        // (ver SqlHighlightTokenMaker) — GARANTE que palavras-chave sejam
-        // destacadas independente de maiusculas/minusculas ("select" e
-        // "SELECT" ficam identicos), sem depender de detalhes internos da
-        // versao exata da biblioteca. TokenMakerFactory e um registro
-        // compartilhado/estatico do processo inteiro, entao isto so precisa
-        // rodar UMA vez — um bloco {@code static} nesta classe (que sempre
-        // roda antes do primeiro RSyntaxTextArea ser criado, ja que e esta
-        // mesma classe que cria) e o lugar natural, sem exigir um ponto de
-        // inicializacao separado em MainWindow.
-        AbstractTokenMakerFactory factory = (AbstractTokenMakerFactory) TokenMakerFactory.getDefaultInstance();
-        factory.putMapping(SyntaxConstants.SYNTAX_STYLE_SQL, SqlHighlightTokenMaker.class.getName());
-    }
-
 	private final RSyntaxTextArea textArea;
     private final Supplier<SqlFormatter> formatterSupplier;
     private int fontSize = BASE_FONT_SIZE;
@@ -105,7 +89,17 @@ public class SqlEditorPane extends JPanel {
         this.fontFamily = fontFamily;
 
         textArea = new RSyntaxTextArea(20, 80);
+        // setSyntaxEditingStyle continua chamado primeiro: e o nome de
+        // estilo guardado na PROPRIA RSyntaxTextArea (nao no documento) que
+        // o code folding usa pra achar o FoldParser certo (ver SqlFoldParser
+        // em App.java) — so DEPOIS trocamos o TokenMaker do documento pelo
+        // nosso, instanciado diretamente (nao mais via TokenMakerFactory,
+        // que so cria por reflexao com construtor sem argumentos e nao
+        // deixaria a instancia "conhecer" esta RSyntaxTextArea — ver
+        // SqlHighlightTokenMaker#getTokenList para o motivo de precisar
+        // disso: negritar aliases usados ANTES do FROM que os define).
         textArea.setSyntaxEditingStyle(SyntaxConstants.SYNTAX_STYLE_SQL);
+        ((RSyntaxDocument) textArea.getDocument()).setSyntaxStyle(new SqlHighlightTokenMaker(textArea));
         textArea.setCodeFoldingEnabled(true);
         textArea.setTabSize(2);
         textArea.setText("");

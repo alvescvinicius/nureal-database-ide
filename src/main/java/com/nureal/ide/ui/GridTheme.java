@@ -22,6 +22,15 @@ final class GridTheme {
     // ---------- Cores por tipo de dado (renderers) ----------
     static final Color COLOR_IDENTIFIER = new Color(0xE65100);
     static final Color COLOR_NUMERIC = new Color(0x00838F);
+
+    // ---------- Destaque de chave (grid) — ver AbstractTypedCellRenderer ----------
+    // Sobrepoe a cor do TIPO da coluna (nao mexe no alinhamento nem na logica
+    // dos 6 grupos de RendererFactory) quando a coluna e, de fato, chave
+    // primaria ou estrangeira da tabela de origem — metadados REAIS do banco
+    // (via ColumnMetadataResolver), nao heuristica de nome. PK = dourado; FK
+    // reaproveita o mesmo laranja de COLOR_IDENTIFIER (mesma familia visual
+    // de "chave/identificador").
+    static final Color COLOR_PRIMARY_KEY = new Color(0xB8860B);
     static final Color COLOR_TEMPORAL = new Color(0x7B1FA2);
     static final Color COLOR_LOGIC_TRUE = new Color(0x2E7D32);
     static final Color COLOR_LOGIC_FALSE = new Color(0xC62828);

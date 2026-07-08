@@ -39,6 +39,15 @@ final class Conexao {
 	 */
 	Map<String, List<QueryResult>> tabResults = new HashMap<>();
 
+	/**
+	 * Instante (epoch millis) da ultima execucao de verdade nesta conexao —
+	 * usado so pelo keep-alive (ver {@code MainWindow#pingKeepAlive}) pra
+	 * decidir se a conexao esta ociosa ha tempo suficiente pra merecer um
+	 * ping. Comeca no momento da criacao (equivalente a "acabou de conectar,
+	 * ainda nao esta ociosa").
+	 */
+	private long lastActivityMillis = System.currentTimeMillis();
+
 	Conexao(String name, ConnectionProfile profile, ConnectionManager mgr) {
 		this.name = name;
 		this.profile = profile;
@@ -87,5 +96,13 @@ final class Conexao {
 
 	Map<String, List<QueryResult>> tabResults() {
 		return tabResults;
+	}
+
+	long lastActivityMillis() {
+		return lastActivityMillis;
+	}
+
+	void setLastActivityMillis(long millis) {
+		this.lastActivityMillis = millis;
 	}
 }

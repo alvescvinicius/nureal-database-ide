@@ -66,9 +66,47 @@ abstract class AbstractTypedCellRenderer extends DefaultTableCellRenderer {
             if (color != null) {
                 setForeground(color);
             }
+            // Chave primaria/estrangeira DE VERDADE (metadados do banco, nao
+            // heuristica de nome) sobrepoe so a COR — o alinhamento continua
+            // vindo do tipo real da coluna (ver alignment() acima), pedido
+            // explicito do usuario: nao mexer em como varchar/number etc. sao
+            // exibidos, so trazer de volta a cor de destaque de chave.
+            Color keyColor = keyHighlightColor(table, column);
+            if (keyColor != null) {
+                setForeground(keyColor);
+            }
         }
         paintActiveCellBorder(table, row, column);
         return this;
+    }
+
+    /**
+     * Cor de destaque de chave (dourado = PK, laranja = FK) para a coluna sob
+     * o cursor de pintura, ou {@code null} se a coluna nao e chave de
+     * nenhuma tabela (ou os metadados ainda nao carregaram). Consulta o
+     * {@link ColumnMetadataResolver} guardado pela {@link ResultGrid} desta
+     * tabela especifica (client property — ver {@link RendererFactory#KEY_METADATA_RESOLVER}),
+     * o MESMO usado pelo indicador de FK do cabecalho e pelo popup de
+     * metadados, entao o resultado e sempre consistente entre os tres.
+     * Enquanto o schema ainda nao carregou, {@code resolve} dispara a carga
+     * em segundo plano e agenda um {@code table.repaint()} para quando ela
+     * terminar — a celula simplesmente aparece sem destaque ate la.
+     */
+    private static Color keyHighlightColor(JTable table, int viewColumn) {
+        Object resolverObj = table.getClientProperty(RendererFactory.KEY_METADATA_RESOLVER);
+        if (!(resolverObj instanceof ColumnMetadataResolver resolver)
+                || !(table.getModel() instanceof ResultTableModel model)) {
+            return null;
+        }
+        int modelColumn = table.convertColumnIndexToModel(viewColumn);
+        ColumnMetadata meta = resolver.resolve(model, modelColumn, table::repaint);
+        if (meta.primaryKey()) {
+            return GridTheme.COLOR_PRIMARY_KEY;
+        }
+        if (meta.hasForeignKey()) {
+            return GridTheme.COLOR_IDENTIFIER;
+        }
+        return null;
     }
 
     /**

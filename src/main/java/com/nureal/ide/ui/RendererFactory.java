@@ -27,6 +27,17 @@ import javax.swing.table.TableColumn;
  */
 final class RendererFactory {
 
+    /**
+     * Chave de client property (ver {@code JComponent#putClientProperty}) sob
+     * a qual {@link ResultGrid} guarda o {@link ColumnMetadataResolver} desta
+     * tabela especifica — {@link AbstractTypedCellRenderer} le esta property
+     * a cada celula pintada pra saber se a coluna e chave primaria/estrangeira
+     * de verdade (metadados do banco), sem precisar que os renderers
+     * (instancias UNICAS e compartilhadas entre todas as grades) guardem
+     * nenhum estado por tabela.
+     */
+    static final String KEY_METADATA_RESOLVER = "nureal.columnMetadataResolver";
+
     private static final IdentifierCellRenderer IDENTIFIER = new IdentifierCellRenderer();
     private static final NumberCellRenderer NUMBER = new NumberCellRenderer();
     private static final TemporalCellRenderer TEMPORAL = new TemporalCellRenderer();

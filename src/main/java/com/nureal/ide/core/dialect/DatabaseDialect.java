@@ -108,4 +108,17 @@ public interface DatabaseDialect {
      * valores literais (DEFAULT, COMMENT) devem ser escapados por ela.
      */
     String createTableStatement(NewTableSpec spec);
+
+    /**
+     * Consulta minima e barata para "keep-alive" da conexao (um SELECT de
+     * teste, sem tocar em nenhuma tabela real) — usada para manter a sessao
+     * viva enquanto a IDE esta aberta e a conexao fica ociosa por um tempo
+     * (ver "Manter conexao viva" no menu de layout, em MainWindow). Default
+     * {@code "SELECT 1"}, valido na maioria dos bancos; dialetos que exigem
+     * uma clausula FROM (ex.: Oracle, {@code "SELECT 1 FROM DUAL"}) devem
+     * sobrescrever.
+     */
+    default String keepAliveQuery() {
+        return "SELECT 1";
+    }
 }

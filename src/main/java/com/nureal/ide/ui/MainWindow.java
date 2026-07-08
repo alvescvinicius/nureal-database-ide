@@ -110,6 +110,7 @@ import com.nureal.ide.core.queries.SavedQueryStore;
 import com.nureal.ide.core.safety.SqlRiskAnalyzer;
 import com.nureal.ide.core.session.SessionStore;
 import com.nureal.ide.core.sql.SqlStatementSplitter;
+import com.nureal.ide.core.sql.UnquotedDateGuard;
 import com.nureal.ide.core.ui.UiPreferences;
 
 /**
@@ -213,6 +214,20 @@ public class MainWindow extends JFrame {
 	private boolean compactMode = false;
 	private int zoomIndex = UiPreferences.DEFAULT_ZOOM_INDEX;
 
+	// ---------- Keep-alive de conexao ----------
+
+	/**
+	 * A cada {@link #KEEP_ALIVE_INTERVAL_MS}, se ligado, roda um "SELECT 1"
+	 * (via {@link DatabaseDialect#keepAliveQuery()}) em TODAS as conexoes
+	 * abertas E ociosas ha pelo menos esse mesmo intervalo — so pra manter o
+	 * socket/sessao vivos enquanto a IDE esta aberta (evita o banco ou um
+	 * firewall/load balancer no meio derrubar a conexao por inatividade).
+	 * Ver {@link #startKeepAliveTimer()} e {@link #pingKeepAlive()}.
+	 */
+	private boolean keepAliveEnabled = false;
+	private static final int KEEP_ALIVE_INTERVAL_MS = 4 * 60 * 1000; // 4 minutos
+	private javax.swing.Timer keepAliveTimer;
+
 	// ---------- Formatacao de SQL (presets) e fonte do editor ----------
 
 	private final FormatPreferences formatPrefsStore = new FormatPreferences();
@@ -228,16 +243,85 @@ public class MainWindow extends JFrame {
 		loadFormatPrefs();
 		buildUi();
 		registerWindowShortcuts();
+		startKeepAliveTimer();
 		// Salva a sessao e fecha as conexoes JDBC ao fechar (alem do autosave
 		// continuo durante a digitacao) — sem isso, as conexoes de todos os
 		// workspaces ficavam abertas ate o processo encerrar de vez.
 		addWindowListener(new WindowAdapter() {
 			@Override
 			public void windowClosing(WindowEvent e) {
+				if (keepAliveTimer != null) {
+					keepAliveTimer.stop();
+				}
 				saveSession();
 				closeAllConnections();
 			}
 		});
+	}
+
+	/**
+	 * Timer unico (fica sempre rodando enquanto a janela existe, ver
+	 * {@link #KEEP_ALIVE_INTERVAL_MS}) que so FAZ alguma coisa quando
+	 * {@link #keepAliveEnabled} esta ligado ({@link #toggleKeepAlive}) — mais
+	 * simples que criar/parar um Timer novo toda vez que o usuario liga ou
+	 * desliga a opcao no menu.
+	 */
+	private void startKeepAliveTimer() {
+		keepAliveTimer = new javax.swing.Timer(KEEP_ALIVE_INTERVAL_MS, e -> {
+			if (keepAliveEnabled) {
+				pingKeepAlive();
+			}
+		});
+		keepAliveTimer.start();
+	}
+
+	/**
+	 * Roda o {@link DatabaseDialect#keepAliveQuery()} (ex.: "SELECT 1") em
+	 * TODA conexao aberta (de qualquer workspace, nao so o ativo) que esteja
+	 * ociosa ha pelo menos {@link #KEEP_ALIVE_INTERVAL_MS} — ver
+	 * {@code Conexao#lastActivityMillis}, atualizado sempre que
+	 * {@link #onRun} executa alguma instrucao de verdade. Cada ping roda em
+	 * background (nunca na EDT, evita travar a interface se a rede estiver
+	 * lenta) e falhas sao so logadas: um keep-alive que falha nao deve
+	 * incomodar o usuario com um dialogo de erro, a proxima execucao real vai
+	 * revelar o problema de conexao normalmente se ele persistir.
+	 */
+	private void pingKeepAlive() {
+		long now = System.currentTimeMillis();
+		for (Conexao w : workspaces.values()) {
+			if (w.profile() == null || !w.mgr().isConnected()) {
+				continue;
+			}
+			if (now - w.lastActivityMillis() < KEEP_ALIVE_INTERVAL_MS) {
+				continue; // teve atividade de verdade recente, nao precisa de ping
+			}
+			w.setLastActivityMillis(now); // evita reenviar no proximo tick se a rede estiver lenta
+			String query = dialect.keepAliveQuery();
+			new Thread(() -> {
+				try {
+					ConnectionManager mgr = w.mgr();
+					if (mgr.isConnected()) {
+						try (Statement st = mgr.getConnection().createStatement()) {
+							st.execute(query);
+						}
+					}
+				} catch (Exception ex) {
+					AppLogger.fine("Keep-alive falhou para " + w.name() + ": " + ex.getMessage(), ex);
+				}
+			}, "keep-alive-" + w.name()).start();
+		}
+	}
+
+	/** Liga/desliga o keep-alive de conexao — ver checkbox no menu de layout. */
+	private void toggleKeepAlive() {
+		keepAliveEnabled = !keepAliveEnabled;
+		saveUiState();
+		if (statusBar != null) {
+			statusBar.setText(keepAliveEnabled
+					? " Keep-alive de conexao ativado (SELECT de teste a cada "
+							+ (KEEP_ALIVE_INTERVAL_MS / 60000) + " min de ociosidade)."
+					: " Keep-alive de conexao desativado.");
+		}
 	}
 
 	/**
@@ -255,6 +339,7 @@ public class MainWindow extends JFrame {
 		sidebarOnRight = state.sidebarOnRight();
 		resultsVertical = state.resultsVertical();
 		compactMode = state.compactMode();
+		keepAliveEnabled = state.keepAliveEnabled();
 		zoomIndex = clampZoomIndex(state.zoomIndex());
 		if (zoomIndex != UiPreferences.DEFAULT_ZOOM_INDEX) {
 			applyZoomFont(zoomIndex); // so a fonte; ainda nao ha janela/componentes
@@ -517,6 +602,12 @@ public class MainWindow extends JFrame {
 		JCheckBoxMenuItem compact = new JCheckBoxMenuItem("Modo compacto", compactMode);
 		compact.addActionListener(a -> toggleCompactMode());
 		menu.add(compact);
+
+		JCheckBoxMenuItem keepAlive = new JCheckBoxMenuItem("Manter conexao viva (keep-alive)", keepAliveEnabled);
+		keepAlive.setToolTipText("Roda um SELECT de teste a cada poucos minutos de ociosidade, "
+				+ "so nas conexoes que ja estao abertas, pra evitar que caiam por inatividade.");
+		keepAlive.addActionListener(a -> toggleKeepAlive());
+		menu.add(keepAlive);
 
 		menu.addSeparator();
 		JMenu zoomMenu = new JMenu("Zoom");
@@ -937,7 +1028,8 @@ public class MainWindow extends JFrame {
 
 	private void saveUiState() {
 		try {
-			uiPrefsStore.save(new UiPreferences.State(sidebarOnRight, resultsVertical, zoomIndex, compactMode));
+			uiPrefsStore.save(new UiPreferences.State(sidebarOnRight, resultsVertical, zoomIndex, compactMode,
+					keepAliveEnabled));
 		} catch (Exception ex) {
 			AppLogger.warning("Falha ao salvar preferencias de UI", ex);
 			if (statusBar != null) {
@@ -1047,6 +1139,15 @@ public class MainWindow extends JFrame {
 		objectTree.setRowHeight(scaledPx(22));
 		objectTree.setBorder(BorderFactory.createEmptyBorder(4, 8, 4, 4));
 		objectTree.setCellRenderer(new ObjectTreeCellRenderer());
+		// Duplo-clique num objeto abrivel (tabela/view/procedure/.../trigger)
+		// agora cola o nome no editor SQL em vez de expandir/recolher —
+		// pedido explicito do usuario, igual ao comportamento de outras IDEs
+		// de banco. Expandir/recolher passa a ser 100% via a setinha nativa
+		// do JTree (clique simples nela), entao desligamos o toggle nativo
+		// por duplo-clique da arvore inteira (setToggleClickCount(0)) e
+		// tratamos categoria/schema manualmente abaixo, pra nao perder esse
+		// atalho nelas.
+		objectTree.setToggleClickCount(0);
 		objectTree.addMouseListener(new MouseAdapter() {
 			@Override
 			public void mouseClicked(MouseEvent e) {
@@ -1058,13 +1159,8 @@ public class MainWindow extends JFrame {
 					switchSchema();
 					return;
 				}
-				// So SCHEMA_PICK reage a duplo clique aqui — objetos
-				// abriveis (tabela/view/...) deixam o duplo clique 100%
-				// livre para o expand/recolher nativo do JTree. "Abrir
-				// propriedades" desses objetos e via clique direito (ver
-				// maybeShowObjectContextMenu abaixo).
 				if (e.getClickCount() == 2) {
-					openSelectedObjectProperties();
+					handleObjectTreeDoubleClick(e);
 				}
 			}
 
@@ -1902,6 +1998,17 @@ public class MainWindow extends JFrame {
 	// ---------- Acoes ----------
 
 	private void connectTo(ConnectionProfile profile) {
+		connectTo(profile, null);
+	}
+
+	/**
+	 * Igual a {@link #connectTo(ConnectionProfile)}, mas com um callback
+	 * opcional disparado (na EDT) so quando a conexao TERMINA COM SUCESSO —
+	 * usado pelo modal de "nao conectado" ao executar (ver {@link #onRun}),
+	 * pra rodar a instrucao logo apos conectar, sem o usuario precisar clicar
+	 * em "Executar" de novo.
+	 */
+	private void connectTo(ConnectionProfile profile, Runnable onConnected) {
 		ConnectionProfile effective = profile;
 		if (profile.needsPasswordPrompt()) {
 			String pw = ConnectionDialog.promptPassword(this, profile);
@@ -1917,6 +2024,9 @@ public class MainWindow extends JFrame {
 		if (existing != null && existing.mgr.isConnected()) {
 			activateWorkspace(existing);
 			statusBar.setText(" Workspace: " + target.name());
+			if (onConnected != null) {
+				onConnected.run();
+			}
 			return;
 		}
 
@@ -1966,8 +2076,14 @@ public class MainWindow extends JFrame {
 					if (pickSchema) {
 						statusBar.setText(
 								" Conectado  (" + ((List<?>) result).size() + " esquema(s) - duplo-clique para abrir)");
+						// Sem schema resolvido ainda, nao da pra rodar a instrucao
+						// sozinho (falta contexto) — o usuario escolhe o schema
+						// primeiro (duplo-clique) e clica Executar de novo.
 					} else {
 						statusBar.setText(" Conectado  (" + ws.schema.tables().size() + " tabelas)");
+						if (onConnected != null) {
+							onConnected.run();
+						}
 					}
 				} catch (Exception ex) {
 					connectionsPanel.setConnecting(null);
@@ -2096,9 +2212,43 @@ public class MainWindow extends JFrame {
 		return opt == 0;
 	}
 
+	/**
+	 * Chamado por {@link #onRun} quando NAO ha conexao ativa: em vez de so
+	 * avisar na barra de status (jeito antigo), pergunta se o usuario quer
+	 * conectar e ja executar a instrucao — mostrando a BASE e o SCHEMA que
+	 * serao usados (os da aba/workspace atual), pra deixar claro onde a
+	 * instrucao vai rodar antes de disparar a conexao. Pedido explicito do
+	 * usuario. So se aplica quando a aba atual pertence a um workspace com
+	 * perfil de conexao conhecido (nao a aba SCRATCH, que nunca teve uma base
+	 * "certa" pra oferecer) — nesse caso cai no aviso simples de sempre.
+	 */
+	private void offerConnectThenRun() {
+		Conexao ws = activeWorkspace;
+		ConnectionProfile profile = (ws != null) ? ws.profile() : null;
+		if (profile == null) {
+			statusBar.setText(" Conecte-se a uma base antes de executar.");
+			return;
+		}
+		String schemaLabel = (profile.schema() != null && !profile.schema().isBlank())
+				? profile.schema()
+				: (ws.schema() != null ? ws.schema().name() : "(nenhum selecionado ainda)");
+		String message = "Voce nao esta conectado no momento.\n\n"
+				+ "Base:    " + profile.name() + "  (" + profile.host() + ")\n"
+				+ "Schema:  " + schemaLabel
+				+ "\n\nConectar agora e executar a instrucao desta aba?";
+		int opt = JOptionPane.showConfirmDialog(this, message, "Nao conectado",
+				JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
+		if (opt == JOptionPane.YES_OPTION) {
+			statusBar.setText(" Conectando a " + profile.name() + " para executar...");
+			connectTo(profile, this::onRun);
+		} else {
+			statusBar.setText(" Execucao cancelada: nao conectado.");
+		}
+	}
+
 	private void onRun() {
 		if (!connectionManager().isConnected()) {
-			statusBar.setText(" Conecte-se a uma base antes de executar.");
+			offerConnectThenRun();
 			return;
 		}
 		SqlEditorPane editor = currentEditor();
@@ -2109,9 +2259,33 @@ public class MainWindow extends JFrame {
 		if (statements.isEmpty()) {
 			return;
 		}
+		String badDate = null;
+		for (String stmt : statements) {
+			badDate = UnquotedDateGuard.findUnquotedDate(stmt);
+			if (badDate != null) {
+				break;
+			}
+		}
+		if (badDate != null) {
+			JOptionPane.showMessageDialog(this,
+					"Encontrei uma data sem aspas: \"" + badDate + "\".\n\n"
+							+ "Sem aspas isso NAO e uma data para o banco — e uma subtracao numerica "
+							+ "(ex.: 2026 - 07 - 08 = 2011), que muda o resultado da consulta sem "
+							+ "nenhum erro, e se repete do mesmo jeito se a instrucao for rodada fora "
+							+ "da IDE. Coloque a data entre aspas (ex.: '2026-07-08') e execute de novo.",
+					"Data sem aspas", JOptionPane.ERROR_MESSAGE);
+			statusBar.setText(" Execucao bloqueada: data sem aspas (\"" + badDate + "\").");
+			return;
+		}
 		if (!confirmRiskyStatements(statements)) {
 			statusBar.setText(" Execucao cancelada.");
 			return;
+		}
+		if (activeWorkspace != null) {
+			// Atividade de verdade: reseta a contagem de ociosidade do
+			// keep-alive (ver pingKeepAlive) — acabou de rodar algo, nao
+			// precisa de um SELECT 1 de teste tao cedo.
+			activeWorkspace.setLastActivityMillis(System.currentTimeMillis());
 		}
 		closeOpenCursors();
 		if (resultsArea != null && !resultsArea.isVisible()) {
@@ -3056,11 +3230,12 @@ public class MainWindow extends JFrame {
 		addNameCategory(root, "Triggers", schema.triggers(), NodeType.TRIGGER, "TRIGGER", f, filtering);
 
 		objectTree.setModel(new DefaultTreeModel(root));
-		if (filtering) {
-			expandAll();
-		} else {
-			expandCategories(root);
-		}
+		// So ate o nivel de CATEGORIA em ambos os modos (nunca as tabelas em
+		// si) — as colunas de cada tabela agora sempre existem como filhas
+		// (ver addTableCategory), entao a setinha de expandir aparece mesmo
+		// filtrando, mas so abre quando o usuario clica nela, sem poluir a
+		// lista com todas as colunas de todo objeto encontrado na busca.
+		expandCategories(root);
 	}
 
 	private void addTableCategory(DefaultMutableTreeNode root, String label, List<TableInfo> items, NodeType type,
@@ -3072,16 +3247,18 @@ public class MainWindow extends JFrame {
 				continue;
 			}
 			DefaultMutableTreeNode tn = new DefaultMutableTreeNode(new ObjNode(type, t.name(), t.name(), kind, t, null));
-			// Ao buscar, a arvore mostra so o objeto; as colunas ficam na tela
-			// de propriedades (duplo-clique). No modo normal, expande as colunas.
-			if (!filtering) {
-				for (ColumnInfo c : t.columns()) {
-					// "kind" (TABLE/VIEW) propagado para a coluna: e o que o
-					// ObjectTreeCellRenderer usa pra saber de qual categoria
-					// colorida a coluna faz parte (a cor "desce" ate ela).
-					tn.add(new DefaultMutableTreeNode(
-							new ObjNode(NodeType.COLUMN, c.name() + " : " + c.type(), c.name(), kind, null, c.type())));
-				}
+			// Colunas sempre viram filhas (buscando ou nao) — sem isto a
+			// tabela some como folha SEM setinha de expandir quando o usuario
+			// esta filtrando ("a seta para expandir nao existe", pedido
+			// explicito do usuario). Ficam colapsadas por padrao mesmo assim
+			// (ver rebuildTree/expandCategories): so aparecem de fato se o
+			// usuario clicar na setinha.
+			for (ColumnInfo c : t.columns()) {
+				// "kind" (TABLE/VIEW) propagado para a coluna: e o que o
+				// ObjectTreeCellRenderer usa pra saber de qual categoria
+				// colorida a coluna faz parte (a cor "desce" ate ela).
+				tn.add(new DefaultMutableTreeNode(
+						new ObjNode(NodeType.COLUMN, c.name() + " : " + c.type(), c.name(), kind, null, c.type())));
 			}
 			cat.add(tn);
 			shown++;
@@ -3132,31 +3309,62 @@ public class MainWindow extends JFrame {
 		}
 	}
 
-	private void expandAll() {
-		for (int i = 0; i < objectTree.getRowCount(); i++) {
-			objectTree.expandRow(i);
-		}
-	}
-
 	/**
-	 * Duplo-clique numa linha da arvore de objetos. So trata SCHEMA_PICK
-	 * (item de uma lista de escolha de schema, folha sem filhos — nao ha
-	 * conflito com expandir/recolher). Objetos abriveis (tabela/view/
-	 * procedure/function/trigger) NAO abrem mais propriedades por duplo
-	 * clique — esse gesto ficou reservado 100% para o expand/recolher
-	 * nativo do JTree (ver o MouseListener em buildObjectBrowser). Abrir
-	 * propriedades desses objetos agora e so pelo clique direito (ver
-	 * {@link #maybeShowObjectContextMenu}).
+	 * Duplo-clique numa linha da arvore de objetos, pelo PONTO clicado (nao
+	 * pela selecao — mais confiavel, funciona mesmo se o clique nao mudou a
+	 * selecao). Comportamento por tipo de no:
+	 *
+	 *  - SCHEMA_PICK (item de lista de escolha de schema): abre o schema.
+	 *  - Objeto abrivel de verdade (TABLE/VIEW/ROUTINE/TRIGGER): cola o NOME
+	 *    imediatamente no editor SQL ativo, na posicao do cursor — pedido
+	 *    explicito do usuario, igual outras IDEs de banco. Expandir para ver
+	 *    a estrutura passou a ser SO pela setinha (ver setToggleClickCount(0)
+	 *    em buildObjectBrowser); "Informacoes"/DDL completos continuam so
+	 *    pelo clique direito (ver {@link #maybeShowObjectContextMenu}).
+	 *  - Categoria (ex.: "Tabelas (256)") ou raiz do schema: expande/recolhe
+	 *    manualmente — do contrario perderiam esse atalho com o toggle
+	 *    nativo desligado.
+	 *  - Coluna: nao faz nada (nao e um gesto util ali).
 	 */
-	private void openSelectedObjectProperties() {
-		TreePath path = objectTree.getSelectionPath();
+	private void handleObjectTreeDoubleClick(MouseEvent e) {
+		TreePath path = objectTree.getPathForLocation(e.getX(), e.getY());
 		if (path == null) {
 			return;
 		}
 		Object node = ((DefaultMutableTreeNode) path.getLastPathComponent()).getUserObject();
-		if (node instanceof ObjNode obj && obj.type() == NodeType.SCHEMA_PICK) {
-			openSchema(obj.name());
+		if (node instanceof ObjNode obj) {
+			if (obj.type() == NodeType.SCHEMA_PICK) {
+				openSchema(obj.name());
+				return;
+			}
+			if (isOpenableObject(obj.type())) {
+				pasteObjectNameIntoEditor(obj.name());
+				return;
+			}
+			if (obj.type() == NodeType.COLUMN) {
+				return;
+			}
 		}
+		// Categoria ou raiz do schema: toggle manual (native desligado acima).
+		if (objectTree.isExpanded(path)) {
+			objectTree.collapsePath(path);
+		} else {
+			objectTree.expandPath(path);
+		}
+	}
+
+	/**
+	 * Cola {@code name} no editor SQL ativo, na posicao do cursor (substitui
+	 * a selecao, se houver — comportamento padrao de "inserir texto"), e
+	 * devolve o foco pro editor pra continuar digitando na hora.
+	 */
+	private void pasteObjectNameIntoEditor(String name) {
+		SqlEditorPane editor = currentEditor();
+		if (editor == null) {
+			return;
+		}
+		editor.textArea().replaceSelection(name);
+		editor.textArea().requestFocusInWindow();
 	}
 
 	/**
