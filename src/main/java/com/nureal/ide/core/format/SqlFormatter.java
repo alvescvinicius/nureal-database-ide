@@ -350,6 +350,16 @@ public final class SqlFormatter {
         private int content = 7;        // RIVER: coluna onde o conteudo comeca (riverWidth + 1)
         private int currentLineIndent = 0; // indentacao (em espacos) da linha atual
 
+        // Alinhamento das condicoes de um JOIN (ON/AND/OR) — ver #joinConditionLine.
+        // Independente do estilo escolhido: sem isto, o AND/OR de uma condicao
+        // de JOIN usava o MESMO tratamento do WHERE (alinhado a direita no rio,
+        // no RIVER, ou recuo generico de 4 espacos no STANDARD/COMMA_FIRST),
+        // que nao tem nenhuma relacao com a coluna onde "ON" realmente ficou
+        // (varia com o tamanho do nome da tabela/alias) — o resultado ficava
+        // com o AND "puxado" de volta pra esquerda, desalinhado do ON.
+        private int joinOnColumn = -1;
+        private boolean inJoinCondition = false;
+
         // pilha de chamadas JSON em quebra: profundidade onde abriram e indentacao base
         private final Deque<Integer> jsonDepths = new ArrayDeque<>();
         private final Deque<Integer> jsonBaseIndents = new ArrayDeque<>();
@@ -444,6 +454,7 @@ public final class SqlFormatter {
                 if (CLAUSE_STARTERS.contains(low)) {
                     startClause(display(t.text()), LIST_CLAUSES.contains(low));
                     conditionCtx = false;
+                    inJoinCondition = false;
                     betweenPending = 0;
                     pendingListItem = false;
                     applyClauseMode(low);
@@ -456,6 +467,8 @@ public final class SqlFormatter {
                     if (!prevJoin) {
                         startJoin();
                         conditionCtx = false;
+                        inJoinCondition = false;
+                        joinOnColumn = -1;
                         mode = Mode.NONE;
                         betweenPending = 0;
                         pendingListItem = false;
@@ -470,12 +483,18 @@ public final class SqlFormatter {
                 if (low.equals("on")) {
                     placeWord(t);
                     conditionCtx = true;
+                    inJoinCondition = true;
+                    joinOnColumn = currentColumn() - 2; // coluna onde o "ON" comecou
                     mode = Mode.NONE;
                     return idx + 1;
                 }
                 if ((low.equals("and") || low.equals("or"))
                         && conditionCtx && betweenPending == 0) {
-                    conditionLine(display(t.text()));
+                    if (inJoinCondition) {
+                        joinConditionLine(display(t.text()));
+                    } else {
+                        conditionLine(display(t.text()));
+                    }
                     return idx + 1;
                 }
                 if (low.equals("and") && betweenPending > 0) {
@@ -542,6 +561,8 @@ public final class SqlFormatter {
                     depth = 0;
                     mode = Mode.NONE;
                     conditionCtx = false;
+                    inJoinCondition = false;
+                    joinOnColumn = -1;
                     betweenPending = 0;
                     pendingListItem = false;
                     pendingContentBreak = false;
@@ -658,7 +679,7 @@ public final class SqlFormatter {
             }
         }
 
-        /** Continuacao de condicao (AND/OR), estilo-dependente. */
+        /** Continuacao de condicao (AND/OR) do WHERE/HAVING, estilo-dependente. */
         private void conditionLine(String phrase) {
             switch (style) {
                 case RIVER -> {
@@ -672,6 +693,34 @@ public final class SqlFormatter {
                     prev = new Tok(T.WORD, lastWord(phrase));
                 }
             }
+        }
+
+        /**
+         * Continuacao de condicao (AND/OR) de uma condicao ON de JOIN — IGUAL
+         * em qualquer estilo (RIVER/STANDARD/COMMA_FIRST), diferente de
+         * {@link #conditionLine}: "ON"/"AND"/"OR" formam seu proprio "rio"
+         * local, alinhados a direita entre si (ver {@link #joinOnColumn}, a
+         * coluna onde "ON" comecou), de forma que o CONTEUDO de cada condicao
+         * (o texto logo apos a palavra-chave) sempre comeca na MESMA coluna,
+         * por exemplo:
+         * <pre>
+         *      INNER JOIN pedidos p
+         *              ON p.cliente_id = c.id
+         *             AND p.status = 'ATIVO'
+         * </pre>
+         */
+        private void joinConditionLine(String phrase) {
+            int startColumn = Math.max(0, joinOnColumn + 2 - phrase.length());
+            breakToIndent(startColumn);
+            sb.append(phrase);
+            atLineStart = false;
+            prev = new Tok(T.WORD, lastWord(phrase));
+        }
+
+        /** Coluna (0-based) onde o cursor de escrita esta na linha atual. */
+        private int currentColumn() {
+            int nl = sb.lastIndexOf("\n");
+            return sb.length() - nl - 1;
         }
 
         /** Nova linha em branco (sem texto), so para preparar uma quebra antes do proximo token. */

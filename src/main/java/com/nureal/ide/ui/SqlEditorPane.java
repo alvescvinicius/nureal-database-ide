@@ -1,6 +1,7 @@
 package com.nureal.ide.ui;
 
 import com.nureal.ide.core.autocomplete.SqlCompletionProvider;
+import com.nureal.ide.core.editor.EditorUndoManager;
 import com.nureal.ide.core.format.SqlFormatter;
 import com.nureal.ide.core.metadata.model.SchemaInfo;
 import com.nureal.ide.core.metadata.model.TableInfo;
@@ -28,10 +29,14 @@ import javax.swing.JPanel;
 import javax.swing.JTextField;
 import javax.swing.JToggleButton;
 import javax.swing.KeyStroke;
+import javax.swing.JMenuItem;
+import javax.swing.JPopupMenu;
 import javax.swing.text.BadLocationException;
 import javax.swing.text.DefaultHighlighter;
 import javax.swing.text.Highlighter;
 import javax.swing.text.JTextComponent;
+import javax.swing.undo.CannotRedoException;
+import javax.swing.undo.CannotUndoException;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Cursor;
@@ -74,6 +79,15 @@ public class SqlEditorPane extends JPanel {
     private final Supplier<SqlFormatter> formatterSupplier;
     private int fontSize = BASE_FONT_SIZE;
     private String fontFamily; // null/vazio = escolha automatica
+
+    /**
+     * Desfazer/refazer deste editor — ver {@link EditorUndoManager}. Ligado
+     * diretamente no {@link javax.swing.text.Document}, independente do
+     * undo manager interno do RSyntaxTextArea (que fica sem uso: nada mais
+     * chama {@code textArea.undoLastAction()}/{@code redoLastAction()} —
+     * Ctrl+Z/Ctrl+Y e o menu de contexto abaixo passam a usar SO este).
+     */
+    private final EditorUndoManager undoManager;
 
     // Id estavel desta aba (UUID), definido pelo chamador na criacao — usado
     // para religar corretamente os resultados salvos (ver Conexao#tabResults)
@@ -125,21 +139,6 @@ public class SqlEditorPane extends JPanel {
     private final ObjectOpenHandler onOpenObject;
 
     /**
-     * Chamado quando o CURSOR (nao o mouse) passa a estar sobre um objeto de
-     * banco reconhecido no editor (secao 8.4 — sincronizar a arvore de
-     * objetos com o cursor). So dispara quando o objeto MUDA (evita
-     * notificar a cada tecla dentro do mesmo nome) e so quando o cursor
-     * ENTRA em cima de um objeto — sair para texto comum nao limpa a
-     * selecao da arvore (evita ela "piscando" toda hora).
-     */
-    @FunctionalInterface
-    interface CaretObjectListener {
-        void onObjectUnderCaret(String kind, String name);
-    }
-
-    private final CaretObjectListener onCaretObject;
-
-    /**
      * Chamado quando o usuario aperta ALT+Seta-esquerda no editor (secao 8.6
      * do pedido "Navegacao Inteligente e Interativa") — pede pra
      * {@code MainWindow} voltar ao objeto anterior no historico de navegacao
@@ -151,7 +150,7 @@ public class SqlEditorPane extends JPanel {
 
     public SqlEditorPane(String tabId, SqlCompletionProvider provider, Runnable onRun,
             Supplier<SqlFormatter> formatterSupplier, String fontFamily, Supplier<SchemaInfo> schemaSupplier,
-            ObjectOpenHandler onOpenObject, CaretObjectListener onCaretObject, Runnable onNavigateBack) {
+            ObjectOpenHandler onOpenObject, Runnable onNavigateBack) {
         super(new BorderLayout());
 
         this.tabId = tabId;
@@ -159,7 +158,6 @@ public class SqlEditorPane extends JPanel {
         this.fontFamily = fontFamily;
         this.schemaSupplier = schemaSupplier;
         this.onOpenObject = onOpenObject;
-        this.onCaretObject = onCaretObject;
         this.onNavigateBack = onNavigateBack;
 
         textArea = new RSyntaxTextArea(20, 80) {
@@ -186,6 +184,12 @@ public class SqlEditorPane extends JPanel {
         textArea.setCodeFoldingEnabled(true);
         textArea.setTabSize(2);
         textArea.setText("");
+        // Ligado JA AQUI (antes de qualquer setText(sql) que o chamador venha
+        // a fazer pra carregar o conteudo inicial da aba) — MainWindow chama
+        // discardUndoHistory() logo depois de carregar o SQL salvo, pra esse
+        // carregamento inicial nao entrar no historico de desfazer (ver
+        // MainWindow#addQueryTab).
+        this.undoManager = new EditorUndoManager(textArea);
         textArea.setFont(pickEditorFont(fontFamily, BASE_FONT_SIZE));
         // Nomes de tabela/view/procedure/alias (ver SqlHighlightTokenMaker,
         // que os reclassifica para DATA_TYPE) devem ficar em NEGRITO, mas
@@ -212,8 +216,12 @@ public class SqlEditorPane extends JPanel {
         textArea.setMarkAllHighlightColor(new Color(0x22, 0xC5, 0x5E, 90));
         installCurrentStatementHighlight(textArea);
         installObjectHover(textArea);
-        installCaretObjectSync(textArea);
         installReferenceHighlight(textArea);
+        // Substitui o menu de contexto padrao do RSyntaxTextArea (que teria
+        // seu PROPRIO "Desfazer"/"Refazer" ligado ao undo manager interno da
+        // biblioteca) pelo nosso, ligado ao EditorUndoManager — sem isso,
+        // clique direito e Ctrl+Z desfariam coisas diferentes.
+        textArea.setComponentPopupMenu(buildEditorPopupMenu());
 
         AutoCompletion ac = new AutoCompletion(provider);
         ac.setAutoActivationEnabled(true);
@@ -286,19 +294,51 @@ public class SqlEditorPane extends JPanel {
         textArea.getInputMap().put(KeyStroke.getKeyStroke("control shift U"), "to-upper");
         textArea.getInputMap().put(KeyStroke.getKeyStroke("control L"), "to-lower");
         textArea.getInputMap().put(KeyStroke.getKeyStroke("control shift L"), "to-lower");
+
+        // Desfazer/Refazer: Ctrl+Z / Ctrl+Y (Ctrl+Shift+Z como alias comum de
+        // "refazer", igual boa parte dos editores) passam a chamar o
+        // EditorUndoManager PROPRIO (ver campo undoManager), nao o
+        // undo/redo padrao do RSyntaxTextArea — o padrao da biblioteca
+        // desfaz LETRA POR LETRA (uma edicao por chamada de
+        // insertString/remove do Document), nunca o "grupo" que o usuario
+        // espera ao digitar uma palavra/frase de uma vez (ver javadoc de
+        // EditorUndoManager). Registrado tanto no InputMap/ActionMap quanto
+        // no KeyListener bruto abaixo, pelo MESMO motivo do Ctrl+U/Ctrl+L
+        // (ver comentario logo abaixo).
+        textArea.getActionMap().put("nureal-undo", new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                performUndo();
+            }
+        });
+        textArea.getActionMap().put("nureal-redo", new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                performRedo();
+            }
+        });
+        textArea.getInputMap().put(KeyStroke.getKeyStroke("control Z"), "nureal-undo");
+        textArea.getInputMap().put(KeyStroke.getKeyStroke("control Y"), "nureal-redo");
+        textArea.getInputMap().put(KeyStroke.getKeyStroke("control shift Z"), "nureal-redo");
+
         // Reforco: os bindings de InputMap/ActionMap acima as vezes NAO
         // disparavam (usuario relatou Ctrl+U/Ctrl+L sem nenhum efeito numa
-        // selecao grande). Causa provavel: o Swing notifica TODOS os
+        // selecao grande — e depois, Ctrl+Z "nao funcionando direito" e
+        // perdendo digitacao). Causa provavel: o Swing notifica TODOS os
         // KeyListener's registrados no editor (inclusive o da biblioteca de
         // autocomplete, instalada logo acima via ac.install(textArea)) ANTES
         // de processar os key bindings do InputMap — se qualquer um deles
         // consumir o evento (e.consume()) por algum motivo proprio, o
         // binding de InputMap simplesmente nunca chega a rodar, sem erro
-        // nenhum, exatamente o sintoma relatado. Um KeyListener proprio,
-        // registrado diretamente, sempre RODA (listeners nao impedem uns aos
-        // outros de serem chamados so por consumir o evento) — chamando
-        // changeCase(...) daqui direto, o atalho funciona independente do
-        // que mais estiver escutando teclas no editor.
+        // nenhum. Um KeyListener proprio, registrado diretamente, sempre
+        // RODA (listeners nao impedem uns aos outros de serem chamados so
+        // por consumir o evento) — chamando as acoes daqui direto, os
+        // atalhos funcionam independente do que mais estiver escutando
+        // teclas no editor. Ctrl+V/Ctrl+X tambem entram aqui (e nao so no
+        // InputMap padrao) pra sempre passar por
+        // {@link EditorUndoManager#runAsSingleEdit}, garantindo colar/
+        // recortar como UMA operacao propria no historico (nunca misturada
+        // com digitacao ao redor).
         textArea.addKeyListener(new java.awt.event.KeyAdapter() {
             @Override
             public void keyPressed(KeyEvent e) {
@@ -310,6 +350,22 @@ public class SqlEditorPane extends JPanel {
                     e.consume();
                 } else if (e.getKeyCode() == KeyEvent.VK_L) {
                     changeCase(false);
+                    e.consume();
+                } else if (e.getKeyCode() == KeyEvent.VK_Z) {
+                    if (e.isShiftDown()) {
+                        performRedo();
+                    } else {
+                        performUndo();
+                    }
+                    e.consume();
+                } else if (e.getKeyCode() == KeyEvent.VK_Y) {
+                    performRedo();
+                    e.consume();
+                } else if (e.getKeyCode() == KeyEvent.VK_V && !e.isShiftDown() && textArea.isEditable()) {
+                    undoManager.runAsSingleEdit(textArea::paste);
+                    e.consume();
+                } else if (e.getKeyCode() == KeyEvent.VK_X && !e.isShiftDown() && textArea.isEditable()) {
+                    undoManager.runAsSingleEdit(textArea::cut);
                     e.consume();
                 }
             }
@@ -389,8 +445,16 @@ public class SqlEditorPane extends JPanel {
         installBreadcrumbSync(textArea);
     }
 
-    /** Cor do destaque de fundo da instrucao atual — ver {@link #installCurrentStatementHighlight}. */
-    private static final Color CURRENT_STATEMENT_BG = new Color(0x64, 0x74, 0x8B, 16);
+    /**
+     * Cor do destaque de fundo da instrucao atual — ver
+     * {@link #installCurrentStatementHighlight}. Historico do ajuste: alpha
+     * 16 (~6%) ficou "quase imperceptivel"; 42 (~16%) ficou escuro/pesado
+     * demais, incomodando ao digitar (usuario relatou "sensacao ruim").
+     * 24 (~9%) ainda ficou um pouco forte; 20 (~8%) e o ponto de equilibrio
+     * pedido pelo usuario — visivel o suficiente pra indicar a instrucao
+     * atual, sem incomodar durante a digitacao.
+     */
+    private static final Color CURRENT_STATEMENT_BG = new Color(0x64, 0x74, 0x8B, 20);
 
     /**
      * Destaque sutil de fundo para TODA a instrucao SQL onde o cursor esta
@@ -412,7 +476,17 @@ public class SqlEditorPane extends JPanel {
         int[] lastBounds = { -1, -1 };
         Runnable update = () -> {
             Highlighter highlighter = textArea.getHighlighter();
-            int[] bounds = SqlStatementLocator.boundsAt(textArea.getText(), textArea.getCaretPosition());
+            int caret = textArea.getCaretPosition();
+            int[] rawBounds = SqlStatementLocator.boundsAt(textArea.getText(), caret);
+            // SqlStatementLocator.boundsAt so apara espacos das PONTAS do
+            // texto encontrado — ele NAO verifica se o cursor de fato caiu
+            // dentro do resultado. Numa linha em branco ENTRE duas
+            // instrucoes, o cursor fica ANTES do inicio aparado (que e o
+            // comeco da PROXIMA instrucao), entao sem essa checagem a linha
+            // vazia contava como pertencendo a instrucao seguinte. Fora
+            // desse caso (inclusive linhas em branco DENTRO de uma mesma
+            // instrucao), o cursor sempre cai dentro do intervalo normal.
+            int[] bounds = (caret >= rawBounds[0] && caret <= rawBounds[1]) ? rawBounds : new int[] {-1, -1};
             if (bounds[0] == lastBounds[0] && bounds[1] == lastBounds[1]) {
                 return;
             }
@@ -512,33 +586,6 @@ public class SqlEditorPane extends JPanel {
                     onOpenObject.open(hit.kind(), hit.name(), hit.table());
                 }
             }
-        });
-    }
-
-    /**
-     * Sincroniza a arvore de objetos com a posicao do CURSOR (secao 8.4): a
-     * cada movimento do cursor (clique, digitacao, setas), se ele esta agora
-     * sobre um objeto de banco reconhecido e DIFERENTE do ultimo notificado,
-     * avisa {@link #onCaretObject}. Sair de cima de um objeto para texto
-     * comum nao notifica nada — a arvore so "acompanha para frente", nunca
-     * desseleciona sozinha (ver javadoc do proprio {@link CaretObjectListener}).
-     */
-    private void installCaretObjectSync(RSyntaxTextArea textArea) {
-        String[] lastNotified = { null };
-        textArea.addCaretListener(e -> {
-            if (onCaretObject == null) {
-                return;
-            }
-            EditorObjectHit hit = resolveObjectAt(textArea.getCaretPosition());
-            if (hit == null) {
-                return;
-            }
-            String key = hit.kind() + ":" + hit.name().toUpperCase(Locale.ROOT);
-            if (key.equals(lastNotified[0])) {
-                return;
-            }
-            lastNotified[0] = key;
-            onCaretObject.onObjectUnderCaret(hit.kind(), hit.name());
         });
     }
 
@@ -958,20 +1005,25 @@ public class SqlEditorPane extends JPanel {
         // verdes" sobre o texto recem-formatado).
         clearMarks();
 
-        SqlFormatter formatter = formatterSupplier.get();
-        String selected = textArea.getSelectedText();
-        if (selected != null && !selected.isBlank()) {
-            textArea.replaceSelection(formatter.format(selected));
-            return;
-        }
-        String all = textArea.getText();
-        if (all == null || all.isBlank()) {
-            return;
-        }
-        int caret = textArea.getCaretPosition();
-        String formatted = formatter.format(all);
-        textArea.setText(formatted);
-        textArea.setCaretPosition(Math.min(caret, formatted.length()));
+        // Formatar e uma OPERACAO PROPRIA no historico de desfazer, nunca
+        // misturada com digitacao antes/depois (pedido explicito do
+        // usuario) — ver EditorUndoManager#runAsSingleEdit.
+        undoManager.runAsSingleEdit(() -> {
+            SqlFormatter formatter = formatterSupplier.get();
+            String selected = textArea.getSelectedText();
+            if (selected != null && !selected.isBlank()) {
+                textArea.replaceSelection(formatter.format(selected));
+                return;
+            }
+            String all = textArea.getText();
+            if (all == null || all.isBlank()) {
+                return;
+            }
+            int caret = textArea.getCaretPosition();
+            String formatted = formatter.format(all);
+            textArea.setText(formatted);
+            textArea.setCaretPosition(Math.min(caret, formatted.length()));
+        });
     }
 
     // ---------- Localizar / Substituir ----------
@@ -1120,12 +1172,18 @@ public class SqlEditorPane extends JPanel {
             return;
         }
         configureSearch(true);
-        SearchResult result = SearchEngine.replace(textArea, searchContext);
-        if (!result.wasFound()) {
-            textArea.setCaretPosition(0);
-            result = SearchEngine.replace(textArea, searchContext);
-        }
-        updateStatus(result);
+        // Substituir e uma OPERACAO PROPRIA no historico, nunca misturada
+        // com digitacao ao redor — ver EditorUndoManager#runAsSingleEdit.
+        SearchResult[] resultHolder = { null };
+        undoManager.runAsSingleEdit(() -> {
+            SearchResult result = SearchEngine.replace(textArea, searchContext);
+            if (!result.wasFound()) {
+                textArea.setCaretPosition(0);
+                result = SearchEngine.replace(textArea, searchContext);
+            }
+            resultHolder[0] = result;
+        });
+        updateStatus(resultHolder[0]);
     }
 
     private void replaceAll() {
@@ -1133,8 +1191,9 @@ public class SqlEditorPane extends JPanel {
             return;
         }
         configureSearch(true);
-        SearchResult result = SearchEngine.replaceAll(textArea, searchContext);
-        findStatus.setText(result.getCount() + " substituicao(oes)");
+        SearchResult[] resultHolder = { null };
+        undoManager.runAsSingleEdit(() -> resultHolder[0] = SearchEngine.replaceAll(textArea, searchContext));
+        findStatus.setText(resultHolder[0].getCount() + " substituicao(oes)");
     }
 
     private void updateStatus(SearchResult result) {
@@ -1258,5 +1317,96 @@ public class SqlEditorPane extends JPanel {
 
     private static boolean isWordChar(char c) {
         return Character.isLetterOrDigit(c) || c == '_';
+    }
+
+    // ---------- Desfazer / Refazer ----------
+
+    private void performUndo() {
+        try {
+            if (undoManager.canUndo()) {
+                undoManager.undo();
+            }
+        } catch (CannotUndoException ignored) {
+            // nada a desfazer no momento — sem problema, o atalho so nao faz nada
+        }
+    }
+
+    private void performRedo() {
+        try {
+            if (undoManager.canRedo()) {
+                undoManager.redo();
+            }
+        } catch (CannotRedoException ignored) {
+            // nada a refazer no momento — sem problema
+        }
+    }
+
+    /**
+     * Descarta todo o historico de desfazer/refazer desta aba — chamado pelo
+     * {@code MainWindow} logo depois de carregar o SQL salvo/restaurado numa
+     * aba nova ({@code textArea().setText(sql)}), pra esse carregamento
+     * inicial NUNCA aparecer como algo "desfazivel" (o usuario nao deveria
+     * conseguir dar Ctrl+Z e apagar uma query que acabou de abrir).
+     */
+    public void discardUndoHistory() {
+        undoManager.discardAllEdits();
+    }
+
+    /**
+     * Menu de contexto (botao direito) do editor: Desfazer/Refazer (pelo
+     * {@link #undoManager}, nao pelo padrao do RSyntaxTextArea — substitui o
+     * menu de fabrica da biblioteca pra nunca ter dois historicos de undo
+     * divergentes no mesmo editor) e as acoes basicas de
+     * recortar/copiar/colar/selecionar tudo. Estado (habilitado/desabilitado)
+     * recalculado toda vez que o menu vai aparecer.
+     */
+    private JPopupMenu buildEditorPopupMenu() {
+        JPopupMenu menu = new JPopupMenu();
+
+        JMenuItem undo = new JMenuItem("Desfazer");
+        undo.addActionListener(e -> performUndo());
+        JMenuItem redo = new JMenuItem("Refazer");
+        redo.addActionListener(e -> performRedo());
+        menu.add(undo);
+        menu.add(redo);
+        menu.addSeparator();
+
+        JMenuItem cut = new JMenuItem("Recortar");
+        cut.addActionListener(e -> undoManager.runAsSingleEdit(textArea::cut));
+        JMenuItem copy = new JMenuItem("Copiar");
+        copy.addActionListener(e -> textArea.copy());
+        JMenuItem paste = new JMenuItem("Colar");
+        paste.addActionListener(e -> undoManager.runAsSingleEdit(textArea::paste));
+        menu.add(cut);
+        menu.add(copy);
+        menu.add(paste);
+        menu.addSeparator();
+
+        JMenuItem selectAll = new JMenuItem("Selecionar tudo");
+        selectAll.addActionListener(e -> textArea.selectAll());
+        menu.add(selectAll);
+
+        menu.addPopupMenuListener(new javax.swing.event.PopupMenuListener() {
+            @Override
+            public void popupMenuWillBecomeVisible(javax.swing.event.PopupMenuEvent e) {
+                undo.setEnabled(undoManager.canUndo());
+                redo.setEnabled(undoManager.canRedo());
+                boolean hasSelection = textArea.getSelectedText() != null;
+                cut.setEnabled(hasSelection && textArea.isEditable());
+                copy.setEnabled(hasSelection);
+                paste.setEnabled(textArea.isEditable());
+            }
+
+            @Override
+            public void popupMenuWillBecomeInvisible(javax.swing.event.PopupMenuEvent e) {
+                // nada a fazer
+            }
+
+            @Override
+            public void popupMenuCanceled(javax.swing.event.PopupMenuEvent e) {
+                // nada a fazer
+            }
+        });
+        return menu;
     }
 }

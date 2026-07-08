@@ -217,15 +217,19 @@ public class MainWindow extends JFrame {
 	// ---------- Keep-alive de conexao ----------
 
 	/**
-	 * A cada {@link #KEEP_ALIVE_INTERVAL_MS}, se ligado, roda um "SELECT 1"
+	 * A cada {@link #keepAliveIntervalMs}, se ligado, roda um "SELECT 1"
 	 * (via {@link DatabaseDialect#keepAliveQuery()}) em TODAS as conexoes
 	 * abertas E ociosas ha pelo menos esse mesmo intervalo — so pra manter o
 	 * socket/sessao vivos enquanto a IDE esta aberta (evita o banco ou um
 	 * firewall/load balancer no meio derrubar a conexao por inatividade).
-	 * Ver {@link #startKeepAliveTimer()} e {@link #pingKeepAlive()}.
+	 * Intervalo configuravel (menu Layout -> "Intervalo do keep-alive...")
+	 * porque o padrao antigo fixo de 4 minutos podia ser MAIOR que o timeout
+	 * real de rede/firewall/proxy de alguns ambientes, fazendo a conexao cair
+	 * antes do primeiro ping — ver {@link #startKeepAliveTimer()} e
+	 * {@link #pingKeepAlive()}.
 	 */
 	private boolean keepAliveEnabled = false;
-	private static final int KEEP_ALIVE_INTERVAL_MS = 4 * 60 * 1000; // 4 minutos
+	private int keepAliveIntervalMs = UiPreferences.DEFAULT_KEEP_ALIVE_SECONDS * 1000;
 	private javax.swing.Timer keepAliveTimer;
 
 	// ---------- Formatacao de SQL (presets) e fonte do editor ----------
@@ -260,14 +264,28 @@ public class MainWindow extends JFrame {
 	}
 
 	/**
-	 * Timer unico (fica sempre rodando enquanto a janela existe, ver
-	 * {@link #KEEP_ALIVE_INTERVAL_MS}) que so FAZ alguma coisa quando
+	 * Granularidade FIXA do relogio interno do keep-alive — o {@code Timer}
+	 * em si sempre roda a cada 5s, independente do intervalo configurado pelo
+	 * usuario ({@link #keepAliveIntervalMs}); {@link #pingKeepAlive} e quem
+	 * decide, a cada tick, se cada conexao ja esta ociosa o suficiente pra
+	 * merecer um ping. Isso permite trocar o intervalo em tempo real (menu
+	 * "Intervalo do keep-alive...") sem precisar recriar o Timer, e deixa
+	 * intervalos curtos (ex.: 15s) responsivos de verdade.
+	 */
+	private static final int KEEP_ALIVE_TICK_MS = 5_000;
+
+	/** Menor intervalo aceito na configuracao (evita o usuario zerar sem querer e martelar o banco). */
+	private static final int MIN_KEEP_ALIVE_SECONDS = 5;
+
+	/**
+	 * Timer unico (fica sempre rodando enquanto a janela existe, granularidade
+	 * fixa — ver {@link #KEEP_ALIVE_TICK_MS}) que so FAZ alguma coisa quando
 	 * {@link #keepAliveEnabled} esta ligado ({@link #toggleKeepAlive}) — mais
 	 * simples que criar/parar um Timer novo toda vez que o usuario liga ou
-	 * desliga a opcao no menu.
+	 * desliga a opcao no menu (ou muda o intervalo).
 	 */
 	private void startKeepAliveTimer() {
-		keepAliveTimer = new javax.swing.Timer(KEEP_ALIVE_INTERVAL_MS, e -> {
+		keepAliveTimer = new javax.swing.Timer(KEEP_ALIVE_TICK_MS, e -> {
 			if (keepAliveEnabled) {
 				pingKeepAlive();
 			}
@@ -278,7 +296,7 @@ public class MainWindow extends JFrame {
 	/**
 	 * Roda o {@link DatabaseDialect#keepAliveQuery()} (ex.: "SELECT 1") em
 	 * TODA conexao aberta (de qualquer workspace, nao so o ativo) que esteja
-	 * ociosa ha pelo menos {@link #KEEP_ALIVE_INTERVAL_MS} — ver
+	 * ociosa ha pelo menos {@link #keepAliveIntervalMs} — ver
 	 * {@code Conexao#lastActivityMillis}, atualizado sempre que
 	 * {@link #onRun} executa alguma instrucao de verdade. Cada ping roda em
 	 * background (nunca na EDT, evita travar a interface se a rede estiver
@@ -292,7 +310,7 @@ public class MainWindow extends JFrame {
 			if (w.profile() == null || !w.mgr().isConnected()) {
 				continue;
 			}
-			if (now - w.lastActivityMillis() < KEEP_ALIVE_INTERVAL_MS) {
+			if (now - w.lastActivityMillis() < keepAliveIntervalMs) {
 				continue; // teve atividade de verdade recente, nao precisa de ping
 			}
 			w.setLastActivityMillis(now); // evita reenviar no proximo tick se a rede estiver lenta
@@ -312,6 +330,18 @@ public class MainWindow extends JFrame {
 		}
 	}
 
+	/** Texto amigavel do intervalo atual: segundos se &lt; 1 min, senao minutos (com casas decimais so se necessario). */
+	private String keepAliveIntervalLabel() {
+		int seconds = keepAliveIntervalMs / 1000;
+		if (seconds < 60) {
+			return seconds + "s";
+		}
+		if (seconds % 60 == 0) {
+			return (seconds / 60) + " min";
+		}
+		return String.format(java.util.Locale.ROOT, "%.1f min", seconds / 60.0);
+	}
+
 	/** Liga/desliga o keep-alive de conexao — ver checkbox no menu de layout. */
 	private void toggleKeepAlive() {
 		keepAliveEnabled = !keepAliveEnabled;
@@ -319,8 +349,46 @@ public class MainWindow extends JFrame {
 		if (statusBar != null) {
 			statusBar.setText(keepAliveEnabled
 					? " Keep-alive de conexao ativado (SELECT de teste a cada "
-							+ (KEEP_ALIVE_INTERVAL_MS / 60000) + " min de ociosidade)."
+							+ keepAliveIntervalLabel() + " de ociosidade)."
 					: " Keep-alive de conexao desativado.");
+		}
+	}
+
+	/**
+	 * Pede ao usuario o novo intervalo do keep-alive, EM SEGUNDOS (menu Layout
+	 * -> "Intervalo do keep-alive...") — o padrao fixo de 4 minutos podia ser
+	 * maior que o timeout real de alguns ambientes (firewall/proxy/load
+	 * balancer cortando por inatividade bem antes disso), entao a conexao
+	 * caia mesmo com o keep-alive ligado. Aceita qualquer valor inteiro >=
+	 * {@link #MIN_KEEP_ALIVE_SECONDS}; o Timer em si roda numa granularidade
+	 * fixa (ver {@link #KEEP_ALIVE_TICK_MS}), entao o novo valor passa a valer
+	 * ja no proximo tick, sem precisar reiniciar nada.
+	 */
+	private void configureKeepAliveInterval() {
+		String input = JOptionPane.showInputDialog(this,
+				"Intervalo do keep-alive, em segundos (ex.: 60 = 1 minuto):",
+				keepAliveIntervalMs / 1000);
+		if (input == null) {
+			return; // cancelado
+		}
+		int seconds;
+		try {
+			seconds = Integer.parseInt(input.trim());
+		} catch (NumberFormatException ex) {
+			JOptionPane.showMessageDialog(this, "Digite um numero inteiro de segundos.",
+					"Intervalo invalido", JOptionPane.ERROR_MESSAGE);
+			return;
+		}
+		if (seconds < MIN_KEEP_ALIVE_SECONDS) {
+			JOptionPane.showMessageDialog(this,
+					"O intervalo minimo e " + MIN_KEEP_ALIVE_SECONDS + " segundos.",
+					"Intervalo invalido", JOptionPane.ERROR_MESSAGE);
+			return;
+		}
+		keepAliveIntervalMs = seconds * 1000;
+		saveUiState();
+		if (statusBar != null) {
+			statusBar.setText(" Intervalo do keep-alive definido para " + keepAliveIntervalLabel() + ".");
 		}
 	}
 
@@ -340,6 +408,7 @@ public class MainWindow extends JFrame {
 		resultsVertical = state.resultsVertical();
 		compactMode = state.compactMode();
 		keepAliveEnabled = state.keepAliveEnabled();
+		keepAliveIntervalMs = Math.max(MIN_KEEP_ALIVE_SECONDS, state.keepAliveIntervalSeconds()) * 1000;
 		zoomIndex = clampZoomIndex(state.zoomIndex());
 		if (zoomIndex != UiPreferences.DEFAULT_ZOOM_INDEX) {
 			applyZoomFont(zoomIndex); // so a fonte; ainda nao ha janela/componentes
@@ -604,10 +673,14 @@ public class MainWindow extends JFrame {
 		menu.add(compact);
 
 		JCheckBoxMenuItem keepAlive = new JCheckBoxMenuItem("Manter conexao viva (keep-alive)", keepAliveEnabled);
-		keepAlive.setToolTipText("Roda um SELECT de teste a cada poucos minutos de ociosidade, "
+		keepAlive.setToolTipText("Roda um SELECT de teste a cada " + keepAliveIntervalLabel() + " de ociosidade, "
 				+ "so nas conexoes que ja estao abertas, pra evitar que caiam por inatividade.");
 		keepAlive.addActionListener(a -> toggleKeepAlive());
 		menu.add(keepAlive);
+
+		JMenuItem keepAliveInterval = new JMenuItem("Intervalo do keep-alive... (" + keepAliveIntervalLabel() + ")");
+		keepAliveInterval.addActionListener(a -> configureKeepAliveInterval());
+		menu.add(keepAliveInterval);
 
 		menu.addSeparator();
 		JMenu zoomMenu = new JMenu("Zoom");
@@ -1029,7 +1102,7 @@ public class MainWindow extends JFrame {
 	private void saveUiState() {
 		try {
 			uiPrefsStore.save(new UiPreferences.State(sidebarOnRight, resultsVertical, zoomIndex, compactMode,
-					keepAliveEnabled));
+					keepAliveEnabled, keepAliveIntervalMs / 1000));
 		} catch (Exception ex) {
 			AppLogger.warning("Falha ao salvar preferencias de UI", ex);
 			if (statusBar != null) {
@@ -1356,10 +1429,13 @@ public class MainWindow extends JFrame {
 			return false;
 		}
 		SqlEditorPane pane = new SqlEditorPane(tabId, completionProvider, this::onRun, this::currentSqlFormatter,
-				formatState.editorFontFamily(), () -> currentSchema, this::openEditorObject, this::selectObjectInTree,
-				this::navigateBack);
+				formatState.editorFontFamily(), () -> currentSchema, this::openEditorObject, this::navigateBack);
 		pane.textArea().setText(sql);
 		pane.textArea().setCaretPosition(0);
+		// Carregar o SQL salvo/restaurado NAO pode entrar no historico de
+		// desfazer desta aba nova — sem isto, um Ctrl+Z logo ao abrir a aba
+		// apagaria a query inteira (ver SqlEditorPane#discardUndoHistory).
+		pane.discardUndoHistory();
 		pane.textArea().getDocument().addDocumentListener(new DocumentListener() {
 			@Override
 			public void insertUpdate(DocumentEvent e) {
@@ -3708,50 +3784,6 @@ public class MainWindow extends JFrame {
 		}
 	}
 
-	/**
-	 * Chamado pelo editor SQL quando o CURSOR passa a estar sobre um objeto
-	 * de banco reconhecido (secao 8.4 — ver {@link SqlEditorPane.CaretObjectListener}):
-	 * localiza o no correspondente na arvore de objetos e SELECIONA (sem
-	 * expandir o proprio objeto, so os ancestrais ate ele ficarem visiveis —
-	 * ver {@link JTree#scrollPathToVisible}, que expande so os pais do
-	 * caminho, nunca o ultimo componente). Se a categoria nao existir (sem
-	 * schema carregado ainda) ou o objeto nao estiver visivel no momento
-	 * (ex.: escondido por um filtro de busca ativo), simplesmente nao faz
-	 * nada — nunca mexe no filtro do usuario sozinho.
-	 */
-	private void selectObjectInTree(String kind, String name) {
-		if (!(objectTree.getModel().getRoot() instanceof DefaultMutableTreeNode root)) {
-			return;
-		}
-		String categoryLabel = switch (kind) {
-			case "TABLE" -> "Tabelas";
-			case "VIEW" -> "Visualizacoes";
-			case "PROCEDURE" -> "Procedures";
-			case "FUNCTION" -> "Functions";
-			case "TRIGGER" -> "Triggers";
-			default -> null;
-		};
-		if (categoryLabel == null) {
-			return;
-		}
-		for (int i = 0; i < root.getChildCount(); i++) {
-			if (!(root.getChildAt(i) instanceof DefaultMutableTreeNode cat)
-					|| !(cat.getUserObject() instanceof ObjNode catNode)
-					|| !categoryLabel.equals(catNode.name())) {
-				continue;
-			}
-			for (int j = 0; j < cat.getChildCount(); j++) {
-				if (cat.getChildAt(j) instanceof DefaultMutableTreeNode child
-						&& child.getUserObject() instanceof ObjNode obj
-						&& obj.name().equalsIgnoreCase(name)) {
-					TreePath path = new TreePath(child.getPath());
-					objectTree.setSelectionPath(path);
-					objectTree.scrollPathToVisible(path);
-				}
-			}
-			return;
-		}
-	}
 
 	/**
 	 * Janela de propriedades: para tabelas/views mostra a grade de colunas; para

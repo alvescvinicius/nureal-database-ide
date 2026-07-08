@@ -13,9 +13,9 @@ import java.util.List;
  *
  * Guarda: lado do painel lateral (esquerda/direita), orientacao do split de
  * resultados (horizontal/vertical), nivel de zoom da interface, modo
- * compacto (densidade) e se o keep-alive de conexao esta ligado. Formato
- * simples chave=valor, igual ao das outras stores do projeto (ConnectionStore,
- * SessionStore).
+ * compacto (densidade), se o keep-alive de conexao esta ligado e o intervalo
+ * (em segundos) usado por ele. Formato simples chave=valor, igual ao das
+ * outras stores do projeto (ConnectionStore, SessionStore).
  */
 public class UiPreferences {
 
@@ -39,12 +39,16 @@ public class UiPreferences {
         return file;
     }
 
+    /** Intervalo padrao do keep-alive, em segundos, quando nunca configurado. */
+    public static final int DEFAULT_KEEP_ALIVE_SECONDS = 60;
+
     /** Estado imutavel das preferencias de UI. */
     public record State(boolean sidebarOnRight, boolean resultsVertical,
-                         int zoomIndex, boolean compactMode, boolean keepAliveEnabled) {
+                         int zoomIndex, boolean compactMode, boolean keepAliveEnabled,
+                         int keepAliveIntervalSeconds) {
 
         public static State defaults() {
-            return new State(false, false, DEFAULT_ZOOM_INDEX, false, false);
+            return new State(false, false, DEFAULT_ZOOM_INDEX, false, false, DEFAULT_KEEP_ALIVE_SECONDS);
         }
     }
 
@@ -58,6 +62,7 @@ public class UiPreferences {
         int zoomIndex = DEFAULT_ZOOM_INDEX;
         boolean compactMode = false;
         boolean keepAliveEnabled = false;
+        int keepAliveIntervalSeconds = DEFAULT_KEEP_ALIVE_SECONDS;
 
         List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);
         for (String raw : lines) {
@@ -77,12 +82,14 @@ public class UiPreferences {
                 case "zoomIndex" -> zoomIndex = parseIndex(value);
                 case "compactMode" -> compactMode = Boolean.parseBoolean(value);
                 case "keepAliveEnabled" -> keepAliveEnabled = Boolean.parseBoolean(value);
+                case "keepAliveIntervalSeconds" -> keepAliveIntervalSeconds = parseSeconds(value);
                 default -> {
                     // ignora chaves desconhecidas (versoes futuras)
                 }
             }
         }
-        return new State(sidebarOnRight, resultsVertical, zoomIndex, compactMode, keepAliveEnabled);
+        return new State(sidebarOnRight, resultsVertical, zoomIndex, compactMode, keepAliveEnabled,
+                keepAliveIntervalSeconds);
     }
 
     /** Grava as preferencias, criando a pasta se necessario. */
@@ -98,6 +105,7 @@ public class UiPreferences {
         sb.append("zoomIndex=").append(state.zoomIndex()).append('\n');
         sb.append("compactMode=").append(state.compactMode()).append('\n');
         sb.append("keepAliveEnabled=").append(state.keepAliveEnabled()).append('\n');
+        sb.append("keepAliveIntervalSeconds=").append(state.keepAliveIntervalSeconds()).append('\n');
         Files.write(file, sb.toString().getBytes(StandardCharsets.UTF_8));
     }
 
@@ -106,6 +114,15 @@ public class UiPreferences {
             return Integer.parseInt(s);
         } catch (NumberFormatException e) {
             return DEFAULT_ZOOM_INDEX;
+        }
+    }
+
+    private static int parseSeconds(String s) {
+        try {
+            int v = Integer.parseInt(s);
+            return (v > 0) ? v : DEFAULT_KEEP_ALIVE_SECONDS;
+        } catch (NumberFormatException e) {
+            return DEFAULT_KEEP_ALIVE_SECONDS;
         }
     }
 }
