@@ -1,12 +1,15 @@
 package com.nureal.ide.ui;
 
+import com.nureal.ide.core.sql.SqlStatementLocator;
 import org.fife.ui.rsyntaxtextarea.RSyntaxTextArea;
 import org.fife.ui.rsyntaxtextarea.Token;
 import org.fife.ui.rsyntaxtextarea.TokenTypes;
 import org.fife.ui.rsyntaxtextarea.modes.SQLTokenMaker;
 
 import javax.swing.text.Segment;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 
@@ -52,7 +55,12 @@ public final class SqlHighlightTokenMaker extends SQLTokenMaker {
      * do RSyntaxTextArea) + extras de SQL "moderno"/ANSI comuns em
      * Postgres/MySQL/SQL Server/Oracle que faltam na gramatica embutida.
      */
-    private static final Set<String> KEYWORDS = Set.of(
+    // Visibilidade de pacote (nao mais private): reaproveitadas por
+    // SqlEditorPane#scanReferenceGroups (secao 8.5 — destaque de todas as
+    // referencias a um objeto/alias), pra nao duplicar de novo esta mesma
+    // lista grande so pra saber quando uma palavra "encerra" a expectativa
+    // de alias implicito.
+    static final Set<String> KEYWORDS = Set.of(
             "ADD", "ALL", "ALTER", "AND", "ANY", "AS", "ASC", "AUTOINCREMENT", "AVA",
             "BETWEEN", "BINARY", "BIT", "BOOLEAN", "BY", "BYTE",
             "CASE", "CHAR", "CHARACTER", "COLUMN", "CONSTRAINT", "COUNTER", "CREATE", "CURRENCY",
@@ -92,7 +100,7 @@ public final class SqlHighlightTokenMaker extends SQLTokenMaker {
     );
 
     /** Idem — agregacoes/funcoes SQL99 do arquivo original + comuns do dia a dia. */
-    private static final Set<String> FUNCTIONS = Set.of(
+    static final Set<String> FUNCTIONS = Set.of(
             "AVG", "COUNT", "MIN", "MAX", "SUM",
             "CURRENT_DATE", "CURRENT_TIME", "CURRENT_TIMESTAMP", "CURRENT_USER", "SESSION_USER", "SYSTEM_USER",
             "BIT_LENGTH", "CHAR_LENGTH", "EXTRACT", "OCTET_LENGTH", "POSITION",
@@ -108,7 +116,7 @@ public final class SqlHighlightTokenMaker extends SQLTokenMaker {
      * {@link #scanKnownNames} pra saber quando o PROXIMO identificador
      * "de verdade" e o nome de um objeto (ou, em seguida, seu alias).
      */
-    private static final Set<String> OBJECT_INTRODUCERS = Set.of(
+    static final Set<String> OBJECT_INTRODUCERS = Set.of(
             "FROM", "JOIN", "INTO", "UPDATE", "TABLE", "VIEW",
             "PROCEDURE", "FUNCTION", "TRIGGER", "CALL", "EXEC", "EXECUTE", "REFERENCES"
     );
@@ -173,73 +181,11 @@ public final class SqlHighlightTokenMaker extends SQLTokenMaker {
             return; // ainda na mesma instrucao ja escaneada, documento sem mudar de tamanho
         }
         String full = owner.getText();
-        int[] bounds = statementBounds(full, offset);
+        int[] bounds = SqlStatementLocator.boundsAt(full, offset);
         cachedStmtStart = bounds[0];
         cachedStmtEnd = bounds[1];
         cachedDocLength = docLength;
         knownNames = scanKnownNames(full, cachedStmtStart, cachedStmtEnd);
-    }
-
-    /**
-     * {@code {inicio, fim}} da instrucao que contem {@code offset} dentro de
-     * {@code full} — vai do inicio do documento (ou do ";" anterior mais
-     * proximo, fora de strings/comentarios) ate o proximo ";" (ou o fim do
-     * documento). Nao reutiliza {@code SqlStatementSplitter} porque aquele
-     * devolve STRINGS ja recortadas/sem posicao; aqui precisamos dos
-     * OFFSETS originais pra decidir se a linha atual ainda cai dentro do
-     * range ja escaneado (ver {@link #refreshKnownNames}).
-     */
-    private static int[] statementBounds(String full, int offset) {
-        int n = full.length();
-        int safeOffset = Math.max(0, Math.min(offset, n));
-        int start = 0;
-        int end = n;
-        int i = 0;
-        while (i < n) {
-            char c = full.charAt(i);
-            if ((c == '-' && i + 1 < n && full.charAt(i + 1) == '-') || c == '#') {
-                while (i < n && full.charAt(i) != '\n') {
-                    i++;
-                }
-                continue;
-            }
-            if (c == '/' && i + 1 < n && full.charAt(i + 1) == '*') {
-                int close = full.indexOf("*/", i + 2);
-                i = (close < 0) ? n : close + 2;
-                continue;
-            }
-            if (c == '\'' || c == '"' || c == '`') {
-                char quote = c;
-                i++;
-                while (i < n) {
-                    char d = full.charAt(i);
-                    if (d == '\\' && (quote == '\'' || quote == '"') && i + 1 < n) {
-                        i += 2;
-                        continue;
-                    }
-                    if (d == quote) {
-                        if (i + 1 < n && full.charAt(i + 1) == quote) {
-                            i += 2;
-                            continue;
-                        }
-                        i++;
-                        break;
-                    }
-                    i++;
-                }
-                continue;
-            }
-            if (c == ';') {
-                if (i < safeOffset) {
-                    start = i + 1;
-                } else {
-                    end = i;
-                    break;
-                }
-            }
-            i++;
-        }
-        return new int[] {start, end};
     }
 
     /**
@@ -353,6 +299,221 @@ public final class SqlHighlightTokenMaker extends SQLTokenMaker {
             }
         }
         return names;
+    }
+
+    /**
+     * Um "grupo de referencia": o nome de um objeto (tabela/view/...) e o
+     * alias que o acompanha na MESMA introducao (FROM/JOIN), quando houver —
+     * ver secao 8.5 do pedido "Navegacao Inteligente e Interativa": clicar ou
+     * posicionar o cursor sobre a tabela OU seu alias deve destacar TODAS as
+     * ocorrencias de AMBOS na instrucao. Sem alias, o grupo tem um so nome.
+     *
+     * Nao trata auto-join (mesma tabela citada duas vezes com alias
+     * diferentes, ex. {@code FROM funcionario f1 JOIN funcionario f2 ON ...})
+     * de forma perfeitamente precisa — os dois grupos ficam com nomes
+     * diferentes (f1, f2), entao continuam independentes; so o nome da
+     * tabela em si (ambigua entre os dois) nao e distinguido, caso raro e
+     * aceitavel pra este recurso.
+     */
+    record ReferenceGroup(Set<String> names) {
+    }
+
+    /**
+     * Varre {@code full.substring(start, end)} (uma instrucao inteira) e
+     * devolve os grupos de referencia (objeto + seu alias) — mesma maquina de
+     * estados de {@link #scanKnownNames}, so que agrupando em vez de
+     * achatar tudo num unico {@code Set}.
+     */
+    static List<ReferenceGroup> scanReferenceGroups(String full, int start, int end) {
+        List<ReferenceGroup> groups = new ArrayList<>();
+        int state = STATE_NONE;
+        // Grupo (objeto + alias) sendo montado no momento — simples variavel
+        // local mutavel (nao ha lambda aqui, entao nao precisa de array/holder
+        // pra "efetivamente final"), reatribuida a cada nova introducao de
+        // objeto (FROM/JOIN) e "fechada" em finalizePending.
+        Set<String> pending = null;
+        int i = start;
+        while (i < end) {
+            char c = full.charAt(i);
+            if (Character.isWhitespace(c)) {
+                i++;
+                continue;
+            }
+            if ((c == '-' && i + 1 < end && full.charAt(i + 1) == '-') || c == '#') {
+                while (i < end && full.charAt(i) != '\n') {
+                    i++;
+                }
+                continue;
+            }
+            if (c == '/' && i + 1 < end && full.charAt(i + 1) == '*') {
+                int close = full.indexOf("*/", i + 2);
+                i = (close < 0 || close > end) ? end : close + 2;
+                continue;
+            }
+            if (c == '\'' || c == '"' || c == '`') {
+                char quote = c;
+                i++;
+                while (i < end) {
+                    char d = full.charAt(i);
+                    if (d == '\\' && (quote == '\'' || quote == '"') && i + 1 < end) {
+                        i += 2;
+                        continue;
+                    }
+                    if (d == quote) {
+                        if (i + 1 < end && full.charAt(i + 1) == quote) {
+                            i += 2;
+                            continue;
+                        }
+                        i++;
+                        break;
+                    }
+                    i++;
+                }
+                continue;
+            }
+            if (c == '.') {
+                i++;
+                continue;
+            }
+            if (c == ',') {
+                if (state == STATE_AFTER_OBJECT) {
+                    pending = finalizePending(groups, pending);
+                    state = STATE_EXPECT_OBJECT;
+                }
+                i++;
+                continue;
+            }
+            if (!Character.isLetterOrDigit(c) && c != '_') {
+                if (state == STATE_AFTER_OBJECT) {
+                    pending = finalizePending(groups, pending);
+                }
+                state = STATE_NONE;
+                i++;
+                continue;
+            }
+            int wordStart = i;
+            while (i < end && (Character.isLetterOrDigit(full.charAt(i)) || full.charAt(i) == '_')) {
+                i++;
+            }
+            String word = full.substring(wordStart, i).toUpperCase(Locale.ROOT);
+            if (OBJECT_INTRODUCERS.contains(word)) {
+                if (state == STATE_AFTER_OBJECT) {
+                    pending = finalizePending(groups, pending);
+                }
+                state = STATE_EXPECT_OBJECT;
+            } else if (word.equals("AS")) {
+                if (state == STATE_AFTER_OBJECT) {
+                    state = STATE_EXPECT_ALIAS;
+                }
+            } else if (KEYWORDS.contains(word) || FUNCTIONS.contains(word)) {
+                if (state == STATE_AFTER_OBJECT) {
+                    pending = finalizePending(groups, pending);
+                }
+                state = STATE_NONE;
+            } else {
+                switch (state) {
+                    case STATE_EXPECT_OBJECT -> {
+                        state = STATE_AFTER_OBJECT;
+                        pending = new HashSet<>();
+                        pending.add(word);
+                    }
+                    case STATE_EXPECT_ALIAS -> {
+                        if (pending != null) {
+                            pending.add(word);
+                        }
+                        pending = finalizePending(groups, pending);
+                        state = STATE_NONE;
+                    }
+                    case STATE_AFTER_OBJECT -> {
+                        if (pending != null) {
+                            pending.add(word);
+                        }
+                        pending = finalizePending(groups, pending);
+                        state = STATE_NONE;
+                    }
+                    default -> {
+                        // identificador solto fora de FROM/JOIN/AS: nao inicia grupo.
+                    }
+                }
+            }
+        }
+        if (state == STATE_AFTER_OBJECT) {
+            finalizePending(groups, pending);
+        }
+        return groups;
+    }
+
+    /** Fecha o grupo pendente (se nao vazio) em {@code groups} e devolve {@code null} (novo valor de "pending"). */
+    private static Set<String> finalizePending(List<ReferenceGroup> groups, Set<String> pending) {
+        if (pending != null && !pending.isEmpty()) {
+            groups.add(new ReferenceGroup(pending));
+        }
+        return null;
+    }
+
+    /**
+     * Todas as ocorrencias (como palavra inteira, nao parte de outro
+     * identificador ou dentro de string/comentario) de qualquer nome em
+     * {@code targetNames} dentro de {@code full.substring(start, end)} — usa
+     * {@code [inicio, fim)} de cada ocorrencia. Usado por
+     * {@code SqlEditorPane#installReferenceHighlight} (secao 8.5) para saber
+     * ONDE desenhar o destaque de cada nome do grupo de referencia.
+     */
+    static List<int[]> findWordOffsets(String full, int start, int end, Set<String> targetNames) {
+        List<int[]> offsets = new ArrayList<>();
+        int i = start;
+        while (i < end) {
+            char c = full.charAt(i);
+            if (Character.isWhitespace(c)) {
+                i++;
+                continue;
+            }
+            if ((c == '-' && i + 1 < end && full.charAt(i + 1) == '-') || c == '#') {
+                while (i < end && full.charAt(i) != '\n') {
+                    i++;
+                }
+                continue;
+            }
+            if (c == '/' && i + 1 < end && full.charAt(i + 1) == '*') {
+                int close = full.indexOf("*/", i + 2);
+                i = (close < 0 || close > end) ? end : close + 2;
+                continue;
+            }
+            if (c == '\'' || c == '"' || c == '`') {
+                char quote = c;
+                i++;
+                while (i < end) {
+                    char d = full.charAt(i);
+                    if (d == '\\' && (quote == '\'' || quote == '"') && i + 1 < end) {
+                        i += 2;
+                        continue;
+                    }
+                    if (d == quote) {
+                        if (i + 1 < end && full.charAt(i + 1) == quote) {
+                            i += 2;
+                            continue;
+                        }
+                        i++;
+                        break;
+                    }
+                    i++;
+                }
+                continue;
+            }
+            if (!Character.isLetterOrDigit(c) && c != '_') {
+                i++;
+                continue;
+            }
+            int wordStart = i;
+            while (i < end && (Character.isLetterOrDigit(full.charAt(i)) || full.charAt(i) == '_')) {
+                i++;
+            }
+            String word = full.substring(wordStart, i).toUpperCase(Locale.ROOT);
+            if (targetNames.contains(word)) {
+                offsets.add(new int[] {wordStart, i});
+            }
+        }
+        return offsets;
     }
 
     @Override

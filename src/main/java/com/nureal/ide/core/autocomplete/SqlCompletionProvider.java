@@ -11,6 +11,7 @@ import org.fife.ui.autocomplete.DefaultCompletionProvider;
 
 import javax.swing.text.JTextComponent;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -23,9 +24,16 @@ import java.util.Map;
  * Em contexto de coluna o provider retorna SOMENTE colunas (sem palavras-chave),
  * escopadas as tabelas em uso no statement.
  *
- * ORDEM DE EXIBICAO: usamos LinkedHashMap (ordem de insercao). As colunas sao
- * inseridas na ordem de criacao na base (ORDINAL_POSITION), que e a mesma ordem
- * do seletor de objetos. Por isso NAO ordenamos as sugestoes por nome.
+ * ORDEM DE EXIBICAO (base): usamos LinkedHashMap (ordem de insercao). As colunas
+ * sao inseridas na ordem de criacao na base (ORDINAL_POSITION), que e a mesma
+ * ordem do seletor de objetos. Por isso NAO ordenamos as sugestoes por nome.
+ *
+ * ORDEM DE EXIBICAO (com prefixo digitado): pedido explicito do usuario — entre
+ * os candidatos que batem com o prefixo, o "mais proximo" (menos caracteres
+ * sobrando alem do que foi digitado) deve aparecer primeiro, pra nao precisar
+ * rolar a lista. Ver {@link #getCompletionsImpl}: so reordena (por tamanho da
+ * string, estavel) quando ha prefixo; sem prefixo (ex.: Ctrl+Espaco em branco),
+ * mantem a ordem ordinal/insercao de sempre.
  */
 public class SqlCompletionProvider extends DefaultCompletionProvider {
 
@@ -81,20 +89,38 @@ public class SqlCompletionProvider extends DefaultCompletionProvider {
             }
         }
 
-        List<Completion> result = new ArrayList<>();
-        // Relevancia decrescente segue a ordem de insercao: garante a ordem ORDINAL
-        // mesmo que o popup reordene por relevancia (relevancia maior aparece antes).
-        int relevance = candidates.size();
+        List<Map.Entry<String, String>> matched = new ArrayList<>();
         for (Map.Entry<String, String> e : candidates.entrySet()) {
             if (prefix.isEmpty() || e.getKey().toLowerCase(Locale.ROOT).startsWith(prefix)) {
-                BasicCompletion completion = new BasicCompletion(this, e.getKey(), e.getValue());
-                completion.setRelevance(relevance);
-                result.add(completion);
-                if (result.size() >= MAX_RESULTS) {
-                    break;
-                }
+                matched.add(e);
             }
-            relevance--;
+        }
+        if (!prefix.isEmpty()) {
+            // Pedido explicito do usuario: o resultado mais "proximo" do que foi
+            // digitado (ou seja, com MENOS caracteres sobrando alem do prefixo)
+            // deve ficar sempre no topo — digitando "tit_ti", quer ver
+            // "tit_titulo_tb" antes de "tit_titulo_venda_tb", sem precisar rolar
+            // a lista pra achar o que procura. Como todo candidato aqui ja
+            // comeca com o MESMO prefixo, ordenar por tamanho total da string
+            // e equivalente a ordenar pelo tamanho do "sobra" depois do prefixo.
+            // Comparator.comparingInt() com Collections.sort (estavel) preserva
+            // a ordem original (ordinal/alfabetica) entre candidatos do MESMO
+            // tamanho, entao nao embaralha o que ja estava certo.
+            matched.sort(Comparator.comparingInt(e -> e.getKey().length()));
+        }
+
+        List<Completion> result = new ArrayList<>();
+        // Relevancia decrescente segue a ordem de "matched" (ja com o mais
+        // proximo primeiro, quando ha prefixo) — maior relevancia aparece
+        // antes no popup, mesmo que ele reordene por conta propria.
+        int relevance = matched.size();
+        for (Map.Entry<String, String> e : matched) {
+            if (result.size() >= MAX_RESULTS) {
+                break;
+            }
+            BasicCompletion completion = new BasicCompletion(this, e.getKey(), e.getValue());
+            completion.setRelevance(relevance--);
+            result.add(completion);
         }
         return result;
     }

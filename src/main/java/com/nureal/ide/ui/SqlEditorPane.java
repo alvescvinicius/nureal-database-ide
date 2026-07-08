@@ -2,12 +2,16 @@ package com.nureal.ide.ui;
 
 import com.nureal.ide.core.autocomplete.SqlCompletionProvider;
 import com.nureal.ide.core.format.SqlFormatter;
+import com.nureal.ide.core.metadata.model.SchemaInfo;
+import com.nureal.ide.core.metadata.model.TableInfo;
+import com.nureal.ide.core.sql.SqlStatementLocator;
 import org.fife.ui.autocomplete.AutoCompletion;
 import org.fife.ui.rsyntaxtextarea.RSyntaxDocument;
 import org.fife.ui.rsyntaxtextarea.RSyntaxTextArea;
 import org.fife.ui.rsyntaxtextarea.Style;
 import org.fife.ui.rsyntaxtextarea.SyntaxConstants;
 import org.fife.ui.rsyntaxtextarea.SyntaxScheme;
+import org.fife.ui.rsyntaxtextarea.Token;
 import org.fife.ui.rsyntaxtextarea.TokenTypes;
 import org.fife.ui.rtextarea.RTextScrollPane;
 import org.fife.ui.rtextarea.SearchContext;
@@ -24,14 +28,25 @@ import javax.swing.JPanel;
 import javax.swing.JTextField;
 import javax.swing.JToggleButton;
 import javax.swing.KeyStroke;
+import javax.swing.text.BadLocationException;
+import javax.swing.text.DefaultHighlighter;
+import javax.swing.text.Highlighter;
+import javax.swing.text.JTextComponent;
 import java.awt.BorderLayout;
 import java.awt.Color;
+import java.awt.Cursor;
 import java.awt.FlowLayout;
 import java.awt.Font;
+import java.awt.Graphics;
 import java.awt.GraphicsEnvironment;
+import java.awt.Rectangle;
+import java.awt.Shape;
 import java.awt.event.ActionEvent;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
+import java.awt.event.MouseMotionAdapter;
 import java.awt.font.TextAttribute;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -80,15 +95,83 @@ public class SqlEditorPane extends JPanel {
     private JToggleButton wholeWordBtn;
     private JLabel findStatus;
 
+    /**
+     * Devolve o schema atualmente conectado (ou {@code null}, sem conexao/
+     * schema selecionado) — usado pela navegacao interativa do editor
+     * (secao 8 do pedido "Navegacao Inteligente e Interativa": hover com
+     * tooltip, CTRL+Clique, etc.) para saber se uma palavra em negrito no
+     * texto e de fato um objeto real do banco (tabela/view/procedure/
+     * function/trigger), e nao so um alias. Chamado sob demanda (a cada
+     * movimento do mouse), nunca guardado em cache aqui — reflete sempre o
+     * schema mais atual de {@code MainWindow}, mesmo que o usuario troque de
+     * conexao/schema com a aba aberta.
+     */
+    private final Supplier<SchemaInfo> schemaSupplier;
+
+    /**
+     * Chamado quando o usuario da CTRL+Clique sobre um objeto de banco
+     * reconhecido no editor (secao 8.3 do pedido "Navegacao Inteligente e
+     * Interativa") — {@code kind} e "TABLE"/"VIEW"/"PROCEDURE"/"FUNCTION"/
+     * "TRIGGER" (mesmos valores usados pela arvore de objetos, ver
+     * {@code MainWindow.ObjNode#kind()}); {@code table} vem preenchido so
+     * para TABLE/VIEW, {@code null} para os demais. {@code MainWindow}
+     * decide o que fazer (abrir a tela de propriedades, no caso).
+     */
+    @FunctionalInterface
+    interface ObjectOpenHandler {
+        void open(String kind, String name, TableInfo table);
+    }
+
+    private final ObjectOpenHandler onOpenObject;
+
+    /**
+     * Chamado quando o CURSOR (nao o mouse) passa a estar sobre um objeto de
+     * banco reconhecido no editor (secao 8.4 — sincronizar a arvore de
+     * objetos com o cursor). So dispara quando o objeto MUDA (evita
+     * notificar a cada tecla dentro do mesmo nome) e so quando o cursor
+     * ENTRA em cima de um objeto — sair para texto comum nao limpa a
+     * selecao da arvore (evita ela "piscando" toda hora).
+     */
+    @FunctionalInterface
+    interface CaretObjectListener {
+        void onObjectUnderCaret(String kind, String name);
+    }
+
+    private final CaretObjectListener onCaretObject;
+
+    /**
+     * Chamado quando o usuario aperta ALT+Seta-esquerda no editor (secao 8.6
+     * do pedido "Navegacao Inteligente e Interativa") — pede pra
+     * {@code MainWindow} voltar ao objeto anterior no historico de navegacao
+     * (ver {@code MainWindow#navigateBack}). Sem nocao de "objeto atual" aqui
+     * no editor: quem guarda o historico e quem decide o que fazer e o
+     * chamador.
+     */
+    private final Runnable onNavigateBack;
+
     public SqlEditorPane(String tabId, SqlCompletionProvider provider, Runnable onRun,
-            Supplier<SqlFormatter> formatterSupplier, String fontFamily) {
+            Supplier<SqlFormatter> formatterSupplier, String fontFamily, Supplier<SchemaInfo> schemaSupplier,
+            ObjectOpenHandler onOpenObject, CaretObjectListener onCaretObject, Runnable onNavigateBack) {
         super(new BorderLayout());
 
         this.tabId = tabId;
         this.formatterSupplier = formatterSupplier;
         this.fontFamily = fontFamily;
+        this.schemaSupplier = schemaSupplier;
+        this.onOpenObject = onOpenObject;
+        this.onCaretObject = onCaretObject;
+        this.onNavigateBack = onNavigateBack;
 
-        textArea = new RSyntaxTextArea(20, 80);
+        textArea = new RSyntaxTextArea(20, 80) {
+            private static final long serialVersionUID = 1L;
+
+            @Override
+            public String getToolTipText(MouseEvent e) {
+                EditorObjectHit hit = resolveObjectAt(viewToModel2D(e.getPoint()));
+                return (hit != null) ? tooltipHtmlFor(hit) : null;
+            }
+        };
+        javax.swing.ToolTipManager.sharedInstance().registerComponent(textArea);
         // setSyntaxEditingStyle continua chamado primeiro: e o nome de
         // estilo guardado na PROPRIA RSyntaxTextArea (nao no documento) que
         // o code folding usa pra achar o FoldParser certo (ver SqlFoldParser
@@ -127,6 +210,10 @@ public class SqlEditorPane extends JPanel {
         textArea.setCurrentLineHighlightColor(new Color(0x05, 0x96, 0x69, 22));
         textArea.setSelectionColor(new Color(0x05, 0x96, 0x69, 60));
         textArea.setMarkAllHighlightColor(new Color(0x22, 0xC5, 0x5E, 90));
+        installCurrentStatementHighlight(textArea);
+        installObjectHover(textArea);
+        installCaretObjectSync(textArea);
+        installReferenceHighlight(textArea);
 
         AutoCompletion ac = new AutoCompletion(provider);
         ac.setAutoActivationEnabled(true);
@@ -245,6 +332,40 @@ public class SqlEditorPane extends JPanel {
         textArea.getInputMap().put(KeyStroke.getKeyStroke(KeyEvent.VK_MINUS, ctrl), "zoom-out");
         textArea.getInputMap().put(KeyStroke.getKeyStroke(KeyEvent.VK_SUBTRACT, ctrl), "zoom-out");
         textArea.getInputMap().put(KeyStroke.getKeyStroke(KeyEvent.VK_0, ctrl), "zoom-reset");
+
+        // Navegacao (secao 8.6 do pedido "Navegacao Inteligente e
+        // Interativa"): F12 = ir para definicao do objeto sob o CURSOR (mesmo
+        // destino do CTRL+Clique da secao 8.3, so que sem precisar do mouse);
+        // ALT+Seta-esquerda = voltar ao objeto anterior no historico mantido
+        // por quem chama (ver #onNavigateBack). CTRL+Hover ja funciona sem
+        // nada extra aqui: o tooltip da secao 8.2 (getToolTipText, ver acima)
+        // aparece em qualquer hover sobre um objeto reconhecido, com ou sem
+        // CTRL pressionado.
+        textArea.getActionMap().put("goto-definition", new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                if (onOpenObject == null) {
+                    return;
+                }
+                EditorObjectHit hit = resolveObjectAt(textArea.getCaretPosition());
+                if (hit != null) {
+                    onOpenObject.open(hit.kind(), hit.name(), hit.table());
+                }
+            }
+        });
+        textArea.getInputMap().put(KeyStroke.getKeyStroke(KeyEvent.VK_F12, 0), "goto-definition");
+
+        textArea.getActionMap().put("navigate-back", new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                if (onNavigateBack != null) {
+                    onNavigateBack.run();
+                }
+            }
+        });
+        textArea.getInputMap().put(
+                KeyStroke.getKeyStroke(KeyEvent.VK_LEFT, InputEvent.ALT_DOWN_MASK), "navigate-back");
+
         RTextScrollPane scroll = new RTextScrollPane(textArea);
         scroll.setBorder(BorderFactory.createEmptyBorder());
         // Gutter (numeros de linha) num cinza levemente mais fechado que o editor
@@ -262,8 +383,510 @@ public class SqlEditorPane extends JPanel {
                 }
             }
         });
+        add(buildBreadcrumbBar(), BorderLayout.NORTH);
         add(scroll, BorderLayout.CENTER);
         add(buildFindBar(), BorderLayout.SOUTH);
+        installBreadcrumbSync(textArea);
+    }
+
+    /** Cor do destaque de fundo da instrucao atual — ver {@link #installCurrentStatementHighlight}. */
+    private static final Color CURRENT_STATEMENT_BG = new Color(0x64, 0x74, 0x8B, 16);
+
+    /**
+     * Destaque sutil de fundo para TODA a instrucao SQL onde o cursor esta
+     * no momento (secao 8.1 do pedido "Navegacao Inteligente e Interativa",
+     * inspirado em como IDEs como IntelliJ realcam o bloco de codigo atual)
+     * — atualiza a cada movimento do cursor (inclusive digitando, ja que
+     * digitar move o cursor). Reusa o MESMO calculo de limites de instrucao
+     * do destacador de sintaxe ({@link SqlStatementLocator}), entao os dois
+     * sempre concordam sobre onde uma instrucao comeca/termina.
+     *
+     * So repinta quando a instrucao MUDA (compara com os limites da ultima
+     * atualizacao) — mover o cursor dentro da MESMA instrucao nao teria
+     * efeito visual nenhum mesmo, entao evitamos o trabalho a toa a cada
+     * tecla digitada.
+     */
+    private static void installCurrentStatementHighlight(RSyntaxTextArea textArea) {
+        Highlighter.HighlightPainter painter = new DefaultHighlighter.DefaultHighlightPainter(CURRENT_STATEMENT_BG);
+        Object[] currentTag = { null };
+        int[] lastBounds = { -1, -1 };
+        Runnable update = () -> {
+            Highlighter highlighter = textArea.getHighlighter();
+            int[] bounds = SqlStatementLocator.boundsAt(textArea.getText(), textArea.getCaretPosition());
+            if (bounds[0] == lastBounds[0] && bounds[1] == lastBounds[1]) {
+                return;
+            }
+            lastBounds[0] = bounds[0];
+            lastBounds[1] = bounds[1];
+            if (currentTag[0] != null) {
+                highlighter.removeHighlight(currentTag[0]);
+                currentTag[0] = null;
+            }
+            if (bounds[1] > bounds[0]) {
+                try {
+                    currentTag[0] = highlighter.addHighlight(bounds[0], bounds[1], painter);
+                } catch (BadLocationException ex) {
+                    // documento mudando bem na hora (edicao concorrente com o
+                    // repaint) — sem problema, so fica sem destacar desta vez;
+                    // o proximo movimento do cursor tenta de novo.
+                }
+            }
+        };
+        textArea.addCaretListener(e -> update.run());
+    }
+
+    /** Cor do sublinhado ao passar o mouse sobre um objeto do banco — ver {@link #installObjectHover}. */
+    private static final Color OBJECT_HOVER_UNDERLINE = new Color(0x33, 0x41, 0x55);
+
+    /**
+     * Um objeto de banco (tabela/view/procedure/function/trigger) encontrado
+     * sob o cursor do mouse no editor — ver {@link #resolveObjectAt}. Secao
+     * 8.2 do pedido "Navegacao Inteligente e Interativa": so existe um "hit"
+     * quando a palavra em negrito sob o mouse bate com um nome de objeto
+     * REAL do schema conectado (nao um alias qualquer, que tambem fica em
+     * negrito mas nao e "clicavel"/navegavel).
+     *
+     * @param table preenchido so para TABLE/VIEW (para mostrar a contagem de
+     *              colunas no tooltip); {@code null} para os demais tipos.
+     */
+    private record EditorObjectHit(String kind, String name, int startOffset, int endOffset, TableInfo table) {
+    }
+
+    /**
+     * Liga o hover interativo sobre objetos do banco no editor (secao 8.2):
+     * sublinhado discreto + cursor de mao ao passar o mouse sobre uma
+     * tabela/view/procedure/function/trigger de verdade (validado contra o
+     * schema atualmente conectado, via {@link #schemaSupplier} — sem
+     * conexao/schema, nada e reconhecido como objeto, so texto normal). O
+     * tooltip em si e servido por {@code getToolTipText(MouseEvent)},
+     * sobrescrito na criacao do {@code textArea} (ver construtor), que
+     * tambem chama {@link #resolveObjectAt}.
+     */
+    private void installObjectHover(RSyntaxTextArea textArea) {
+        Highlighter.HighlightPainter underline = new UnderlineHighlightPainter(OBJECT_HOVER_UNDERLINE);
+        Object[] tag = { null };
+        textArea.addMouseMotionListener(new MouseMotionAdapter() {
+            @Override
+            public void mouseMoved(MouseEvent e) {
+                Highlighter highlighter = textArea.getHighlighter();
+                if (tag[0] != null) {
+                    highlighter.removeHighlight(tag[0]);
+                    tag[0] = null;
+                }
+                EditorObjectHit hit = resolveObjectAt(textArea.viewToModel2D(e.getPoint()));
+                if (hit != null) {
+                    textArea.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+                    try {
+                        tag[0] = highlighter.addHighlight(hit.startOffset(), hit.endOffset(), underline);
+                    } catch (BadLocationException ignored) {
+                        // documento mudando na hora: sem problema, so fica sem sublinhar
+                    }
+                } else {
+                    textArea.setCursor(Cursor.getPredefinedCursor(Cursor.TEXT_CURSOR));
+                }
+            }
+        });
+        textArea.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseExited(MouseEvent e) {
+                textArea.setCursor(Cursor.getPredefinedCursor(Cursor.TEXT_CURSOR));
+                if (tag[0] != null) {
+                    textArea.getHighlighter().removeHighlight(tag[0]);
+                    tag[0] = null;
+                }
+            }
+
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                // CTRL+Clique sobre um objeto reconhecido (secao 8.3): abre a
+                // tela de propriedades — mesmo destino de duplo-clique na
+                // arvore de objetos, so que a partir do editor. So dispara se
+                // o mouse estiver EXATAMENTE sobre um objeto de verdade (o
+                // mesmo criterio do hover/sublinhado acima), nunca sobre
+                // texto qualquer.
+                if (!e.isControlDown() || javax.swing.SwingUtilities.isRightMouseButton(e) || onOpenObject == null) {
+                    return;
+                }
+                EditorObjectHit hit = resolveObjectAt(textArea.viewToModel2D(e.getPoint()));
+                if (hit != null) {
+                    onOpenObject.open(hit.kind(), hit.name(), hit.table());
+                }
+            }
+        });
+    }
+
+    /**
+     * Sincroniza a arvore de objetos com a posicao do CURSOR (secao 8.4): a
+     * cada movimento do cursor (clique, digitacao, setas), se ele esta agora
+     * sobre um objeto de banco reconhecido e DIFERENTE do ultimo notificado,
+     * avisa {@link #onCaretObject}. Sair de cima de um objeto para texto
+     * comum nao notifica nada — a arvore so "acompanha para frente", nunca
+     * desseleciona sozinha (ver javadoc do proprio {@link CaretObjectListener}).
+     */
+    private void installCaretObjectSync(RSyntaxTextArea textArea) {
+        String[] lastNotified = { null };
+        textArea.addCaretListener(e -> {
+            if (onCaretObject == null) {
+                return;
+            }
+            EditorObjectHit hit = resolveObjectAt(textArea.getCaretPosition());
+            if (hit == null) {
+                return;
+            }
+            String key = hit.kind() + ":" + hit.name().toUpperCase(Locale.ROOT);
+            if (key.equals(lastNotified[0])) {
+                return;
+            }
+            lastNotified[0] = key;
+            onCaretObject.onObjectUnderCaret(hit.kind(), hit.name());
+        });
+    }
+
+    /** Cor do destaque de referencias (tabela + alias) — ver {@link #installReferenceHighlight}. */
+    private static final Color REFERENCE_HIGHLIGHT_BG = new Color(0xB8, 0x86, 0x0B, 55);
+
+    /**
+     * Destaca TODAS as ocorrencias do objeto (tabela/view/...) E do alias sob
+     * o cursor, em qualquer lugar da instrucao atual (secao 8.5 do pedido
+     * "Navegacao Inteligente e Interativa") — funciona nos dois sentidos:
+     * posicionar o cursor no nome da tabela destaca tambem o alias, e
+     * vice-versa. Reusa {@link SqlHighlightTokenMaker#scanReferenceGroups} (a
+     * mesma pre-varredura que decide o que fica em negrito) pra descobrir
+     * quais nomes "andam juntos", e {@link SqlHighlightTokenMaker#findWordOffsets}
+     * pra achar TODAS as posicoes de cada um deles no texto.
+     *
+     * Independente de {@link #resolveObjectAt}/{@link #classify}: aqui nao
+     * importa se a palavra bate com um objeto REAL do schema conectado — um
+     * alias sozinho (que nunca teria "hit" em 8.2/8.3/8.4) tambem dispara o
+     * destaque de referencias, contanto que ele pertenca a um grupo
+     * identificado por {@code scanReferenceGroups}.
+     */
+    private void installReferenceHighlight(RSyntaxTextArea textArea) {
+        Highlighter.HighlightPainter painter = new DefaultHighlighter.DefaultHighlightPainter(REFERENCE_HIGHLIGHT_BG);
+        List<Object> tags = new ArrayList<>();
+        String[] lastKey = { null };
+        textArea.addCaretListener(e -> {
+            Highlighter highlighter = textArea.getHighlighter();
+            String full = textArea.getText();
+            int offset = textArea.getCaretPosition();
+            String word = wordAt(full, offset);
+            int[] bounds = SqlStatementLocator.boundsAt(full, offset);
+            SqlHighlightTokenMaker.ReferenceGroup group = (word == null) ? null
+                    : findGroupContaining(SqlHighlightTokenMaker.scanReferenceGroups(full, bounds[0], bounds[1]),
+                            word.toUpperCase(Locale.ROOT));
+            String key = (group == null) ? null : (bounds[0] + ":" + bounds[1] + ":" + group.names());
+            if (java.util.Objects.equals(key, lastKey[0])) {
+                return;
+            }
+            lastKey[0] = key;
+            for (Object tag : tags) {
+                highlighter.removeHighlight(tag);
+            }
+            tags.clear();
+            if (group == null) {
+                return;
+            }
+            for (int[] wordBounds : SqlHighlightTokenMaker.findWordOffsets(full, bounds[0], bounds[1], group.names())) {
+                try {
+                    tags.add(highlighter.addHighlight(wordBounds[0], wordBounds[1], painter));
+                } catch (BadLocationException ignored) {
+                    // documento mudando na hora: so nao destaca esta ocorrencia
+                }
+            }
+        });
+    }
+
+    private static SqlHighlightTokenMaker.ReferenceGroup findGroupContaining(
+            List<SqlHighlightTokenMaker.ReferenceGroup> groups, String word) {
+        for (SqlHighlightTokenMaker.ReferenceGroup group : groups) {
+            if (group.names().contains(word)) {
+                return group;
+            }
+        }
+        return null;
+    }
+
+    /** Palavra ({@code [A-Za-z0-9_]+}) que cobre {@code offset} em {@code full}, ou {@code null} se nao houver. */
+    private static String wordAt(String full, int offset) {
+        int[] span = wordSpanAt(full, offset);
+        return (span == null) ? null : full.substring(span[0], span[1]);
+    }
+
+    /** Limites {@code [inicio, fim)} da palavra que cobre {@code offset} em {@code full}, ou {@code null} se nao houver. */
+    private static int[] wordSpanAt(String full, int offset) {
+        int n = full.length();
+        if (offset < 0 || offset > n) {
+            return null;
+        }
+        int s = offset;
+        int e = offset;
+        while (s > 0 && isWordChar(full.charAt(s - 1))) {
+            s--;
+        }
+        while (e < n && isWordChar(full.charAt(e))) {
+            e++;
+        }
+        return (s == e) ? null : new int[] {s, e};
+    }
+
+    /** Cor do texto do breadcrumb — ver {@link #buildBreadcrumbBar}. */
+    private static final Color BREADCRUMB_FG = new Color(0x60, 0x6B, 0x7A);
+
+    private JLabel breadcrumbLabel;
+
+    /**
+     * Barra fina acima do editor mostrando o contexto do cursor (secao 8.7 do
+     * pedido "Navegacao Inteligente e Interativa"): {@code Schema > Tabela >
+     * Coluna} quando o cursor esta sobre uma referencia de coluna, {@code
+     * Schema > Tabela} sobre so a tabela/alias, ou {@code Procedure > nome}
+     * (sem schema) sobre uma chamada de procedure/function/trigger — ver
+     * {@link #computeBreadcrumb}. Vazio quando nao ha nada reconhecivel sob o
+     * cursor (texto comum, palavra-chave, numero, etc.).
+     */
+    private JComponent buildBreadcrumbBar() {
+        breadcrumbLabel = new JLabel(" ");
+        breadcrumbLabel.setForeground(BREADCRUMB_FG);
+        breadcrumbLabel.setFont(breadcrumbLabel.getFont().deriveFont(Font.PLAIN, 11f));
+        JPanel bar = new JPanel(new BorderLayout());
+        bar.setBorder(BorderFactory.createEmptyBorder(3, 8, 3, 8));
+        bar.setBackground(new Color(0xEC, 0xEE, 0xF1));
+        bar.add(breadcrumbLabel, BorderLayout.WEST);
+        return bar;
+    }
+
+    /** Atualiza o breadcrumb a cada movimento do cursor — so troca o texto do JLabel quando ele de fato muda. */
+    private void installBreadcrumbSync(RSyntaxTextArea textArea) {
+        String[] lastText = { null };
+        textArea.addCaretListener(e -> {
+            String text = computeBreadcrumb(textArea.getCaretPosition());
+            String shown = (text == null || text.isBlank()) ? " " : text;
+            if (!shown.equals(lastText[0])) {
+                lastText[0] = shown;
+                breadcrumbLabel.setText(shown);
+            }
+        });
+    }
+
+    /**
+     * Monta o texto do breadcrumb para o cursor em {@code offset} — ver
+     * javadoc de {@link #buildBreadcrumbBar}. Reusa a mesma deteccao de
+     * palavra do destaque de referencias (secao 8.5) e, quando a palavra sob
+     * o cursor faz parte de uma referencia qualificada ({@code alias.coluna}
+     * ou {@code alias.<cursor aqui>}), tambem identifica a coluna.
+     */
+    private String computeBreadcrumb(int offset) {
+        SchemaInfo schema = (schemaSupplier != null) ? schemaSupplier.get() : null;
+        String schemaName = (schema != null) ? schema.name() : null;
+        String full = textArea.getText();
+        int[] span = wordSpanAt(full, offset);
+        if (span == null) {
+            return schemaName;
+        }
+        String rawWord = full.substring(span[0], span[1]);
+        String upperWord = rawWord.toUpperCase(Locale.ROOT);
+        String qualifier = null;
+        String column = null;
+        if (span[1] < full.length() && full.charAt(span[1]) == '.') {
+            // cursor sobre o QUALIFICADOR (alias/tabela) de "qualificador.coluna"
+            int[] nextSpan = wordSpanAt(full, span[1] + 1);
+            if (nextSpan != null) {
+                qualifier = rawWord;
+                column = full.substring(nextSpan[0], nextSpan[1]);
+            }
+        }
+        if (qualifier == null && span[0] > 0 && full.charAt(span[0] - 1) == '.') {
+            // cursor sobre a COLUNA de "qualificador.coluna"
+            int[] prevSpan = wordSpanAt(full, span[0] - 1);
+            if (prevSpan != null) {
+                qualifier = full.substring(prevSpan[0], prevSpan[1]);
+                column = rawWord;
+            }
+        }
+        if (qualifier == null) {
+            // palavra solta, sem "." adjacente: so interessa se for, ela mesma,
+            // um objeto reconhecido (tabela/view/alias/procedure/function/trigger)
+            if (schema != null) {
+                for (String p : schema.procedures()) {
+                    if (p.equalsIgnoreCase(rawWord)) {
+                        return "Procedure > " + p;
+                    }
+                }
+                for (String f : schema.functions()) {
+                    if (f.equalsIgnoreCase(rawWord)) {
+                        return "Function > " + f;
+                    }
+                }
+                for (String tg : schema.triggers()) {
+                    if (tg.equalsIgnoreCase(rawWord)) {
+                        return "Trigger > " + tg;
+                    }
+                }
+            }
+            if (SqlHighlightTokenMaker.KEYWORDS.contains(upperWord) || SqlHighlightTokenMaker.FUNCTIONS.contains(upperWord)) {
+                return schemaName; // palavra-chave/funcao SQL: sem contexto de objeto
+            }
+            qualifier = rawWord;
+        }
+        String tableName = matchRealTable(schema, qualifier);
+        if (tableName == null) {
+            // qualificador nao bate direto com nenhuma tabela/view: tenta
+            // resolver como ALIAS via os mesmos grupos de referencia do
+            // destaque de 8.5 (tabela + alias juntos).
+            int[] bounds = SqlStatementLocator.boundsAt(full, offset);
+            List<SqlHighlightTokenMaker.ReferenceGroup> groups =
+                    SqlHighlightTokenMaker.scanReferenceGroups(full, bounds[0], bounds[1]);
+            SqlHighlightTokenMaker.ReferenceGroup group = findGroupContaining(groups, qualifier.toUpperCase(Locale.ROOT));
+            if (group != null) {
+                for (String candidate : group.names()) {
+                    String match = matchRealTable(schema, candidate);
+                    if (match != null) {
+                        tableName = match;
+                        break;
+                    }
+                }
+            }
+        }
+        StringBuilder sb = new StringBuilder();
+        if (schemaName != null) {
+            sb.append(schemaName).append(" > ");
+        }
+        sb.append((tableName != null) ? tableName : qualifier);
+        if (column != null) {
+            sb.append(" > ").append(column);
+        }
+        return sb.toString();
+    }
+
+    /** Nome (com a grafia original do banco) da tabela/view do {@code schema} que bate com {@code candidate}, ou {@code null}. */
+    private static String matchRealTable(SchemaInfo schema, String candidate) {
+        if (schema == null || candidate == null) {
+            return null;
+        }
+        for (TableInfo t : schema.tables()) {
+            if (t.name().equalsIgnoreCase(candidate)) {
+                return t.name();
+            }
+        }
+        for (TableInfo v : schema.views()) {
+            if (v.name().equalsIgnoreCase(candidate)) {
+                return v.name();
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Resolve o objeto de banco (se houver) sob o offset {@code offset} do
+     * documento: encontra o TOKEN da linha que cobre esse offset e, so se
+     * ele estiver marcado {@link TokenTypes#DATA_TYPE} (negrito — nome de
+     * tabela/view/procedure/function/trigger OU alias, ver
+     * {@link SqlHighlightTokenMaker}), verifica se o texto bate com um
+     * objeto DE VERDADE do schema conectado no momento. Alias (que tambem
+     * ficam em negrito) simplesmente nao batem com nenhuma lista do schema e
+     * voltam {@code null} aqui — sem tooltip/cursor/sublinhado pra eles
+     * (isso e papel da secao 8.5, destaque de referencias, nao 8.2).
+     */
+    private EditorObjectHit resolveObjectAt(int offset) {
+        if (offset < 0 || schemaSupplier == null) {
+            return null;
+        }
+        SchemaInfo schema = schemaSupplier.get();
+        if (schema == null) {
+            return null;
+        }
+        try {
+            int line = textArea.getLineOfOffset(offset);
+            Token tok = ((RSyntaxDocument) textArea.getDocument()).getTokenListForLine(line);
+            while (tok != null) {
+                if (tok.isPaintable() && tok.getType() == TokenTypes.DATA_TYPE && tok.containsPosition(offset)) {
+                    String word = tok.getLexeme();
+                    return classify(schema, word, tok.getOffset(), tok.getEndOffset());
+                }
+                tok = tok.getNextToken();
+            }
+        } catch (BadLocationException ignored) {
+            // offset invalido (documento mudou bem na hora): sem objeto
+        }
+        return null;
+    }
+
+    private static EditorObjectHit classify(SchemaInfo schema, String word, int start, int end) {
+        for (TableInfo t : schema.tables()) {
+            if (t.name().equalsIgnoreCase(word)) {
+                return new EditorObjectHit("TABLE", t.name(), start, end, t);
+            }
+        }
+        for (TableInfo v : schema.views()) {
+            if (v.name().equalsIgnoreCase(word)) {
+                return new EditorObjectHit("VIEW", v.name(), start, end, v);
+            }
+        }
+        for (String p : schema.procedures()) {
+            if (p.equalsIgnoreCase(word)) {
+                return new EditorObjectHit("PROCEDURE", p, start, end, null);
+            }
+        }
+        for (String f : schema.functions()) {
+            if (f.equalsIgnoreCase(word)) {
+                return new EditorObjectHit("FUNCTION", f, start, end, null);
+            }
+        }
+        for (String tg : schema.triggers()) {
+            if (tg.equalsIgnoreCase(word)) {
+                return new EditorObjectHit("TRIGGER", tg, start, end, null);
+            }
+        }
+        return null;
+    }
+
+    private String tooltipHtmlFor(EditorObjectHit hit) {
+        SchemaInfo schema = (schemaSupplier != null) ? schemaSupplier.get() : null;
+        StringBuilder sb = new StringBuilder("<html><b>").append(hit.name()).append("</b><br>")
+                .append(prettyKind(hit.kind()));
+        if (schema != null) {
+            sb.append("<br>Schema: ").append(schema.name());
+        }
+        if (hit.table() != null) {
+            sb.append("<br>Colunas: ").append(hit.table().columns().size());
+        }
+        sb.append("</html>");
+        return sb.toString();
+    }
+
+    private static String prettyKind(String kind) {
+        return switch (kind) {
+            case "TABLE" -> "Tabela";
+            case "VIEW" -> "Visualizacao";
+            case "PROCEDURE" -> "Procedure";
+            case "FUNCTION" -> "Function";
+            case "TRIGGER" -> "Trigger";
+            default -> kind;
+        };
+    }
+
+    /** Sublinhado discreto sob um trecho de texto — ver {@link #installObjectHover}. */
+    private static final class UnderlineHighlightPainter implements Highlighter.HighlightPainter {
+
+        private final Color color;
+
+        UnderlineHighlightPainter(Color color) {
+            this.color = color;
+        }
+
+        @Override
+        public void paint(Graphics g, int p0, int p1, Shape bounds, JTextComponent c) {
+            try {
+                Rectangle r0 = c.modelToView2D(p0).getBounds();
+                Rectangle r1 = c.modelToView2D(p1).getBounds();
+                g.setColor(color);
+                if (r0.y == r1.y) {
+                    int y = r0.y + r0.height - 2;
+                    g.drawLine(r0.x, y, r1.x, y);
+                }
+            } catch (BadLocationException ignored) {
+                // offset invalido (documento mudou na hora): so nao desenha desta vez
+            }
+        }
     }
 
     public RSyntaxTextArea textArea() {

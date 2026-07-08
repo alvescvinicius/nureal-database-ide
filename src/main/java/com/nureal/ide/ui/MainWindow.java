@@ -1356,7 +1356,8 @@ public class MainWindow extends JFrame {
 			return false;
 		}
 		SqlEditorPane pane = new SqlEditorPane(tabId, completionProvider, this::onRun, this::currentSqlFormatter,
-				formatState.editorFontFamily());
+				formatState.editorFontFamily(), () -> currentSchema, this::openEditorObject, this::selectObjectInTree,
+				this::navigateBack);
 		pane.textArea().setText(sql);
 		pane.textArea().setCaretPosition(0);
 		pane.textArea().getDocument().addDocumentListener(new DocumentListener() {
@@ -3653,6 +3654,103 @@ public class MainWindow extends JFrame {
 	private static boolean isOpenableObject(NodeType type) {
 		return type == NodeType.TABLE || type == NodeType.VIEW
 				|| type == NodeType.ROUTINE || type == NodeType.TRIGGER;
+	}
+
+	/**
+	 * Historico de objetos abertos a partir do editor SQL (CTRL+Clique ou
+	 * F12 — secoes 8.3/8.6 do pedido "Navegacao Inteligente e Interativa"),
+	 * do mais antigo (fundo da pilha) ao mais recente (topo). ALT+Seta-
+	 * esquerda ({@link #navigateBack}) volta um passo nesta pilha, reabrindo
+	 * a tela de propriedades do objeto anterior — nao rastreia nada aberto
+	 * via duplo-clique na arvore, so o que veio do editor mesmo.
+	 */
+	private final java.util.Deque<ObjNode> objectNavHistory = new java.util.ArrayDeque<>();
+
+	/**
+	 * Chamado pelo editor SQL quando o usuario da CTRL+Clique OU aperta F12
+	 * sobre um objeto de banco reconhecido (secoes 8.3/8.6 do pedido
+	 * "Navegacao Inteligente e Interativa" — ver
+	 * {@link SqlEditorPane.ObjectOpenHandler}). Monta um {@link ObjNode}
+	 * equivalente ao que a arvore de objetos usaria pro mesmo objeto e
+	 * reaproveita a MESMA tela de propriedades — CTRL+Clique/F12 no editor e
+	 * duplo-clique na setinha da arvore levam ao mesmo lugar, sem duplicar UI
+	 * nenhuma. Empilha o objeto em {@link #objectNavHistory} para o ALT+Seta-
+	 * esquerda ({@link #navigateBack}) poder voltar a ele depois.
+	 */
+	private void openEditorObject(String kind, String name, TableInfo table) {
+		NodeType type = switch (kind) {
+			case "TABLE" -> NodeType.TABLE;
+			case "VIEW" -> NodeType.VIEW;
+			case "TRIGGER" -> NodeType.TRIGGER;
+			default -> NodeType.ROUTINE; // PROCEDURE ou FUNCTION
+		};
+		ObjNode node = new ObjNode(type, name, name, kind, table, null);
+		objectNavHistory.push(node);
+		showObjectProperties(node);
+	}
+
+	/**
+	 * ALT+Seta-esquerda no editor SQL (secao 8.6): volta ao objeto anterior
+	 * na pilha {@link #objectNavHistory} — remove o topo (o objeto atual) e
+	 * reabre a tela de propriedades do que ficou no topo em seguida. Pilha
+	 * vazia ou com um so item (nada "anterior" a voltar): so avisa na barra
+	 * de status, sem erro.
+	 */
+	private void navigateBack() {
+		if (!objectNavHistory.isEmpty()) {
+			objectNavHistory.pop();
+		}
+		ObjNode previous = objectNavHistory.peek();
+		if (previous != null) {
+			showObjectProperties(previous);
+		} else if (statusBar != null) {
+			statusBar.setText(" Sem objeto anterior no historico de navegacao.");
+		}
+	}
+
+	/**
+	 * Chamado pelo editor SQL quando o CURSOR passa a estar sobre um objeto
+	 * de banco reconhecido (secao 8.4 — ver {@link SqlEditorPane.CaretObjectListener}):
+	 * localiza o no correspondente na arvore de objetos e SELECIONA (sem
+	 * expandir o proprio objeto, so os ancestrais ate ele ficarem visiveis —
+	 * ver {@link JTree#scrollPathToVisible}, que expande so os pais do
+	 * caminho, nunca o ultimo componente). Se a categoria nao existir (sem
+	 * schema carregado ainda) ou o objeto nao estiver visivel no momento
+	 * (ex.: escondido por um filtro de busca ativo), simplesmente nao faz
+	 * nada — nunca mexe no filtro do usuario sozinho.
+	 */
+	private void selectObjectInTree(String kind, String name) {
+		if (!(objectTree.getModel().getRoot() instanceof DefaultMutableTreeNode root)) {
+			return;
+		}
+		String categoryLabel = switch (kind) {
+			case "TABLE" -> "Tabelas";
+			case "VIEW" -> "Visualizacoes";
+			case "PROCEDURE" -> "Procedures";
+			case "FUNCTION" -> "Functions";
+			case "TRIGGER" -> "Triggers";
+			default -> null;
+		};
+		if (categoryLabel == null) {
+			return;
+		}
+		for (int i = 0; i < root.getChildCount(); i++) {
+			if (!(root.getChildAt(i) instanceof DefaultMutableTreeNode cat)
+					|| !(cat.getUserObject() instanceof ObjNode catNode)
+					|| !categoryLabel.equals(catNode.name())) {
+				continue;
+			}
+			for (int j = 0; j < cat.getChildCount(); j++) {
+				if (cat.getChildAt(j) instanceof DefaultMutableTreeNode child
+						&& child.getUserObject() instanceof ObjNode obj
+						&& obj.name().equalsIgnoreCase(name)) {
+					TreePath path = new TreePath(child.getPath());
+					objectTree.setSelectionPath(path);
+					objectTree.scrollPathToVisible(path);
+				}
+			}
+			return;
+		}
 	}
 
 	/**

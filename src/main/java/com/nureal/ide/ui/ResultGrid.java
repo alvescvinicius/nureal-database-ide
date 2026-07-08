@@ -154,6 +154,7 @@ final class ResultGrid extends JPanel {
         };
         ResultContextMenu.install(table, sorter, metadataSource, filterController, exportExcel);
         ResultHeaderContextMenu.install(table, header, sorter, metadataSource, filterController, this::persistLayout);
+        ResultContextMenu.installOnCorner(corner, table, sorter, metadataSource, filterController, exportExcel);
 
         header.addMouseListener(new MouseAdapter() {
             @Override
@@ -164,7 +165,10 @@ final class ResultGrid extends JPanel {
         sorter.rowSorter().addRowSorterListener(e -> persistLayout());
 
         JScrollPane scroll = new JScrollPane(table);
-        scroll.setRowHeaderView(RowNumberGutter.build(table, model, selection));
+        javax.swing.JList<String> rowGutter = RowNumberGutter.build(table, model, selection);
+        ResultContextMenu.installOnRowGutter(rowGutter, table, sorter, metadataSource, filterController, exportExcel,
+                selection);
+        scroll.setRowHeaderView(rowGutter);
         scroll.setCorner(JScrollPane.UPPER_LEFT_CORNER, corner);
 
         add(buildFilterBar(model), BorderLayout.NORTH);

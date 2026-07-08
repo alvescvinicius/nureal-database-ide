@@ -56,6 +56,75 @@ final class ResultContextMenu {
         });
     }
 
+    /**
+     * Igual a {@link #install}, so que para clique direito na NUMERACAO de
+     * linha (gutter a esquerda da grade, ver {@link RowNumberGutter}) — sem
+     * coluna especifica (os itens de coluna somem sozinhos em
+     * {@link #buildMenu}, ver alteracao la), mas com copiar/exportar/limpar
+     * filtro disponiveis, atuando sobre a linha sob o cursor (selecionada
+     * primeiro, se ainda nao estivesse).
+     */
+    static void installOnRowGutter(javax.swing.JList<String> gutter, JTable table, ColumnSorter sorter,
+            ColumnHeaderRenderer.MetadataSource metadataSource, FilterController filter, Runnable exportExcel,
+            SelectionManager selection) {
+        gutter.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mousePressed(MouseEvent e) {
+                maybeShow(e);
+            }
+
+            @Override
+            public void mouseReleased(MouseEvent e) {
+                maybeShow(e);
+            }
+
+            private void maybeShow(MouseEvent e) {
+                if (!e.isPopupTrigger()) {
+                    return;
+                }
+                int row = gutter.locationToIndex(e.getPoint());
+                if (row >= 0 && !table.isRowSelected(row)) {
+                    selection.selectRow(row, false, false);
+                }
+                buildMenu(table, sorter, metadataSource, filter, exportExcel, row, -1)
+                        .show(gutter, e.getX(), e.getY());
+            }
+        });
+    }
+
+    /**
+     * Igual a {@link #install}, so que para clique direito no CANTO
+     * superior-esquerdo da grade (representa "selecionar tudo" — ver
+     * {@link SelectionManager#installCorner}): clique direito ali seleciona
+     * TODAS as linhas (se ainda nao estivessem todas selecionadas) e mostra o
+     * mesmo menu, pronto pra copiar/exportar a grade inteira.
+     */
+    static void installOnCorner(javax.swing.JComponent corner, JTable table, ColumnSorter sorter,
+            ColumnHeaderRenderer.MetadataSource metadataSource, FilterController filter, Runnable exportExcel) {
+        corner.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mousePressed(MouseEvent e) {
+                maybeShow(e);
+            }
+
+            @Override
+            public void mouseReleased(MouseEvent e) {
+                maybeShow(e);
+            }
+
+            private void maybeShow(MouseEvent e) {
+                if (!e.isPopupTrigger()) {
+                    return;
+                }
+                if (table.getRowCount() > 0 && table.getSelectedRowCount() < table.getRowCount()) {
+                    table.selectAll();
+                }
+                buildMenu(table, sorter, metadataSource, filter, exportExcel, -1, -1)
+                        .show(corner, e.getX(), e.getY());
+            }
+        });
+    }
+
     private static JPopupMenu buildMenu(JTable table, ColumnSorter sorter,
             ColumnHeaderRenderer.MetadataSource metadataSource, FilterController filter,
             Runnable exportExcel, int row, int col) {
@@ -85,21 +154,28 @@ final class ResultContextMenu {
                     CellContentViewer.show(table, table.getColumnName(col), value)));
         }
         menu.add(item("Limpar filtro", filter::clearFilter));
-        menu.addSeparator();
 
-        menu.add(item("Ordenar crescente",
-                () -> sorter.setSingleSort(modelColumn, SortOrder.ASCENDING)));
-        menu.add(item("Ordenar decrescente",
-                () -> sorter.setSingleSort(modelColumn, SortOrder.DESCENDING)));
-        menu.addSeparator();
+        if (modelColumn >= 0) {
+            menu.addSeparator();
+            menu.add(item("Ordenar crescente",
+                    () -> sorter.setSingleSort(modelColumn, SortOrder.ASCENDING)));
+            menu.add(item("Ordenar decrescente",
+                    () -> sorter.setSingleSort(modelColumn, SortOrder.DESCENDING)));
+            menu.addSeparator();
+            menu.add(item("Informacoes da coluna", () -> {
+                if (metadataSource != null) {
+                    ColumnMetadataPopup.showDialog(table, metadataSource.metadataFor(modelColumn));
+                }
+            }));
+        }
 
-        menu.add(item("Informacoes da coluna", () -> {
-            if (modelColumn >= 0 && metadataSource != null) {
-                ColumnMetadataPopup.showDialog(table, metadataSource.metadataFor(modelColumn));
-            }
-        }));
-
-        if (modelColumn < 0) {
+        // So desabilita o menu INTEIRO quando nao ha absolutamente nada pra
+        // agir (grade vazia) — clique na numeracao de linha (gutter) ou no
+        // canto (selecionar tudo) chega aqui com col=-1 (sem coluna
+        // especifica), mas ainda faz total sentido copiar/exportar a
+        // selecao de linhas, so os itens de coluna (filtro/ordenacao/
+        // informacoes) e que ficam de fora (ver acima).
+        if (table.getRowCount() == 0) {
             disableAll(menu);
         }
         return menu;

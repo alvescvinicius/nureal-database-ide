@@ -28,7 +28,7 @@ final class RowNumberGutter {
     private RowNumberGutter() {
     }
 
-    static JComponent build(JTable table, DefaultTableModel model, SelectionManager selection) {
+    static JList<String> build(JTable table, DefaultTableModel model, SelectionManager selection) {
         AbstractListModel<String> listModel = new AbstractListModel<>() {
             private static final long serialVersionUID = 1L;
 
