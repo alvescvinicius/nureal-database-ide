@@ -17,12 +17,14 @@ import javax.swing.table.JTableHeader;
 import java.awt.BorderLayout;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
+import java.awt.Rectangle;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.IntUnaryOperator;
@@ -51,6 +53,19 @@ final class ResultGrid extends JPanel {
     private final String fingerprint;
     private final JComboBox<String> filterColumnBox = new JComboBox<>();
     private final JTextField filterField = new JTextField(20);
+    /** Campo curto e independente do filtro de valores: so navega ate a coluna, nunca restringe linhas (ver {@link #searchColumn}). */
+    private final JTextField columnSearchField = new JTextField(10);
+    private final GridEditController editController;
+    private final ColumnHeaderRenderer headerRenderer;
+    /**
+     * Notificado sempre que a selecao de celulas muda, com a contagem de
+     * celulas selecionadas e a soma dos valores numericos entre elas
+     * ({@code null} quando nenhuma e numerica) — ver {@link #updateSelectionSummary()}.
+     * {@code MainWindow} liga isto a {@link ResultStatusBar#updateSelectionSummary}.
+     * Default no-op: a grade funciona sozinha (testes, uso fora do MainWindow)
+     * mesmo sem ninguem ouvindo.
+     */
+    private java.util.function.BiConsumer<Integer, java.math.BigDecimal> onSelectionSummary = (count, sum) -> { };
 
     /**
      * @param model            dados + metadados da consulta (ver {@link ResultTableModel})
@@ -63,6 +78,14 @@ final class ResultGrid extends JPanel {
     ResultGrid(ResultTableModel model, ConnectionManager connectionManager, String schema,
             TableMetadataCache metadataCache, Runnable exportExcel, IntUnaryOperator scale) {
         super(new BorderLayout());
+
+        // Sempre criado (nunca null) mas so vira editavel de fato quando
+        // MainWindow chama editController().enable(target) apos resolver que
+        // este resultado e um SELECT simples de uma tabela com PK conhecida
+        // — ver MainWindow#tryEnableEditing. Enquanto isso, isEditable()
+        // volta false e a grade permanece somente-leitura, como sempre foi.
+        this.editController = new GridEditController(model);
+        model.setEditController(editController);
 
         this.table = new JTable(model) {
             private static final long serialVersionUID = 1L;
@@ -88,8 +111,22 @@ final class ResultGrid extends JPanel {
 
         SelectionManager selection = SelectionManager.install(table);
 
+        // Resumo de selecao (contagem + soma): ouve os DOIS modelos de
+        // selecao (linha E coluna) separadamente — um arrasto horizontal
+        // dentro de uma unica linha, por exemplo, muda so o modelo de
+        // coluna, nunca o de linha (ver SelectionManager#installBodyMouseHandling),
+        // entao ouvir so um dos dois deixaria casos assim sem atualizar.
+        javax.swing.event.ListSelectionListener selectionSummaryListener = e -> {
+            if (!e.getValueIsAdjusting()) {
+                updateSelectionSummary();
+            }
+        };
+        table.getSelectionModel().addListSelectionListener(selectionSummaryListener);
+        table.getColumnModel().getSelectionModel().addListSelectionListener(selectionSummaryListener);
+
         JComponent corner = RowNumberGutter.corner();
-        JTableHeader header = ResultTableHeader.install(table, sorter, selection, metadataSource);
+        this.headerRenderer = new ColumnHeaderRenderer(sorter);
+        JTableHeader header = ResultTableHeader.install(table, sorter, selection, metadataSource, headerRenderer);
         applyHeaderHeight(header, scale);
         selection.installCorner(corner, this::persistLayout);
 
@@ -130,8 +167,44 @@ final class ResultGrid extends JPanel {
         return table;
     }
 
+    /** Liga o callback de resumo de selecao (ver campo {@link #onSelectionSummary}). */
+    void onSelectionSummary(java.util.function.BiConsumer<Integer, java.math.BigDecimal> listener) {
+        this.onSelectionSummary = listener;
+    }
+
     JComponent asComponent() {
         return this;
+    }
+
+    GridEditController editController() {
+        return editController;
+    }
+
+    /** Linhas selecionadas convertidas para indices de MODELO (ver {@link GridEditController}). */
+    int[] selectedModelRows() {
+        int[] viewRows = table.getSelectedRows();
+        int[] modelRows = new int[viewRows.length];
+        for (int i = 0; i < viewRows.length; i++) {
+            modelRows[i] = table.convertRowIndexToModel(viewRows[i]);
+        }
+        return modelRows;
+    }
+
+    /**
+     * Adiciona uma linha nova (via {@link GridEditController#addNewRow()}) e
+     * garante que o usuario a VEJA: limpa qualquer filtro ativo (uma linha em
+     * branco recem-criada quase nunca bate com um filtro de texto/numero em
+     * vigor — sem isto ela some da vista assim que criada, parecendo que o
+     * botao "Nova linha" nao fez nada) e rola/seleciona ate ela.
+     */
+    void addNewRowAndReveal() {
+        clearFilterUi();
+        int modelRow = editController.addNewRow();
+        int viewRow = table.convertRowIndexToView(modelRow);
+        if (viewRow >= 0) {
+            table.setRowSelectionInterval(viewRow, viewRow);
+            table.scrollRectToVisible(table.getCellRect(viewRow, 0, true));
+        }
     }
 
     // ---------- Estilo base da tabela ----------
@@ -171,6 +244,53 @@ final class ResultGrid extends JPanel {
         int hardMinWidth = scale.applyAsInt(24);
         for (int c = 0; c < table.getColumnModel().getColumnCount(); c++) {
             table.getColumnModel().getColumn(c).setMinWidth(hardMinWidth);
+        }
+    }
+
+    /**
+     * Recalcula quantas celulas estao selecionadas e a soma dos valores
+     * numericos entre elas, e repassa para quem estiver ouvindo (ver
+     * {@link #onSelectionSummary}). Iterar {@code isCellSelected} sobre o
+     * produto linhas-selecionadas x colunas-selecionadas (em vez de assumir
+     * que toda combinacao esta selecionada) e o jeito robusto de contar a
+     * selecao de fato — no Swing, linhas e colunas selecionadas sao dois
+     * modelos independentes, e o retangulo que os dois juntos "sugerem" nem
+     * sempre e o que esta realmente marcado.
+     */
+    private void updateSelectionSummary() {
+        int[] rows = table.getSelectedRows();
+        int[] cols = table.getSelectedColumns();
+        int count = 0;
+        java.math.BigDecimal sum = java.math.BigDecimal.ZERO;
+        boolean hasNumeric = false;
+        for (int row : rows) {
+            for (int col : cols) {
+                if (!table.isCellSelected(row, col)) {
+                    continue;
+                }
+                count++;
+                java.math.BigDecimal n = numericValue(table.getValueAt(row, col));
+                if (n != null) {
+                    sum = sum.add(n);
+                    hasNumeric = true;
+                }
+            }
+        }
+        onSelectionSummary.accept(count, hasNumeric ? sum : null);
+    }
+
+    /** {@code null} para qualquer coisa que nao seja um numero (texto, data, nulo, booleano...). */
+    private static java.math.BigDecimal numericValue(Object value) {
+        if (value instanceof java.math.BigDecimal bd) {
+            return bd;
+        }
+        if (!(value instanceof Number number)) {
+            return null;
+        }
+        try {
+            return new java.math.BigDecimal(number.toString());
+        } catch (NumberFormatException ex) {
+            return null; // NaN/Infinity de um Double/Float, por exemplo
         }
     }
 
@@ -238,9 +358,34 @@ final class ResultGrid extends JPanel {
             @Override public void removeUpdate(DocumentEvent e) { apply.run(); }
             @Override public void changedUpdate(DocumentEvent e) { apply.run(); }
         });
-        filterColumnBox.addActionListener(e -> apply.run());
+        // O combo de colunas ja funciona como "busca de coluna" (JComboBox
+        // pesquisa por digitacao nativamente): alem de restringir o filtro a
+        // ela, leva a visao ate a coluna escolhida e marca seu cabecalho —
+        // pedido explicito do usuario para achar uma coluna em grades largas.
+        filterColumnBox.addActionListener(e -> {
+            apply.run();
+            highlightSelectedColumn();
+        });
+
+        // Campo dedicado SO para achar uma coluna (nao filtra linhas, nao
+        // depende de abrir o combo e rolar por uma lista enorme): a cada
+        // tecla, localiza a coluna cujo nome mais se aproxima do texto
+        // digitado e rola/realca o cabecalho dela — pedido explicito do
+        // usuario para tabelas com muitas colunas.
+        columnSearchField.putClientProperty("JTextField.placeholderText", "Buscar coluna...");
+        columnSearchField.putClientProperty("JTextField.showClearButton", true);
+        columnSearchField.setToolTipText("Digite parte do nome da coluna: a grade rola ate ela e destaca o cabecalho.");
+        columnSearchField.getDocument().addDocumentListener(new DocumentListener() {
+            @Override public void insertUpdate(DocumentEvent e) { searchColumn(); }
+            @Override public void removeUpdate(DocumentEvent e) { searchColumn(); }
+            @Override public void changedUpdate(DocumentEvent e) { searchColumn(); }
+        });
 
         JPanel bar = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 3));
+        JLabel columnLabel = new JLabel("Coluna:");
+        columnLabel.setForeground(GridTheme.MUTED_TEXT);
+        bar.add(columnLabel);
+        bar.add(columnSearchField);
         JLabel label = new JLabel("Filtro:");
         label.setForeground(GridTheme.MUTED_TEXT);
         bar.add(label);
@@ -257,6 +402,91 @@ final class ResultGrid extends JPanel {
     private void clearFilterUi() {
         filterField.setText("");
         filterColumnBox.setSelectedIndex(0);
+        columnSearchField.setText("");
+    }
+
+    /**
+     * Rola a grade ate a coluna escolhida no {@link #filterColumnBox} e marca
+     * seu cabecalho (ver {@link ColumnHeaderRenderer#setHighlight}) — assim o
+     * usuario acha visualmente a coluna pesquisada mesmo com muitas colunas
+     * fora da area visivel. Selecionar "Todas as colunas" (indice 0) limpa a
+     * marcacao. Coluna oculta (ver {@link ColumnVisibility}) so ganha a
+     * marcacao — nao ha o que rolar ate, pois nao esta na view.
+     */
+    private void highlightSelectedColumn() {
+        int modelColumn = filterColumnBox.getSelectedIndex() - 1;
+        headerRenderer.setHighlight(modelColumn);
+        table.getTableHeader().repaint();
+        if (modelColumn < 0) {
+            return;
+        }
+        int viewColumn = table.convertColumnIndexToView(modelColumn);
+        if (viewColumn >= 0) {
+            scrollToColumn(viewColumn);
+        }
+    }
+
+    /**
+     * Localiza a coluna mais proxima do texto de {@link #columnSearchField} a
+     * CADA tecla digitada e rola/realca ate ela — independente do
+     * {@link #filterColumnBox} (nao muda o filtro de linhas em vigor, so
+     * ajuda a "achar" a coluna em tabelas com muitas colunas, onde navegar
+     * pelo combo rolando um por um e penoso). Texto vazio ou sem
+     * correspondencia so limpa o realce.
+     */
+    private void searchColumn() {
+        String query = columnSearchField.getText().trim();
+        if (query.isEmpty()) {
+            clearColumnHighlight();
+            return;
+        }
+        int viewColumn = findVisibleColumn(query);
+        if (viewColumn < 0) {
+            clearColumnHighlight();
+            return;
+        }
+        headerRenderer.setHighlight(table.convertColumnIndexToModel(viewColumn));
+        table.getTableHeader().repaint();
+        scrollToColumn(viewColumn);
+    }
+
+    /**
+     * Indice de VIEW da coluna visivel que melhor bate com {@code query}
+     * (case-insensitive): igualdade exata > comeca com > contem — nessa
+     * ordem de preferencia, para digitar as primeiras letras ja pular direto
+     * pra coluna certa mesmo quando o texto tambem aparece no meio de outros
+     * nomes. So considera colunas visiveis (rolar ate uma oculta nao faz
+     * sentido); {@code -1} se nenhuma bater.
+     */
+    private int findVisibleColumn(String query) {
+        String needle = query.toLowerCase(Locale.ROOT);
+        int prefixMatch = -1;
+        int containsMatch = -1;
+        for (int v = 0; v < table.getColumnCount(); v++) {
+            String lower = table.getColumnName(v).toLowerCase(Locale.ROOT);
+            if (lower.equals(needle)) {
+                return v;
+            }
+            if (prefixMatch < 0 && lower.startsWith(needle)) {
+                prefixMatch = v;
+            }
+            if (containsMatch < 0 && lower.contains(needle)) {
+                containsMatch = v;
+            }
+        }
+        return prefixMatch >= 0 ? prefixMatch : containsMatch;
+    }
+
+    private void clearColumnHighlight() {
+        headerRenderer.setHighlight(-1);
+        table.getTableHeader().repaint();
+    }
+
+    /** Rola so no eixo horizontal ate a coluna informada, preservando a posicao vertical atual. */
+    private void scrollToColumn(int viewColumn) {
+        Rectangle visible = table.getVisibleRect();
+        Rectangle cell = table.getCellRect(0, viewColumn, true);
+        table.scrollRectToVisible(new Rectangle(cell.x, visible.y, cell.width, visible.height));
     }
 
     // ---------- Persistencia (largura/ocultas/ordenacao) ----------
@@ -273,11 +503,13 @@ final class ResultGrid extends JPanel {
         GridPreferences.Snapshot snapshot = GridPreferences.load(fingerprint);
 
         if (snapshot.widths().isEmpty()) {
-            // Primeira vez que este "formato" de resultado (mesmas colunas)
-            // e exibido: largura PADRAO uniforme, nao ajuste por conteudo —
-            // ver a nota de classe em ColumnAutoFit. O ajuste por conteudo
-            // continua a um duplo-clique/"AutoFit" de distancia.
-            ColumnAutoFit.applyDefaultWidths(table);
+            // Primeira vez que este "formato" de resultado (mesmas colunas) e
+            // exibido: cada coluna ja nasce ajustada ao proprio conteudo
+            // (cabecalho OU celula, o que for maior — igual ao "AutoFit
+            // Todas" do menu de contexto), em vez da largura uniforme antiga
+            // que cortava nomes de coluna longos por padrao — pedido
+            // explicito do usuario para o resultado ja vir "expandido".
+            ColumnAutoFit.packColumns(table);
         } else {
             for (int v = 0; v < table.getColumnCount(); v++) {
                 Integer saved = snapshot.widths().get(table.getColumnName(v));
@@ -292,9 +524,10 @@ final class ResultGrid extends JPanel {
                     // sozinhos se o valor salvo for absurdo.
                     ColumnAutoFit.applyWidth(table, v, saved);
                 } else {
-                    // Coluna nova (nao existia quando o layout foi salvo): mesma largura
-                    // padrao usada na primeira exibicao, por consistencia.
-                    ColumnAutoFit.applyDefaultWidth(table, v);
+                    // Coluna nova (nao existia quando o layout foi salvo):
+                    // mesmo ajuste ao conteudo da primeira exibicao, por
+                    // consistencia (nao a largura uniforme antiga).
+                    ColumnAutoFit.packColumn(table, v);
                 }
             }
         }

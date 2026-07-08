@@ -1,8 +1,11 @@
 package com.nureal.ide.core.dialect;
 
 import java.util.List;
+import java.util.Locale;
 
 import com.nureal.ide.core.connection.ConnectionProfile;
+import com.nureal.ide.core.metadata.model.NewColumnSpec;
+import com.nureal.ide.core.metadata.model.NewTableSpec;
 
 /**
  * Implementacao para MySQL. Le metadados via information_schema em UMA
@@ -83,12 +86,104 @@ public class MySqlDialect implements DatabaseDialect {
 
     @Override
     public String definitionQuery(String objectKind, String objectName) {
-        return "SHOW CREATE " + objectKind + " " + quoteIdent(objectName);
+        return "SHOW CREATE " + objectKind + " " + quoteIdentifier(objectName);
     }
 
     /** Envolve um identificador em crases, dobrando crases internas. */
-    private static String quoteIdent(String ident) {
+    @Override
+    public String quoteIdentifier(String ident) {
         return "`" + ident.replace("`", "``") + "`";
+    }
+
+    @Override
+    public String createSchemaStatement(String name) {
+        return "CREATE DATABASE " + quoteIdentifier(name);
+    }
+
+    /**
+     * Monta o CREATE TABLE a partir da especificacao coletada pelo
+     * CreateTableDialog. Uma unica PRIMARY KEY (composta, se mais de uma
+     * coluna marcar {@code primaryKey}) e adicionada ao final, se houver
+     * pelo menos uma. AUTO_INCREMENT so e emitido se a propria coluna pedir
+     * (nao valida aqui se faz sentido — isso e responsabilidade do MySQL, que
+     * rejeita AUTO_INCREMENT fora da chave/indice na hora de executar).
+     */
+    @Override
+    public String createTableStatement(NewTableSpec spec) {
+        StringBuilder sql = new StringBuilder();
+        sql.append("CREATE TABLE ").append(quoteIdentifier(spec.name())).append(" (\n");
+
+        List<String> pkColumns = new java.util.ArrayList<>();
+        List<NewColumnSpec> cols = spec.columns();
+        for (int i = 0; i < cols.size(); i++) {
+            NewColumnSpec c = cols.get(i);
+            sql.append("  ").append(columnDefinition(c));
+            if (i < cols.size() - 1 || !pkColumnNames(cols).isEmpty()) {
+                sql.append(",\n");
+            } else {
+                sql.append("\n");
+            }
+            if (c.primaryKey()) {
+                pkColumns.add(quoteIdentifier(c.name()));
+            }
+        }
+        if (!pkColumns.isEmpty()) {
+            sql.append("  PRIMARY KEY (").append(String.join(", ", pkColumns)).append(")\n");
+        }
+        sql.append(")");
+        if (spec.comment() != null && !spec.comment().isBlank()) {
+            sql.append(" COMMENT=").append(quoteLiteral(spec.comment()));
+        }
+        return sql.toString();
+    }
+
+    private static List<String> pkColumnNames(List<NewColumnSpec> cols) {
+        List<String> names = new java.util.ArrayList<>();
+        for (NewColumnSpec c : cols) {
+            if (c.primaryKey()) {
+                names.add(c.name());
+            }
+        }
+        return names;
+    }
+
+    private String columnDefinition(NewColumnSpec c) {
+        StringBuilder def = new StringBuilder();
+        def.append(quoteIdentifier(c.name())).append(" ").append(c.sqlType().toUpperCase(Locale.ROOT));
+        if (c.length() != null && !c.length().isBlank()) {
+            def.append("(").append(c.length().trim()).append(")");
+        }
+        def.append(c.nullable() ? " NULL" : " NOT NULL");
+        if (c.autoIncrement()) {
+            def.append(" AUTO_INCREMENT");
+        }
+        if (c.defaultValue() != null && !c.defaultValue().isBlank()) {
+            def.append(" DEFAULT ").append(defaultLiteral(c.defaultValue().trim()));
+        }
+        if (c.comment() != null && !c.comment().isBlank()) {
+            def.append(" COMMENT ").append(quoteLiteral(c.comment()));
+        }
+        return def.toString();
+    }
+
+    /**
+     * Decide se um DEFAULT deve ir literal (palavras-chave/numeros, ex.:
+     * {@code CURRENT_TIMESTAMP}, {@code NULL}, {@code 0}) ou entre aspas
+     * simples (qualquer outra coisa, ex.: um texto). Escapa aspas simples
+     * internas para evitar quebrar o DDL.
+     */
+    private static String defaultLiteral(String value) {
+        String upper = value.toUpperCase(Locale.ROOT);
+        if (upper.equals("NULL") || upper.equals("TRUE") || upper.equals("FALSE")
+                || upper.startsWith("CURRENT_TIMESTAMP") || value.matches("-?\\d+(\\.\\d+)?")) {
+            return value;
+        }
+        return quoteLiteral(value);
+    }
+
+    /** Envolve um valor literal em aspas simples, escapando aspas internas. */
+    private static String quoteLiteral(String value) {
+        return "'" + value.replace("'", "''") + "'";
     }
 
     @Override

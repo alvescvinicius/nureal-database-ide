@@ -22,7 +22,10 @@ public class FormatPreferences {
     private static final String DIR_NAME = ".nureal-ide";
     private static final String FILE_NAME = "format.conf";
 
-    public static final SqlFormatter.Style DEFAULT_STYLE = SqlFormatter.Style.RIVER;
+    // Era RIVER (estilo Oracle/PL-SQL Developer). Trocado para STANDARD, que
+    // e o preset mais proximo do que a maioria das IDEs de banco usa por
+    // padrao (DataGrip, DBeaver, pgAdmin) — pedido do usuario.
+    public static final SqlFormatter.Style DEFAULT_STYLE = SqlFormatter.Style.STANDARD;
 
     private final Path file;
 

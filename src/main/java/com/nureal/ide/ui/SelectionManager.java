@@ -23,7 +23,11 @@ import java.awt.event.MouseMotionAdapter;
  *       colunas), mantendo a celula clicada como "ativa" (lead da selecao de
  *       coluna, usado por {@link AbstractTypedCellRenderer} para o destaque
  *       extra de celula ativa).</li>
- *   <li>Duplo clique -&gt; seleciona SOMENTE aquela celula e abre {@link CellContentViewer} para selecionar/copiar um trecho do texto (grade e somente-leitura).</li>
+ *   <li>Duplo clique -&gt; seleciona SOMENTE aquela celula; se ela NAO for editavel
+*       (ver {@link GridEditController}), abre {@link CellContentViewer} para
+*       selecionar/copiar um trecho do texto. Se FOR editavel, deixa o duplo
+*       clique iniciar a edicao da propria celula normalmente (nao compete com
+*       o visualizador).</li>
  *   <li>Ctrl+clique -&gt; adiciona a linha a selecao existente.</li>
  *   <li>Shift+clique -&gt; seleciona o intervalo de linhas a partir da ancora.</li>
  *   <li>Clique no cabecalho de uma coluna ({@link #selectColumn}, chamado por
@@ -76,6 +80,20 @@ final class SelectionManager {
 
     private final JTable table;
 
+    /**
+     * Celula onde o clique simples (sem Shift/Ctrl, sem duplo-clique) COMECOU
+     * — ancora para {@link #installBodyMouseHandling} decidir, durante o
+     * arrasto, se a selecao continua sendo so a linha inteira (estilo Excel,
+     * clique sem mover o mouse) ou vira um RETANGULO de celulas de verdade
+     * (usuario arrastou para outra celula). So tem sentido enquanto
+     * {@link #plainPress} for {@code true}; sem valor (-1) fora de um clique
+     * simples em andamento.
+     */
+    private int pressRow = -1;
+    private int pressCol = -1;
+    /** {@code true} so durante um clique simples (sem Shift/Ctrl/duplo-clique) — ver {@link #pressRow}. */
+    private boolean plainPress;
+
     private SelectionManager(JTable table) {
         this.table = table;
     }
@@ -95,6 +113,7 @@ final class SelectionManager {
         table.addMouseListener(new MouseAdapter() {
             @Override
             public void mousePressed(MouseEvent e) {
+                plainPress = false;
                 int row = table.rowAtPoint(e.getPoint());
                 int col = table.columnAtPoint(e.getPoint());
                 if (row < 0 || col < 0) {
@@ -111,20 +130,58 @@ final class SelectionManager {
                 }
                 if (e.getClickCount() >= 2) {
                     selectSingleCell(row, col);
-                    // A grade e somente-leitura (ResultTableModel.isCellEditable
-                    // sempre falso) — nao ha cursor de texto dentro da celula
-                    // para selecionar um trecho e copiar, como no Excel. O
-                    // duplo-clique abre o MESMO visualizador do menu de
-                    // contexto "Ver conteudo completo" (JTextArea selecionavel
-                    // + botao Copiar), sem risco de alterar o valor real.
-                    CellContentViewer.show(table, table.getColumnName(col), table.getValueAt(row, col));
+                    // Celula EDITAVEL (ver GridEditController/ResultTableModel):
+                    // deixa o duplo-clique fazer o que ele sempre fez em
+                    // qualquer grade estilo Excel — abrir o editor da propria
+                    // celula. Abrir o visualizador por cima disso so atrapalha
+                    // (foi exatamente o que o usuario reportou: o modal "Conteudo
+                    // completo" competindo com a edicao da celula).
+                    //
+                    // Celula NAO editavel (grade ainda somente-leitura para
+                    // este resultado — JOIN, sem PK, etc.): nao ha cursor de
+                    // texto dentro da celula para selecionar um trecho e
+                    // copiar, entao o duplo-clique continua abrindo o MESMO
+                    // visualizador do menu de contexto "Ver conteudo completo"
+                    // (JTextArea selecionavel + botao Copiar).
+                    if (!table.isCellEditable(row, col)) {
+                        CellContentViewer.show(table, table.getColumnName(col), table.getValueAt(row, col));
+                    }
                 } else if (e.isShiftDown()) {
                     extendRowRangeTo(row, col);
                 } else if (e.isControlDown()) {
                     addRowToSelection(row, col);
                 } else {
+                    pressRow = row;
+                    pressCol = col;
+                    plainPress = true;
                     selectFullRow(row, col);
                 }
+            }
+        });
+        table.addMouseMotionListener(new MouseMotionAdapter() {
+            @Override
+            public void mouseDragged(MouseEvent e) {
+                // So reage a arrasto que COMECOU com um clique simples (ver
+                // pressRow/plainPress) — Shift/Ctrl/duplo-clique ja tem seu
+                // proprio significado e nao devem virar um retangulo aqui.
+                if (!plainPress) {
+                    return;
+                }
+                int row = table.rowAtPoint(e.getPoint());
+                int col = table.columnAtPoint(e.getPoint());
+                if (row < 0 || col < 0 || (row == pressRow && col == pressCol)) {
+                    return; // ainda na mesma celula do clique inicial: nao virou arrasto de verdade
+                }
+                // Arrasto de verdade: troca a selecao de "linha inteira" (o
+                // clique simples estilo Excel) por um RETANGULO exato entre a
+                // celula onde o clique comecou e a celula sob o mouse agora —
+                // pedido explicito do usuario para poder marcar so algumas
+                // celulas de UMA coluna, sem "vazar" pras colunas vizinhas.
+                table.setRowSelectionInterval(pressRow, row);
+                table.setColumnSelectionInterval(pressCol, col);
+                // Mais de uma celula escolhida explicitamente: Ctrl+C deve
+                // copiar o retangulo inteiro, nao so a celula ativa.
+                setSelectionScope(SelectionScope.MULTI);
             }
         });
     }
@@ -153,13 +210,30 @@ final class SelectionManager {
         setSelectionScope(SelectionScope.MULTI);
     }
 
+    /**
+     * Shift+clique estende a selecao da ANCORA (celula do ultimo clique
+     * simples) ate a celula clicada agora — um RETANGULO de verdade (linhas E
+     * colunas), nao mais a linha inteira: pedido explicito do usuario para
+     * conseguir marcar so um trecho de UMA coluna com Shift+clique, igual ao
+     * arrasto (ver {@link #installBodyMouseHandling}). A ancora de COLUNA usa
+     * o indice de LEAD (nao o de ancora) do modelo de selecao de colunas:
+     * {@link #selectFullColumnRangeWithLead} (chamado pelo clique simples
+     * anterior) sempre deixa esse indice apontando pra coluna que o usuario
+     * de fato clicou, mesmo com TODAS as colunas visualmente selecionadas —
+     * o indice de ancora, ali, aponta pra ultima coluna da grade, nao pra
+     * coluna clicada.
+     */
     private void extendRowRangeTo(int row, int clickedCol) {
-        int anchor = table.getSelectionModel().getAnchorSelectionIndex();
-        int from = (anchor < 0) ? row : anchor;
-        table.getSelectionModel().setSelectionInterval(from, row);
-        selectFullColumnRangeWithLead(clickedCol);
-        // Shift+clique estende o intervalo de linhas — intencao explicita de
-        // MAIS de uma celula.
+        int rowAnchor = table.getSelectionModel().getAnchorSelectionIndex();
+        int fromRow = (rowAnchor < 0) ? row : rowAnchor;
+        table.setRowSelectionInterval(fromRow, row);
+
+        int colAnchor = table.getColumnModel().getSelectionModel().getLeadSelectionIndex();
+        int fromCol = (colAnchor < 0) ? clickedCol : colAnchor;
+        table.setColumnSelectionInterval(fromCol, clickedCol);
+
+        // Shift+clique estende a selecao — intencao explicita de MAIS de uma
+        // celula.
         setSelectionScope(SelectionScope.MULTI);
     }
 
@@ -170,6 +244,19 @@ final class SelectionManager {
      * chamadas em sequencia selecionam o intervalo completo sem nunca perder
      * nenhuma coluna no meio do caminho, terminando com o lead exatamente em
      * {@code leadCol}.
+     *
+     * A ULTIMA linha ({@code setAnchorSelectionIndex}) e o que faz a
+     * DIFERENCA: sem ela, a 2a chamada de {@code addSelectionInterval} deixa
+     * a ANCORA presa em {@code lastCol} (o parametro ANTERIOR passado a ela),
+     * nao em {@code leadCol} — MESMO com a selecao visual correta (linha
+     * inteira destacada). Essa ancora "errada" so importa quando algo
+     * ESTENDE a selecao a partir dela depois: Shift+seta (Cima/Baixo), que o
+     * proprio JTable trata nativamente (fora do nosso controle — ver
+     * {@code installBodyMouseHandling} para o equivalente tratado por NOS,
+     * no mouse), usa exatamente esse indice de ancora — sem este fix, dava
+     * pra reproduzir o bug so com teclado: clicar numa celula e depois segurar
+     * Shift+Baixo estendia a selecao inteira "vazando" pras colunas vizinhas
+     * em vez de ficar restrita a coluna clicada.
      */
     private void selectFullColumnRangeWithLead(int leadCol) {
         int lastCol = table.getColumnCount() - 1;
@@ -180,6 +267,7 @@ final class SelectionManager {
         csm.clearSelection();
         csm.addSelectionInterval(0, lastCol);
         csm.addSelectionInterval(lastCol, leadCol);
+        csm.setAnchorSelectionIndex(leadCol);
     }
 
     // ---------- Selecao de linha (chamado pelo clique na coluna de numeracao) ----------
@@ -226,6 +314,7 @@ final class SelectionManager {
         setSelectionScope(SelectionScope.MULTI);
     }
 
+    /** Mesmo fix de ancora de {@link #selectFullColumnRangeWithLead}, agora para linhas (coluna inteira pelo cabecalho). */
     private void selectAllRowsPreservingLead() {
         int lastRow = table.getRowCount() - 1;
         if (lastRow < 0) {
@@ -237,6 +326,7 @@ final class SelectionManager {
         rsm.clearSelection();
         rsm.addSelectionInterval(0, lastRow);
         rsm.addSelectionInterval(lastRow, leadRow);
+        rsm.setAnchorSelectionIndex(leadRow);
     }
 
     // ---------- Canto superior-esquerdo ----------

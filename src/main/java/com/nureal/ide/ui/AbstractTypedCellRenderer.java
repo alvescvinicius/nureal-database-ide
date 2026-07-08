@@ -51,7 +51,7 @@ abstract class AbstractTypedCellRenderer extends DefaultTableCellRenderer {
         // CLOB gigante pese na pintura a cada repaint.
         super.getTableCellRendererComponent(table, CellText.forDisplay(display), isSelected, hasFocus, row, column);
         setBorder(BorderFactory.createEmptyBorder(0, 8, 0, 8));
-        applyRowBackground(table, isSelected, row);
+        applyRowBackground(table, isSelected, row, column);
 
         if (isNull) {
             setHorizontalAlignment(SwingConstants.LEFT);
@@ -76,18 +76,48 @@ abstract class AbstractTypedCellRenderer extends DefaultTableCellRenderer {
      * quando a linha nao esta selecionada. Selecionada, o fundo e sempre o
      * que {@code super.getTableCellRendererComponent} ja aplicou (cinza
      * neutro configurado na tabela) e nunca e sobrescrito aqui.
+     *
+     * Prioridade adicional (tambem so quando NAO selecionada, pelo mesmo
+     * motivo): estado de edicao pendente (ver {@link GridEditController}) —
+     * linha nova (verde), linha marcada para exclusao (vermelho) ou, faltando
+     * essas duas, a celula especifica editada (amarelo) — sobrepoe a
+     * zebra/hover normal, na ordem linha-toda antes de celula-a-celula.
      */
-    private void applyRowBackground(JTable table, boolean isSelected, int row) {
+    private void applyRowBackground(JTable table, boolean isSelected, int row, int column) {
         if (isSelected) {
             return;
         }
         setOpaque(true);
+        GridEditController edit = editControllerFor(table);
+        if (edit != null && edit.isEditable()) {
+            // row/column aqui sao indices da VIEW (ordenada/filtrada) — o
+            // controller trabalha em indices de MODELO (ver seu javadoc de
+            // classe), entao SEMPRE converte antes de perguntar a ele.
+            int modelRow = table.convertRowIndexToModel(row);
+            int modelColumn = table.convertColumnIndexToModel(column);
+            if (edit.isDeletedRow(modelRow)) {
+                setBackground(GridTheme.EDIT_DELETED_ROW);
+                return;
+            }
+            if (edit.isNewRow(modelRow)) {
+                setBackground(GridTheme.EDIT_NEW_ROW);
+                return;
+            }
+            if (edit.isDirtyCell(modelRow, modelColumn)) {
+                setBackground(GridTheme.EDIT_DIRTY_CELL);
+                return;
+            }
+        }
         boolean hover = SelectionManager.hoverRow(table) == row;
         if (hover) {
             setBackground(GridTheme.HOVER_BACKGROUND);
         } else {
             setBackground((row % 2 == 0) ? GridTheme.ZEBRA_EVEN : GridTheme.ZEBRA_ODD);
         }
+    }
+
+    private static GridEditController editControllerFor(JTable table) {
+        return (table.getModel() instanceof ResultTableModel rtm) ? rtm.editController() : null;
     }
 
     /**

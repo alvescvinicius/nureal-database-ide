@@ -6,8 +6,12 @@ import javax.swing.JLabel;
 import javax.swing.JMenuItem;
 import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
+import javax.swing.Timer;
 import java.awt.BorderLayout;
+import java.awt.Cursor;
 import java.awt.FlowLayout;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 
 /**
  * Barra inferior de uma aba de resultado: a esquerda, contagem de linhas +
@@ -36,11 +40,28 @@ final class ResultStatusBar {
 
     private final JPanel panel = new JPanel(new BorderLayout());
     private final JLabel info = new JLabel();
+    /**
+     * Resumo da selecao atual (quantidade de celulas + soma, quando ha valor
+     * numerico entre elas) — estilo barra de status do Excel. So exibe algo
+     * quando ha mais de uma celula selecionada (ver {@link #updateSelectionSummary}):
+     * para uma unica celula, o proprio valor ja esta visivel na grade.
+     */
+    private final JLabel selectionSummary = new JLabel();
+    /** Ultima soma exibida — o que um clique em {@link #selectionSummary} copia (ver {@link #copySum}). */
+    private java.math.BigDecimal lastSum;
     private final JButton loadMoreButton;
     private final JButton loadAllButton = new JButton("Carregar tudo");
     private final JButton exportButton = new JButton("Exportar");
     private final JMenuItem exportThisItem = new JMenuItem("Exportar este resultado...");
     private final JMenuItem exportAllItem = new JMenuItem("Exportar todos (uma aba por resultado)...");
+
+    // ---------- Barra de edicao (so aparece quando GridEditController.isEditable()) ----------
+    private final JPanel editBar = new JPanel(new BorderLayout());
+    private final JButton addRowButton = new JButton("Nova linha");
+    private final JButton deleteRowsButton = new JButton("Excluir linha(s)");
+    private final JLabel pendingLabel = new JLabel();
+    private final JButton discardButton = new JButton("Descartar");
+    private final JButton saveChangesButton = new JButton("Salvar alteracoes");
 
     ResultStatusBar(int pageSize) {
         loadMoreButton = new JButton("Carregar mais " + pageSize);
@@ -52,8 +73,20 @@ final class ResultStatusBar {
         exportMenu.add(exportAllItem);
         exportButton.addActionListener(e -> exportMenu.show(exportButton, 0, exportButton.getHeight()));
 
+        selectionSummary.setForeground(GridTheme.MUTED_TEXT);
+        // Clique copia a soma — mesmo gesto do Excel (clicar no "Soma:" da
+        // barra de status copia o valor pronto pra colar), pedido explicito
+        // do usuario pra facilitar reaproveitar o total sem digitar de novo.
+        selectionSummary.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                copySum();
+            }
+        });
+
         JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 3));
         left.add(info);
+        left.add(selectionSummary);
         left.add(loadMoreButton);
         left.add(loadAllButton);
         JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 3));
@@ -61,6 +94,34 @@ final class ResultStatusBar {
 
         panel.add(left, BorderLayout.WEST);
         panel.add(right, BorderLayout.EAST);
+        panel.add(buildEditBar(), BorderLayout.NORTH);
+    }
+
+    /**
+     * Linha extra ACIMA da barra normal — so visivel quando
+     * {@code MainWindow} resolve que o resultado e editavel (ver
+     * {@code MainWindow#tryEnableEditing}). Pedido explicito do usuario:
+     * update/insert/delete direto na grade, em vez de so gerar o SQL para
+     * copiar (ver {@link GridClipboard}).
+     */
+    private JComponent buildEditBar() {
+        addRowButton.setIcon(Icons.get(IconType.NEW, 13, new java.awt.Color(0x334155)));
+        deleteRowsButton.setIcon(Icons.get(IconType.DELETE, 13, new java.awt.Color(0x334155)));
+        saveChangesButton.setIcon(Icons.get(IconType.SAVE, 13, MainWindow.ACCENT));
+        pendingLabel.setForeground(GridTheme.MUTED_TEXT);
+
+        JPanel editLeft = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 3));
+        editLeft.add(addRowButton);
+        editLeft.add(deleteRowsButton);
+        editLeft.add(pendingLabel);
+        JPanel editRight = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 3));
+        editRight.add(discardButton);
+        editRight.add(saveChangesButton);
+
+        editBar.add(editLeft, BorderLayout.WEST);
+        editBar.add(editRight, BorderLayout.EAST);
+        editBar.setVisible(false);
+        return editBar;
     }
 
     JComponent asComponent() {
@@ -83,6 +144,48 @@ final class ResultStatusBar {
         exportAllItem.addActionListener(e -> action.run());
     }
 
+    void onAddRow(Runnable action) {
+        addRowButton.addActionListener(e -> action.run());
+    }
+
+    void onDeleteRows(Runnable action) {
+        deleteRowsButton.addActionListener(e -> action.run());
+    }
+
+    void onSaveChanges(Runnable action) {
+        saveChangesButton.addActionListener(e -> action.run());
+    }
+
+    void onDiscardChanges(Runnable action) {
+        discardButton.addActionListener(e -> action.run());
+    }
+
+    /** Mostra/esconde a barra de edicao inteira — chamado uma vez quando a edicao e habilitada. */
+    void showEditControls(boolean visible) {
+        editBar.setVisible(visible);
+    }
+
+    /** Desabilita os botoes de edicao enquanto {@code apply} roda em segundo plano — evita clique duplo em "Salvar". */
+    void setEditBusy(boolean busy) {
+        addRowButton.setEnabled(!busy);
+        deleteRowsButton.setEnabled(!busy);
+        discardButton.setEnabled(!busy);
+        saveChangesButton.setEnabled(!busy);
+    }
+
+    /**
+     * Atualiza o rotulo de pendencias e o habilitar/desabilitar dos botoes de
+     * edicao — chamado sempre que {@link GridEditController} muda (edicao,
+     * insercao, marca/desmarca exclusao) e quando a selecao da grade muda
+     * (para {@code Excluir linha(s)}).
+     */
+    void updatePendingState(int pendingCount, boolean hasSelection) {
+        pendingLabel.setText(pendingCount > 0 ? pendingCount + " alteracao(oes) pendente(s)" : "");
+        saveChangesButton.setEnabled(pendingCount > 0);
+        discardButton.setEnabled(pendingCount > 0);
+        deleteRowsButton.setEnabled(hasSelection);
+    }
+
     /** Atualiza o texto de contagem/tempos e mostra/esconde os botoes de paginacao. */
     void refresh(int rowCount, long execMs, long fetchMs, boolean hasMore) {
         info.setText(rowCount + " linha(s)" + (hasMore ? "+" : "")
@@ -90,5 +193,69 @@ final class ResultStatusBar {
                 + "   ·   busca " + fetchMs + " ms");
         loadMoreButton.setVisible(hasMore);
         loadAllButton.setVisible(hasMore);
+    }
+
+    /**
+     * Atualiza o resumo de selecao ("N selecionada(s) · Soma: X") — chamado
+     * pela {@link ResultGrid} sempre que a selecao de celulas muda (ver
+     * {@code MainWindow#buildGridPanel}, que liga os dois). Pedido explicito
+     * do usuario: selecionar N celulas soma so essas N; selecionar a coluna
+     * inteira soma a coluna inteira — igual a barra de status do Excel.
+     *
+     * {@code count <= 1} nao mostra nada: com uma unica celula selecionada o
+     * proprio valor ja esta visivel na grade, um "1 selecionada" fixo so
+     * seria ruido durante a navegacao normal (mesmo comportamento do Excel).
+     *
+     * @param sum {@code null} quando nenhum valor numerico entra na selecao
+     *            (texto/nulos/datas) — nesse caso mostra so a contagem.
+     */
+    void updateSelectionSummary(int count, java.math.BigDecimal sum) {
+        lastSum = sum;
+        if (count <= 1) {
+            selectionSummary.setText("");
+            selectionSummary.setToolTipText(null);
+            selectionSummary.setCursor(Cursor.getDefaultCursor());
+            return;
+        }
+        String text = count + " selecionada(s)";
+        if (sum != null) {
+            text += "   ·   Soma: " + formatSum(sum);
+            selectionSummary.setToolTipText("Clique para copiar a soma");
+            selectionSummary.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        } else {
+            selectionSummary.setToolTipText(null);
+            selectionSummary.setCursor(Cursor.getDefaultCursor());
+        }
+        selectionSummary.setText(text);
+    }
+
+    /**
+     * Copia so o NUMERO da soma (sem "N selecionada(s) ·" na frente) pra
+     * area de transferencia, com um retorno visual rapido de confirmacao —
+     * chamado pelo clique em {@link #selectionSummary}. Sem efeito quando a
+     * selecao atual nao tem soma (texto/vazio): nada para copiar.
+     */
+    private void copySum() {
+        if (lastSum == null) {
+            return;
+        }
+        GridClipboard.setClipboard(formatSum(lastSum));
+        String original = selectionSummary.getText();
+        selectionSummary.setText("Soma copiada!");
+        Timer revert = new Timer(900, e -> {
+            if (lastSum != null) {
+                selectionSummary.setText(original);
+            }
+        });
+        revert.setRepeats(false);
+        revert.start();
+    }
+
+    /** Sem casas decimais artificiais (1500 fica "1500", nao "1500,00") mas sem perder as que existirem de fato. */
+    private static String formatSum(java.math.BigDecimal sum) {
+        java.math.BigDecimal stripped = sum.stripTrailingZeros();
+        // stripTrailingZeros() pode devolver notacao cientifica para
+        // inteiros grandes (ex.: 1E+2) — toPlainString() sempre expande.
+        return stripped.toPlainString();
     }
 }

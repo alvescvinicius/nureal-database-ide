@@ -6,6 +6,7 @@ import javax.swing.JPanel;
 import javax.swing.JTable;
 import javax.swing.SortOrder;
 import javax.swing.SwingConstants;
+import javax.swing.border.Border;
 import javax.swing.table.JTableHeader;
 import javax.swing.table.TableCellRenderer;
 import java.awt.BorderLayout;
@@ -57,14 +58,23 @@ final class ColumnHeaderRenderer implements TableCellRenderer {
     private final JLabel upArrow = new JLabel("▲", SwingConstants.CENTER);   // ▲
     private final JLabel downArrow = new JLabel("▼", SwingConstants.CENTER); // ▼
 
+    private final Border normalBorder = BorderFactory.createCompoundBorder(
+            BorderFactory.createMatteBorder(0, 0, 2, 1, GridTheme.HEADER_BORDER),
+            BorderFactory.createEmptyBorder(5, 10, 5, 10));
+    /** Borda usada na coluna "encontrada" (ver {@link #setHighlight}) — mesmo espaco interno, so a cor muda. */
+    private final Border highlightBorder = BorderFactory.createCompoundBorder(
+            BorderFactory.createMatteBorder(0, 0, 2, 1, GridTheme.HEADER_HIGHLIGHT_BORDER),
+            BorderFactory.createEmptyBorder(5, 10, 5, 10));
+
+    /** Indice de MODELO da coluna marcada pela busca (ver {@link ResultGrid#highlightSelectedColumn}), ou -1 se nenhuma. */
+    private int highlightModelColumn = -1;
+
     ColumnHeaderRenderer(ColumnSorter sorter) {
         this.sorter = sorter;
 
         panel.setOpaque(true);
         panel.setBackground(GridTheme.HEADER_BACKGROUND);
-        panel.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(0, 0, 2, 1, GridTheme.HEADER_BORDER),
-                BorderFactory.createEmptyBorder(5, 10, 5, 10)));
+        panel.setBorder(normalBorder);
 
         nameLabel.setForeground(GridTheme.HEADER_FOREGROUND);
         nameLabel.setHorizontalAlignment(SwingConstants.LEFT);
@@ -90,6 +100,10 @@ final class ColumnHeaderRenderer implements TableCellRenderer {
         int modelColumn = table.getColumnModel().getColumn(viewColumn).getModelIndex();
         applySortIndicator(modelColumn);
 
+        boolean highlighted = highlightModelColumn >= 0 && modelColumn == highlightModelColumn;
+        panel.setBackground(highlighted ? GridTheme.HEADER_HIGHLIGHT_BACKGROUND : GridTheme.HEADER_BACKGROUND);
+        panel.setBorder(highlighted ? highlightBorder : normalBorder);
+
         Integer height = null;
         JTableHeader header = table.getTableHeader();
         if (header != null) {
@@ -99,6 +113,15 @@ final class ColumnHeaderRenderer implements TableCellRenderer {
             panel.setPreferredSize(new Dimension(panel.getPreferredSize().width, height));
         }
         return panel;
+    }
+
+    /**
+     * Marca (ou limpa, com {@code -1}) a coluna "encontrada" pela busca de
+     * coluna do {@link ResultGrid} — quem chama e responsavel por pedir o
+     * repaint do cabecalho depois (o renderer nao guarda referencia a ele).
+     */
+    void setHighlight(int modelColumn) {
+        this.highlightModelColumn = modelColumn;
     }
 
     /**

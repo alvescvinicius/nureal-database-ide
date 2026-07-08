@@ -10,6 +10,7 @@ import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * Persiste a sessao do editor por CONEXAO (workspace): cada conexao guarda suas
@@ -42,8 +43,8 @@ public class SessionStore {
         return file;
     }
 
-    /** Uma aba salva: titulo + SQL completo. */
-    public record Tab(String title, String sql) {
+    /** Uma aba salva: titulo + SQL completo + id estavel (usado p/ religar resultados). */
+    public record Tab(String title, String sql, String id) {
     }
 
     /** A sessao de uma conexao: abas + indice da aba selecionada. */
@@ -63,6 +64,7 @@ public class SessionStore {
         List<Tab> tabs = new ArrayList<>();
         String title = null;
         String sql = null;
+        String id = null;
 
         for (String raw : lines) {
             String line = raw.strip();
@@ -70,18 +72,20 @@ public class SessionStore {
                 continue;
             }
             if (line.equals(CONN_HEADER)) {
-                flush(result, connName, tabs, title, sql, selected);
+                flush(result, connName, tabs, title, sql, id, selected);
                 connName = "";
                 selected = 0;
                 tabs = new ArrayList<>();
                 title = null;
                 sql = null;
+                id = null;
                 continue;
             }
             if (line.equals(TAB_HEADER)) {
-                addTab(tabs, title, sql);
+                addTab(tabs, title, sql, id);
                 title = "SQL Query";
                 sql = "";
+                id = null;
                 continue;
             }
             int eq = line.indexOf('=');
@@ -95,28 +99,34 @@ public class SessionStore {
                 case "selected" -> selected = parseInt(value.trim());
                 case "title" -> title = value.trim();
                 case "sql" -> sql = decode(value.trim());
+                case "id" -> id = value.trim();
                 default -> {
                     // ignora chaves desconhecidas
                 }
             }
         }
-        flush(result, connName, tabs, title, sql, selected);
+        flush(result, connName, tabs, title, sql, id, selected);
         return result;
     }
 
     private static void flush(Map<String, Session> result, String connName,
-            List<Tab> tabs, String title, String sql, int selected) {
+            List<Tab> tabs, String title, String sql, String id, int selected) {
         if (connName == null) {
             return;
         }
-        addTab(tabs, title, sql);
+        addTab(tabs, title, sql, id);
         int sel = (selected < 0 || selected >= tabs.size()) ? 0 : selected;
         result.put(connName, new Session(new ArrayList<>(tabs), sel));
     }
 
-    private static void addTab(List<Tab> tabs, String title, String sql) {
+    private static void addTab(List<Tab> tabs, String title, String sql, String id) {
         if (title != null) {
-            tabs.add(new Tab(title, sql == null ? "" : sql));
+            // Sessoes salvas ANTES desta versao nao tem "id=" no bloco [tab] (id
+            // fica null aqui) — geramos um UUID novo na hora, para a aba ganhar
+            // uma identidade estavel a partir de agora (persistida na proxima
+            // gravacao). Sessoes ja migradas simplesmente reutilizam o id salvo.
+            String tabId = (id == null || id.isBlank()) ? UUID.randomUUID().toString() : id;
+            tabs.add(new Tab(title, sql == null ? "" : sql, tabId));
         }
     }
 
@@ -140,6 +150,7 @@ public class SessionStore {
                 sb.append(TAB_HEADER).append('\n');
                 sb.append("title=").append(nullToEmpty(t.title())).append('\n');
                 sb.append("sql=").append(encode(nullToEmpty(t.sql()))).append('\n');
+                sb.append("id=").append(nullToEmpty(t.id())).append('\n');
             }
             sb.append('\n');
         }

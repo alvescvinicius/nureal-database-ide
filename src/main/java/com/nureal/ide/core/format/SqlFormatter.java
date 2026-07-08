@@ -11,10 +11,14 @@ import java.util.Set;
 /**
  * Formatador (beautifier) de SQL com 3 presets de estilo:
  *
- *  - RIVER (padrao Oracle / PL-SQL Developer): clausulas alinhadas a
- *    direita, formando uma "coluna invisivel" onde o conteudo comeca.
- *  - STANDARD (indentado por tab/espacos): a clausula fica sozinha na
- *    linha, o conteudo vem indentado embaixo.
+ *  - RIVER: clausulas alinhadas a direita, formando uma "coluna invisivel"
+ *    onde o conteudo comeca (estilo classico de ferramentas como PL/SQL
+ *    Developer / Toad).
+ *  - STANDARD (o mais usado no mercado — DataGrip, DBeaver, pgAdmin):
+ *    clausulas de lista (SELECT, GROUP/ORDER BY, SET, VALUES, RETURNING)
+ *    ficam sozinhas na linha com cada item indentado embaixo; clausulas de
+ *    valor unico (FROM, JOIN, WHERE, LIMIT...) mantem o 1o valor/condicao
+ *    na mesma linha da palavra-chave.
  *  - COMMA_FIRST (virgulas na frente): em listas (SELECT, GROUP/ORDER BY,
  *    SET), a virgula fica no inicio da linha seguinte, antes do campo.
  *
@@ -457,14 +461,10 @@ public final class SqlFormatter {
                         pendingListItem = false;
                     }
                     placeWord(t);
-                    // Quando esta foi a ULTIMA palavra do JOIN (a proxima nao e mais
-                    // "inner/left/outer/join/..."), o que vem a seguir e o conteudo
-                    // (nome da tabela): so agora pedimos a quebra, no STANDARD.
-                    boolean nextIsJoinWord = next != null && next.type() == T.WORD
-                            && JOIN_WORDS.contains(next.text().toLowerCase(Locale.ROOT));
-                    if (!nextIsJoinWord && style == Style.STANDARD) {
-                        pendingContentBreak = true;
-                    }
+                    // O nome da tabela do JOIN fica na mesma linha da keyword
+                    // (ex.: "INNER JOIN pedidos p ON ..."), sem quebra — igual
+                    // ao FROM. Antes, o STANDARD forcava uma quebra aqui,
+                    // jogando o nome da tabela pra uma 3a linha sem necessidade.
                     return idx + 1;
                 }
                 if (low.equals("on")) {
@@ -610,7 +610,19 @@ public final class SqlFormatter {
                 }
                 case STANDARD -> {
                     plainLine(phrase, 0);
-                    pendingContentBreak = true;
+                    // Antes, TODA clausula (inclusive FROM/WHERE/LIMIT, que tem
+                    // um unico valor) quebrava a clausula sozinha numa linha e
+                    // jogava o conteudo pra linha seguinte — "FROM\n    tabela"
+                    // em vez de "FROM tabela". Igual ao COMMA_FIRST: so listas
+                    // de verdade (SELECT, GROUP/ORDER BY, SET, VALUES,
+                    // RETURNING) quebram; o resto mantem o 1o valor na mesma
+                    // linha da clausula, que e o padrao usado pela maioria das
+                    // IDEs de banco (DataGrip, DBeaver, pgAdmin).
+                    if (listBearing) {
+                        pendingContentBreak = true;
+                    } else {
+                        currentLineIndent = 0;
+                    }
                 }
                 case COMMA_FIRST -> {
                     if (listBearing) {

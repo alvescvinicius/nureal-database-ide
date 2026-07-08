@@ -12,9 +12,15 @@ import java.util.Deque;
 import java.util.List;
 
 /**
- * Folding (expandir/recolher) para SQL: recolhe blocos entre parenteses que
- * ocupem mais de uma linha (subconsultas, listas, argumentos) e comentarios de
- * bloco multi-linha. Strings e comentarios sao ignorados na varredura.
+ * Folding (expandir/recolher) para SQL: recolhe (1) cada instrucao completa
+ * (terminada em {@code ;}, ou a ultima do arquivo sem {@code ;} final) que
+ * ocupe mais de uma linha — recolhida, mostra so a 1a linha da instrucao;
+ * expandida, mostra tudo de novo, e isso vale mesmo com varias instrucoes no
+ * mesmo editor, cada uma com seu proprio +/- na margem; (2) blocos entre
+ * parenteses que ocupem mais de uma linha (subconsultas, listas, argumentos),
+ * aninhados dentro da instrucao a que pertencem; e (3) comentarios de bloco
+ * multi-linha. Strings e comentarios de linha sao ignorados na varredura (um
+ * {@code ;} dentro deles nunca conta como fim de instrucao).
  */
 public final class SqlFoldParser implements FoldParser {
 
@@ -51,13 +57,18 @@ public final class SqlFoldParser implements FoldParser {
         return folds;
     }
 
-    /** {inicio, fim, tipoFold} de cada bloco multi-linha (parenteses e /* *&#47;). */
+    /** {inicio, fim, tipoFold} de cada bloco multi-linha (instrucoes, parenteses e /* *&#47;). */
     private static List<int[]> collectRanges(String s) {
         List<int[]> ranges = new ArrayList<>();
         Deque<int[]> parens = new ArrayDeque<>(); // {offset, linha}
         int i = 0;
         int n = s.length();
         int line = 0;
+        // Instrucao SQL "atual": offset/linha do seu 1o caractere nao-branco,
+        // ate encontrar um ";" no nivel 0 de parenteses (ou o fim do
+        // arquivo). -1 = nenhuma instrucao em andamento no momento.
+        int stmtStart = -1;
+        int stmtStartLine = -1;
         while (i < n) {
             char c = s.charAt(i);
             if (c == '\n') {
@@ -115,6 +126,14 @@ public final class SqlFoldParser implements FoldParser {
                 continue;
             }
             if (c == '(') {
+                // cobre o caso raro de uma instrucao comecar direto com "("
+                // (ex.: "(SELECT 1) UNION (SELECT 2);") — sem isto, o inicio
+                // da instrucao so seria marcado no 1o caractere DEPOIS do
+                // bloco de parenteses.
+                if (stmtStart < 0) {
+                    stmtStart = i;
+                    stmtStartLine = line;
+                }
                 parens.push(new int[] {i, line});
                 i++;
                 continue;
@@ -129,7 +148,28 @@ public final class SqlFoldParser implements FoldParser {
                 i++;
                 continue;
             }
+            if (!Character.isWhitespace(c) && stmtStart < 0) {
+                stmtStart = i;
+                stmtStartLine = line;
+            }
+            if (c == ';' && parens.isEmpty() && stmtStart >= 0) {
+                if (line > stmtStartLine) {
+                    ranges.add(new int[] {stmtStart, i, FoldType.CODE});
+                }
+                stmtStart = -1;
+            }
             i++;
+        }
+        // ultima instrucao do arquivo, se nao terminar em ";"
+        if (stmtStart >= 0) {
+            int end = n - 1;
+            while (end > stmtStart && Character.isWhitespace(s.charAt(end))) {
+                end--;
+            }
+            int nl = s.indexOf('\n', stmtStart);
+            if (end > stmtStart && nl >= 0 && nl <= end) {
+                ranges.add(new int[] {stmtStart, end, FoldType.CODE});
+            }
         }
         return ranges;
     }

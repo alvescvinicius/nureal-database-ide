@@ -5,7 +5,10 @@ import java.util.Vector;
 import javax.swing.table.DefaultTableModel;
 
 /**
- * Modelo de tabela somente leitura utilizado pela grade de resultados.
+ * Modelo de tabela usado pela grade de resultados — somente leitura por
+ * padrao, mas pode virar editavel (ver {@link GridEditController} /
+ * {@link #setEditController}) quando o resultado vem de um SELECT simples de
+ * uma unica tabela com chave primaria conhecida.
  *
  * Alem dos dados propriamente ditos, mantem os metadados de cada coluna
  * disponiveis SEM round-trip extra ao banco — tudo que
@@ -39,6 +42,15 @@ public final class ResultTableModel extends DefaultTableModel {
     private final transient String[] realColumnNames;
     private final transient String[] sqlTypeNames;
     private final transient ColumnJdbcMeta[] jdbcMeta;
+
+    /**
+     * Controlador de edicao (ver {@link GridEditController}), instalado por
+     * {@link ResultGrid} logo apos criar o modelo. {@code null} (ou com
+     * {@code isEditable() == false}) mantem a grade somente-leitura, como
+     * sempre foi — {@link #isCellEditable} delega para ele em vez de um
+     * {@code return false} fixo.
+     */
+    private transient GridEditController editController;
 
     /**
      * Metadados de coluna disponiveis diretamente pelo JDBC no momento da
@@ -76,9 +88,17 @@ public final class ResultTableModel extends DefaultTableModel {
         this.jdbcMeta = (jdbcMeta != null) ? jdbcMeta : new ColumnJdbcMeta[columnTypes.length];
     }
 
+    void setEditController(GridEditController editController) {
+        this.editController = editController;
+    }
+
+    GridEditController editController() {
+        return editController;
+    }
+
     @Override
     public boolean isCellEditable(int row, int column) {
-        return false;
+        return editController != null && editController.isCellEditable(row, column);
     }
 
     @Override

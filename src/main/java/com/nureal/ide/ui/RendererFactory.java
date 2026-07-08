@@ -74,10 +74,11 @@ final class RendererFactory {
     /**
      * Classifica a coluna em um dos 6 grupos. Prioridade: tipos
      * temporais/binarios/logicos pelo NOME DO TIPO SQL primeiro
-     * (inequivocos); depois o nome da coluna para identificadores (id/_id/
-     * uuid/guid — vale mesmo para colunas numericas OU texto, ja que UUID
-     * costuma vir como CHAR/VARCHAR); por fim numericos pelo tipo SQL, com
-     * fallback pela classe Java quando o tipo SQL nao estiver disponivel.
+     * (inequivocos); depois o nome da coluna para identificadores, mas com
+     * duas regras DIFERENTES conforme o sinal do nome (ver
+     * {@link #isUuidName}/{@link #isGenericIdName} abaixo); por fim
+     * numericos pelo tipo SQL, com fallback pela classe Java quando o tipo
+     * SQL nao estiver disponivel.
      */
     static Group classify(String sqlType, Class<?> cls, String columnName) {
         String type = normalizeType(sqlType);
@@ -97,16 +98,33 @@ final class RendererFactory {
         if (name.contains("status")) {
             return Group.LOGICAL;
         }
-        if (isIdentifierName(name)) {
+
+        boolean numericType = !type.isEmpty() && startsWithAny(type, NUMERIC_PREFIXES);
+        boolean numericClass = Number.class.isAssignableFrom(cls);
+
+        // "uuid"/"guid" no nome: sinal inequivoco de identificador opaco
+        // independente do tipo fisico de armazenamento (muitos bancos
+        // guardam UUID como CHAR/VARCHAR mesmo).
+        if (isUuidName(name)) {
             return Group.IDENTIFIER;
         }
-        if (!type.isEmpty() && startsWithAny(type, NUMERIC_PREFIXES)) {
+        // "id"/"*_id" no nome: SO conta como identificador de verdade quando
+        // o valor tambem E numerico (autoincrement/chave de verdade). Uma
+        // coluna "*_id" armazenada como TEXTO PURO (VARCHAR/CHAR/TEXT) e sem
+        // cara de UUID e, na pratica, quase sempre um identificador de
+        // NEGOCIO/externo (ex.: client_order_id copiado de outro sistema) —
+        // nao uma chave desta tabela — entao cai no fluxo normal abaixo e
+        // termina classificada como TEXTUAL, igual qualquer outra coluna de
+        // texto. Pedido explicito do usuario: uma "*_id" que e texto e nem
+        // faz parte da chave da tabela deve ser tratada como texto normal,
+        // nao ganhar o destaque/alinhamento de identificador so pelo nome.
+        if (isGenericIdName(name) && (numericType || numericClass)) {
+            return Group.IDENTIFIER;
+        }
+        if (numericType || numericClass) {
             return Group.NUMERIC;
         }
         // Fallback pela classe Java quando o nome do tipo SQL nao ajudou.
-        if (Number.class.isAssignableFrom(cls)) {
-            return Group.NUMERIC;
-        }
         if (isTemporalClass(cls)) {
             return Group.TEMPORAL;
         }
@@ -116,9 +134,12 @@ final class RendererFactory {
         return Group.TEXTUAL;
     }
 
-    private static boolean isIdentifierName(String lowerCaseName) {
-        return lowerCaseName.equals("id") || lowerCaseName.endsWith("_id")
-                || lowerCaseName.contains("uuid") || lowerCaseName.contains("guid");
+    private static boolean isGenericIdName(String lowerCaseName) {
+        return lowerCaseName.equals("id") || lowerCaseName.endsWith("_id");
+    }
+
+    private static boolean isUuidName(String lowerCaseName) {
+        return lowerCaseName.contains("uuid") || lowerCaseName.contains("guid");
     }
 
     private static boolean isTemporalClass(Class<?> cls) {

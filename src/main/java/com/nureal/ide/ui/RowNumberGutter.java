@@ -14,6 +14,7 @@ import java.awt.Cursor;
 import java.awt.Font;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.awt.event.MouseMotionAdapter;
 
 /**
  * Coluna fixa (gutter) com o numero de cada linha, a esquerda da grade, e o
@@ -70,15 +71,39 @@ final class RowNumberGutter {
         }
         table.getSelectionModel().addListSelectionListener(e -> list.repaint());
 
+        // Ancora do arrasto "estilo Excel" (clicar na numeracao e arrastar
+        // pra cima/baixo estende a selecao por todas as linhas no caminho,
+        // ao vivo — mesmo padrao usado no cabecalho para colunas, ver
+        // ResultTableHeader). -1 = nenhum arrasto em andamento; so comeca a
+        // partir de um clique SIMPLES (sem Ctrl/Shift, que ja tem seu
+        // proprio significado e nao encadeiam com arrasto aqui).
+        int[] dragAnchorRow = { -1 };
+
         list.addMouseListener(new MouseAdapter() {
             @Override
             public void mousePressed(MouseEvent e) {
                 int row = list.locationToIndex(e.getPoint());
                 if (row < 0 || table.getColumnCount() == 0) {
+                    dragAnchorRow[0] = -1;
                     return;
                 }
                 table.requestFocusInWindow();
                 selection.selectRow(row, e.isControlDown(), e.isShiftDown());
+                table.scrollRectToVisible(table.getCellRect(row, 0, true));
+                dragAnchorRow[0] = (e.isControlDown() || e.isShiftDown()) ? -1 : row;
+            }
+        });
+        list.addMouseMotionListener(new MouseMotionAdapter() {
+            @Override
+            public void mouseDragged(MouseEvent e) {
+                if (dragAnchorRow[0] < 0) {
+                    return;
+                }
+                int row = list.locationToIndex(e.getPoint());
+                if (row < 0) {
+                    return;
+                }
+                selection.selectRow(row, false, true); // true = estende da ancora (dragAnchorRow) ate aqui
                 table.scrollRectToVisible(table.getCellRect(row, 0, true));
             }
         });

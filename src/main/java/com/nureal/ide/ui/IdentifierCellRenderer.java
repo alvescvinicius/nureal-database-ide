@@ -7,17 +7,25 @@ import javax.swing.SwingConstants;
 /**
  * Colunas identificadoras (id, *_id, uuid/guid): laranja forte.
  *
- * Alinhamento depende do FORMATO do valor, nao so do grupo: um ID numerico
- * autoincrementado (1, 2, 42...) alinha a direita, como qualquer numero —
- * mas um UUID/GUID (texto opaco de 32+ caracteres) alinha a ESQUERDA, porque
- * nao e um numero comparavel e right-align so confundiria a leitura.
+ * Alinhamento depende do TIPO REAL do valor (o que o JDBC devolveu), nao do
+ * GRUPO nem da aparencia do texto: um ID genuinamente numerico (a coluna e
+ * INT/BIGINT/... de verdade, e o driver devolve um {@link Number}) alinha a
+ * direita, como qualquer numero — qualquer outra coisa (String, mesmo que
+ * seja so digitos como "3" ou "00042", UUID, etc.) alinha a ESQUERDA, como
+ * texto.
+ *
+ * Importante nao decidir isso pelo "formato" do texto (ex.: "parece um
+ * numero curto" vs "parece um hash longo"): uma coluna VARCHAR cujas
+ * primeiras linhas so tem digitos (ex.: {@code client_order_id} com valores
+ * "3", "42"...) NAO e numerica so porque o conteudo de hoje parece um
+ * numero — o BANCO diz que e texto, entao o alinhamento/estilo tem que
+ * seguir o texto, nao adivinhar pelo valor. Foi exatamente esse o bug
+ * relatado: uma coluna VARCHAR alinhada/parecendo numero so pq os valores
+ * de exemplo eram digitos curtos.
  */
 final class IdentifierCellRenderer extends AbstractTypedCellRenderer {
 
     private static final long serialVersionUID = 1L;
-
-    /** Textos com esta quantidade de caracteres ou mais sao tratados como UUID/hash opaco, nao numero. */
-    private static final int OPAQUE_ID_MIN_LENGTH = 20;
 
     @Override
     int alignment(Object value) {
@@ -29,10 +37,8 @@ final class IdentifierCellRenderer extends AbstractTypedCellRenderer {
         return GridTheme.COLOR_IDENTIFIER;
     }
 
+    /** Opaco (alinha a esquerda, como texto) = qualquer coisa que NAO seja um numero de verdade. */
     private static boolean isOpaqueIdentifier(Object value) {
-        if (value instanceof java.util.UUID) {
-            return true;
-        }
-        return value instanceof String s && s.length() >= OPAQUE_ID_MIN_LENGTH;
+        return !(value instanceof Number);
     }
 }

@@ -34,6 +34,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.Vector;
 import java.util.concurrent.CancellationException;
 import java.util.function.BiConsumer;
@@ -102,6 +103,7 @@ import com.nureal.ide.core.metadata.model.ColumnInfo;
 import com.nureal.ide.core.metadata.model.ForeignKeyInfo;
 import com.nureal.ide.core.metadata.model.IndexInfo;
 import com.nureal.ide.core.metadata.model.SchemaInfo;
+import com.nureal.ide.core.metadata.model.NewTableSpec;
 import com.nureal.ide.core.metadata.model.TableDetails;
 import com.nureal.ide.core.metadata.model.TableInfo;
 import com.nureal.ide.core.queries.SavedQueryStore;
@@ -131,10 +133,16 @@ public class MainWindow extends JFrame {
 	private static final String SCRATCH = "(sem conexao)";
 
 	private final DatabaseDialect dialect = new MySqlDialect();
-	/** Aponta SEMPRE para a conexao do workspace ativo (trocada ao alternar). */
-	private ConnectionManager connectionManager = new ConnectionManager(dialect);
-	private final Map<String, Workspace> workspaces = new LinkedHashMap<>();
-	private Workspace activeWorkspace;
+	/**
+	 * Usado SO para criar a conexao SCRATCH em {@code initWorkspaces()}, antes
+	 * de {@code activeWorkspace} existir — depois disso, {@code activeWorkspace}
+	 * nunca mais fica null pelo resto da vida da janela, entao {@link #connectionManager()}
+	 * sempre devolve {@code activeWorkspace.mgr} a partir dai. Nao usar
+	 * diretamente fora de {@code initWorkspaces()}.
+	 */
+	private final ConnectionManager bootstrapConnectionManager = new ConnectionManager(dialect);
+	private final Map<String, Conexao> workspaces = new LinkedHashMap<>();
+	private Conexao activeWorkspace;
 	private Map<String, SessionStore.Session> savedSessions = new LinkedHashMap<>();
 	private final MetadataService metadataService = new MetadataService(dialect);
 	private final MetadataCache metadataCache = new MetadataCache();
@@ -169,6 +177,7 @@ public class MainWindow extends JFrame {
 	private ConnectionsPanel connectionsPanel;
 	private SavedQueriesPanel savedQueriesPanel;
 	private JTextField objectSearch;
+	/** Esquema selecionado na conexao ativa — so escrever via {@link #setCurrentSchema}. */
 	private SchemaInfo currentSchema;
 	private JLabel statusBar;
 	private JLabel connStatusLabel;
@@ -536,9 +545,9 @@ public class MainWindow extends JFrame {
 
 		menu.add(formatMenuHeader("Presets"));
 		ButtonGroup presets = new ButtonGroup();
-		menu.add(presetItem(presets, SqlFormatter.Style.RIVER, "Oracle (Alinhado a direita)"));
-		menu.add(presetItem(presets, SqlFormatter.Style.STANDARD, "Standard (Indentado por tab)"));
-		menu.add(presetItem(presets, SqlFormatter.Style.COMMA_FIRST, "Commas First (Virgulas no inicio)"));
+		menu.add(presetItem(presets, SqlFormatter.Style.STANDARD, "Padrao (recomendado)"));
+		menu.add(presetItem(presets, SqlFormatter.Style.COMMA_FIRST, "Virgula no inicio da linha"));
+		menu.add(presetItem(presets, SqlFormatter.Style.RIVER, "Alinhado a direita (estilo classico)"));
 
 		menu.addSeparator();
 		menu.add(formatMenuHeader("Configuracoes"));
@@ -1120,10 +1129,17 @@ public class MainWindow extends JFrame {
 		refreshObjectsButton.setToolTipText("Atualizar objetos (Ctrl+R)");
 		refreshObjectsButton.addActionListener(e -> refreshObjectTree(true));
 
+		JButton createSchemaButton = new JButton(Icons.get(IconType.NEW, 13, MUTED));
+		createSchemaButton.setBorderPainted(false);
+		createSchemaButton.setContentAreaFilled(false);
+		createSchemaButton.setToolTipText("Criar esquema...");
+		createSchemaButton.addActionListener(e -> createSchema());
+
 		JPanel headerButtons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
 		headerButtons.setOpaque(false);
 		headerButtons.add(switchSchemaButton);
 		headerButtons.add(refreshObjectsButton);
+		headerButtons.add(createSchemaButton);
 
 		JPanel headerRow = new JPanel(new BorderLayout());
 		headerRow.setOpaque(false);
@@ -1224,14 +1240,26 @@ public class MainWindow extends JFrame {
 		return false;
 	}
 
+	/** Abre uma aba NOVA (id gerado agora) — usado por "+", "abrir query salva" etc. */
 	private boolean addQueryTab(String title, String sql) {
+		return addQueryTab(title, sql, UUID.randomUUID().toString());
+	}
+
+	/**
+	 * Abre uma aba com o id ESPECIFICADO — usado ao restaurar uma aba salva em
+	 * disco/{@code Conexao#tabs} (ver {@code rebuildEditorTabs}), para que a
+	 * nova instancia de SqlEditorPane reutilize o mesmo id da aba original e
+	 * assim religue corretamente aos resultados salvos em
+	 * {@code Conexao#tabResults} (indexados por esse id).
+	 */
+	private boolean addQueryTab(String title, String sql, String tabId) {
 		if (realTabCount() >= MAX_TABS) {
 			if (statusBar != null) {
 				statusBar.setText(" Limite de " + MAX_TABS + " abas atingido.");
 			}
 			return false;
 		}
-		SqlEditorPane pane = new SqlEditorPane(completionProvider, this::onRun, this::currentSqlFormatter,
+		SqlEditorPane pane = new SqlEditorPane(tabId, completionProvider, this::onRun, this::currentSqlFormatter,
 				formatState.editorFontFamily());
 		pane.textArea().setText(sql);
 		pane.textArea().setCaretPosition(0);
@@ -1413,7 +1441,7 @@ public class MainWindow extends JFrame {
 			AppLogger.warning("Falha ao carregar sessoes salvas; iniciando vazio", ex);
 			savedSessions = new LinkedHashMap<>();
 		}
-		Workspace scratch = new Workspace(SCRATCH, null, connectionManager);
+		Conexao scratch = new Conexao(SCRATCH, null, bootstrapConnectionManager);
 		SessionStore.Session sc = savedSessions.get(SCRATCH);
 		if (sc != null) {
 			scratch.tabs = new ArrayList<>(sc.tabs());
@@ -1430,12 +1458,12 @@ public class MainWindow extends JFrame {
 	/**
 	 * Reconstroi as abas do editor a partir do conteudo salvo (titulo + SQL)
 	 * e restaura os resultados de cada uma, se houver (ver
-	 * {@code Workspace#tabResults}) — usado tanto na inicializacao quanto ao
+	 * {@code Conexao#tabResults}) — usado tanto na inicializacao quanto ao
 	 * trocar de workspace/conexao (ver {@code activateWorkspace}): trocar de
 	 * conexao e voltar tem que devolver os resultados que cada aba tinha
 	 * antes da troca, nao uma tela vazia.
 	 */
-	private void rebuildEditorTabs(List<SessionStore.Tab> tabs, int selected, Map<Integer, List<QueryResult>> savedResults) {
+	private void rebuildEditorTabs(List<SessionStore.Tab> tabs, int selected, Map<String, List<QueryResult>> savedResults) {
 		// As abas antigas (de outro workspace/conexao, ou recarregadas do
 		// disco) vao ser descartadas e substituidas por instancias NOVAS de
 		// SqlEditorPane (mesmo titulo/SQL, objeto diferente) — os resultados
@@ -1457,29 +1485,27 @@ public class MainWindow extends JFrame {
 		} else {
 			for (SessionStore.Tab t : tabs) {
 				String title = (t.title() == null || t.title().isBlank()) ? nextQueryTitle() : t.title();
-				addQueryTab(title, t.sql());
+				addQueryTab(title, t.sql(), t.id());
 			}
 		}
 		addPlusTab();
-		// Restaura os resultados salvos (indexados por POSICAO da aba, ver
-		// Workspace#tabResults) nas instancias NOVAS de SqlEditorPane recem
+		// Restaura os resultados salvos (indexados pelo ID ESTAVEL da aba, ver
+		// Conexao#tabResults) nas instancias NOVAS de SqlEditorPane recem
 		// criadas acima — tem que ser DEPOIS de cria-las (para termos as
 		// instancias certas como chave) e ANTES do showResultsForActiveEditor
-		// no final (para ele ja encontrar o resultado, se houver).
+		// no final (para ele ja encontrar o resultado, se houver). Como cada
+		// pane foi criado acima com addQueryTab(title, sql, t.id()), seu
+		// tabId() e igual ao id salvo — a busca e direta, sem depender de
+		// posicao/ordem das abas.
 		if (savedResults != null && !savedResults.isEmpty()) {
-			int tabIndex = 0;
 			for (int i = 0; i < editorTabs.getTabCount(); i++) {
 				Component c = editorTabs.getComponentAt(i);
-				if (c == plusTab) {
-					continue;
-				}
 				if (c instanceof SqlEditorPane sep) {
-					List<QueryResult> saved = savedResults.get(tabIndex);
+					List<QueryResult> saved = savedResults.get(sep.tabId());
 					if (saved != null) {
 						resultsByTab.put(sep, saved);
 					}
 				}
-				tabIndex++;
 			}
 		}
 		if (selected >= 0 && selected < editorTabs.getTabCount() && editorTabs.getComponentAt(selected) != plusTab) {
@@ -1499,7 +1525,7 @@ public class MainWindow extends JFrame {
 		for (int i = 0; i < editorTabs.getTabCount(); i++) {
 			Component c = editorTabs.getComponentAt(i);
 			if (c instanceof SqlEditorPane sep) {
-				list.add(new SessionStore.Tab(editorTabs.getTitleAt(i), sep.textArea().getText()));
+				list.add(new SessionStore.Tab(editorTabs.getTitleAt(i), sep.textArea().getText(), sep.tabId()));
 			}
 		}
 		return list;
@@ -1516,14 +1542,13 @@ public class MainWindow extends JFrame {
 
 	/**
 	 * Guarda os resultados ATUAIS de cada aba de SQL (ver resultsByTab),
-	 * indexados por POSICAO (nao pela instancia de SqlEditorPane — ver
-	 * javadoc de {@code Workspace#tabResults}). Chamado ao SAIR de um
-	 * workspace (ver {@code saveActiveTabs}), para que
+	 * indexados pelo ID ESTAVEL da aba (nao pela instancia de SqlEditorPane
+	 * nem pela POSICAO — ver javadoc de {@code Conexao#tabResults}). Chamado
+	 * ao SAIR de um workspace (ver {@code saveActiveTabs}), para que
 	 * {@code rebuildEditorTabs} consiga devolve-los quando o usuario voltar.
 	 */
-	private Map<Integer, List<QueryResult>> snapshotTabResults() {
-		Map<Integer, List<QueryResult>> snapshot = new HashMap<>();
-		int tabIndex = 0;
+	private Map<String, List<QueryResult>> snapshotTabResults() {
+		Map<String, List<QueryResult>> snapshot = new HashMap<>();
 		for (int i = 0; i < editorTabs.getTabCount(); i++) {
 			Component c = editorTabs.getComponentAt(i);
 			if (c == plusTab) {
@@ -1532,10 +1557,9 @@ public class MainWindow extends JFrame {
 			if (c instanceof SqlEditorPane sep) {
 				List<QueryResult> results = resultsByTab.get(sep);
 				if (results != null) {
-					snapshot.put(tabIndex, results);
+					snapshot.put(sep.tabId(), results);
 				}
 			}
-			tabIndex++;
 		}
 		return snapshot;
 	}
@@ -1546,10 +1570,11 @@ public class MainWindow extends JFrame {
 	 * resultados que ele tinha da ultima vez que esteve ativo) e atualiza
 	 * navegador/autocomplete/indicadores.
 	 */
-	private void activateWorkspace(Workspace w) {
+	private void activateWorkspace(Conexao w) {
 		saveActiveTabs();
 		activeWorkspace = w;
-		connectionManager = w.mgr;
+		// Nao precisa mais copiar w.mgr pra um campo separado: connectionManager()
+		// ja devolve activeWorkspace.mgr ao vivo (ver o metodo, logo abaixo).
 		if (savedQueriesPanel != null) {
 			savedQueriesPanel.setActiveConnection(w.profile == null ? null : w.profile.name());
 		}
@@ -1562,7 +1587,7 @@ public class MainWindow extends JFrame {
 			completionProvider.refresh(null);
 			buildSchemaPicker(w.schemaList);
 		} else {
-			currentSchema = null;
+			setCurrentSchema(null);
 			completionProvider.refresh(null);
 			objectSearch.setEnabled(false);
 			String label = (w.profile == null) ? "Sem conexao"
@@ -1574,10 +1599,38 @@ public class MainWindow extends JFrame {
 		focusEditor();
 	}
 
+	/**
+	 * Conexao JDBC da CONEXAO ATIVA (nao mais um campo espelhado e reatribuido
+	 * manualmente a cada troca de workspace — ver {@link #activateWorkspace}):
+	 * le direto de {@code activeWorkspace}, entao nunca corre o risco de ficar
+	 * "desatualizado" em relacao a ele. So cai no {@code bootstrapConnectionManager}
+	 * na janela minuscula ANTES de {@code initWorkspaces()} definir
+	 * {@code activeWorkspace} pela 1a vez (nao deveria acontecer na pratica,
+	 * ja que nada mais roda antes disso, mas evita NPE se algo mudar).
+	 */
+	private ConnectionManager connectionManager() {
+		return (activeWorkspace != null) ? activeWorkspace.mgr : bootstrapConnectionManager;
+	}
+
+	/**
+	 * UNICO ponto de ESCRITA do "esquema atual" ({@link #currentSchema}):
+	 * mantem ele e {@code activeWorkspace.schema} sempre em sincronia num so
+	 * lugar, em vez de cada trecho do codigo ter que lembrar de atualizar os
+	 * dois separadamente (o jeito antigo — risco real de esquecer um dos dois
+	 * e eles divergirem silenciosamente). {@code schema == null} desmarca
+	 * (nenhum esquema selecionado no momento, ex.: workspace sem conexao).
+	 */
+	private void setCurrentSchema(SchemaInfo schema) {
+		currentSchema = schema;
+		if (activeWorkspace != null) {
+			activeWorkspace.schema = schema;
+		}
+	}
+
 	/** Atualiza as bolinhas (conectados) e o indicador de status do rodape. */
 	private void refreshConnectionIndicators() {
 		Set<String> connected = new HashSet<>();
-		for (Workspace w : workspaces.values()) {
+		for (Conexao w : workspaces.values()) {
 			if (w.profile != null && w.mgr.isConnected()) {
 				connected.add(w.name);
 			}
@@ -1606,7 +1659,7 @@ public class MainWindow extends JFrame {
 		}
 		saveActiveTabs();
 		Map<String, SessionStore.Session> sessions = new LinkedHashMap<>();
-		for (Workspace w : workspaces.values()) {
+		for (Conexao w : workspaces.values()) {
 			sessions.put(w.name, new SessionStore.Session(new ArrayList<>(w.tabs), w.selectedTab));
 		}
 		try {
@@ -1860,7 +1913,7 @@ public class MainWindow extends JFrame {
 		final ConnectionProfile target = effective;
 
 		// Ja conectado a essa conexao? Apenas ativa o workspace dela.
-		Workspace existing = workspaces.get(target.name());
+		Conexao existing = workspaces.get(target.name());
 		if (existing != null && existing.mgr.isConnected()) {
 			activateWorkspace(existing);
 			statusBar.setText(" Workspace: " + target.name());
@@ -1873,8 +1926,8 @@ public class MainWindow extends JFrame {
 		statusBar.setText(" Conectando a " + target.host() + "...");
 
 		final boolean pickSchema = target.schema() == null || target.schema().isBlank();
-		final Workspace ws = (existing != null) ? existing
-				: new Workspace(target.name(), target, new ConnectionManager(dialect));
+		final Conexao ws = (existing != null) ? existing
+				: new Conexao(target.name(), target, new ConnectionManager(dialect));
 
 		new SwingWorker<Object, Void>() {
 			@Override
@@ -1935,7 +1988,7 @@ public class MainWindow extends JFrame {
 	 * qual abrir.
 	 */
 	private void disconnectFrom(ConnectionProfile profile) {
-		Workspace w = workspaces.get(profile.name());
+		Conexao w = workspaces.get(profile.name());
 		if (w == null || !w.mgr.isConnected()) {
 			return;
 		}
@@ -1952,7 +2005,7 @@ public class MainWindow extends JFrame {
 		w.schema = null;
 		w.schemaList = null;
 		if (activeWorkspace == w) {
-			currentSchema = null;
+			setCurrentSchema(null);
 			activateWorkspace(w);
 		}
 		refreshConnectionIndicators();
@@ -1961,7 +2014,7 @@ public class MainWindow extends JFrame {
 
 	/** Monta a arvore com a lista de esquemas (duplo-clique abre o esquema). */
 	private void buildSchemaPicker(List<String> schemas) {
-		currentSchema = null;
+		setCurrentSchema(null);
 		objectSearch.setEnabled(false);
 		objectSearch.setText("");
 		DefaultMutableTreeNode root = new DefaultMutableTreeNode(
@@ -1982,7 +2035,7 @@ public class MainWindow extends JFrame {
 		new SwingWorker<SchemaInfo, Void>() {
 			@Override
 			protected SchemaInfo doInBackground() throws Exception {
-				Connection conn = connectionManager.getConnection();
+				Connection conn = connectionManager().getConnection();
 				conn.setCatalog(schemaName); // define o banco padrao (USE schema)
 				return metadataService.loadSchema(conn, schemaName);
 			}
@@ -2044,7 +2097,7 @@ public class MainWindow extends JFrame {
 	}
 
 	private void onRun() {
-		if (!connectionManager.isConnected()) {
+		if (!connectionManager().isConnected()) {
 			statusBar.setText(" Conecte-se a uma base antes de executar.");
 			return;
 		}
@@ -2074,7 +2127,7 @@ public class MainWindow extends JFrame {
 			@Override
 			protected List<QueryResult> doInBackground() {
 				List<QueryResult> results = new ArrayList<>();
-				Connection conn = connectionManager.getConnection();
+				Connection conn = connectionManager().getConnection();
 				for (int i = 0; i < statements.size(); i++) {
 					if (isCancelled()) {
 						break;
@@ -2311,7 +2364,7 @@ public class MainWindow extends JFrame {
 	private JComponent buildGridPanel(QueryResult r) {
 		ResultTableModel model = (ResultTableModel) r.model();
 		String schemaName = (currentSchema != null) ? currentSchema.name() : null;
-		ResultGrid grid = new ResultGrid(model, connectionManager, schemaName, tableMetadataCache,
+		ResultGrid grid = new ResultGrid(model, connectionManager(), schemaName, tableMetadataCache,
 				() -> exportResult(r), this::scaledPx);
 
 		// Nome distinto de propósito do campo MainWindow.statusBar (JLabel do
@@ -2323,9 +2376,179 @@ public class MainWindow extends JFrame {
 		resultStatusBar.onLoadAll(() -> loadAll(r, refresh));
 		resultStatusBar.onExportThis(() -> exportResult(r));
 		resultStatusBar.onExportAll(this::exportAll);
+		grid.onSelectionSummary(resultStatusBar::updateSelectionSummary);
 		refresh.run();
 
+		wireGridEditing(grid, resultStatusBar, model, schemaName);
+
 		return new ResultView(grid, resultStatusBar).asComponent();
+	}
+
+	// ---------- Edicao direta na grade (update/insert/delete) ----------
+
+	/**
+	 * Liga os botoes de edicao da barra de resultado a {@link GridEditController}
+	 * da grade, e tenta habilitar a edicao em si (ver {@link #tryEnableEditing}).
+	 * Pedido explicito do usuario: poder atualizar/inserir/excluir linhas
+	 * direto na grade (em lote, com um botao "Salvar alteracoes"), em vez de
+	 * so gerar o SQL para copiar (ver {@link GridClipboard}).
+	 */
+	private void wireGridEditing(ResultGrid grid, ResultStatusBar resultStatusBar, ResultTableModel model,
+			String schemaName) {
+		GridEditController editController = grid.editController();
+
+		Runnable refreshEditUi = () -> resultStatusBar.updatePendingState(
+				editController.pendingCount(), grid.selectedModelRows().length > 0);
+		editController.setOnChange(refreshEditUi);
+		grid.table().getSelectionModel().addListSelectionListener(e -> {
+			if (!e.getValueIsAdjusting()) {
+				refreshEditUi.run();
+			}
+		});
+
+		resultStatusBar.onAddRow(grid::addNewRowAndReveal);
+		resultStatusBar.onDeleteRows(() -> {
+			int[] rows = grid.selectedModelRows();
+			if (rows.length > 0) {
+				editController.markForDelete(rows);
+			}
+		});
+		resultStatusBar.onDiscardChanges(() -> {
+			editController.discardAll();
+			grid.table().repaint();
+		});
+		resultStatusBar.onSaveChanges(() -> applyPendingChanges(editController, grid, resultStatusBar, refreshEditUi));
+
+		tryEnableEditing(schemaName, model, () -> {
+			resultStatusBar.showEditControls(true);
+			refreshEditUi.run();
+		});
+	}
+
+	/**
+	 * So habilita a edicao quando TODAS as colunas com tabela de origem
+	 * conhecida apontam para a MESMA tabela (SELECT simples, sem JOIN — ver
+	 * {@link #uniqueSourceTable}) e essa tabela tem ao menos uma coluna de PK
+	 * PRESENTE no resultado (sem PK nao da pra identificar univocamente qual
+	 * linha fisica atualizar/excluir). Os metadados da tabela (PK) podem
+	 * ainda nao estar em cache — dispara a carga e tenta de novo quando ela
+	 * terminar, mesmo padrao ja usado por {@link ColumnMetadataResolver}.
+	 */
+	private void tryEnableEditing(String schemaName, ResultTableModel model, Runnable onEnabled) {
+		if (schemaName == null) {
+			return; // workspace "sem conexao" (SCRATCH) nunca tem metadados de tabela
+		}
+		String table = uniqueSourceTable(model);
+		if (table == null) {
+			return;
+		}
+		TableDetails details = tableMetadataCache.get(connectionManager(), schemaName, table,
+				() -> tryEnableEditing(schemaName, model, onEnabled));
+		if (details == null) {
+			return; // ainda carregando; o callback acima tenta de novo quando terminar
+		}
+		EditableTarget target = buildEditableTarget(model, table, details);
+		if (target == null) {
+			return; // sem PK conhecida presente no resultado
+		}
+		model.editController().enable(target);
+		onEnabled.run();
+	}
+
+	/** A UNICA tabela fisica de origem entre as colunas do resultado, ou {@code null} se houver mais de uma (JOIN) ou nenhuma. */
+	private static String uniqueSourceTable(ResultTableModel model) {
+		String table = null;
+		for (int c = 0; c < model.getColumnCount(); c++) {
+			String t = model.sourceTable(c);
+			if (t == null || t.isBlank()) {
+				continue;
+			}
+			if (table == null) {
+				table = t;
+			} else if (!table.equalsIgnoreCase(t)) {
+				return null;
+			}
+		}
+		return table;
+	}
+
+	private static EditableTarget buildEditableTarget(ResultTableModel model, String table, TableDetails details) {
+		Set<String> pkNames = new HashSet<>();
+		for (ColumnDetail col : details.columns()) {
+			if ("PRI".equalsIgnoreCase(col.key())) {
+				pkNames.add(col.name().toLowerCase(Locale.ROOT));
+			}
+		}
+		if (pkNames.isEmpty()) {
+			return null;
+		}
+		List<Integer> pkModelColumns = new ArrayList<>();
+		List<Integer> editableColumns = new ArrayList<>();
+		for (int c = 0; c < model.getColumnCount(); c++) {
+			String realCol = model.realColumnName(c);
+			String sourceTable = model.sourceTable(c);
+			if (realCol == null || sourceTable == null || !sourceTable.equalsIgnoreCase(table)) {
+				continue;
+			}
+			editableColumns.add(c);
+			if (pkNames.contains(realCol.toLowerCase(Locale.ROOT))) {
+				pkModelColumns.add(c);
+			}
+		}
+		if (pkModelColumns.isEmpty()) {
+			return null; // a PK da tabela nao esta presente no resultado (ex.: SELECT sem a coluna de id)
+		}
+		return new EditableTarget(table, pkModelColumns, editableColumns);
+	}
+
+	/** Pede confirmacao e aplica tudo que esta pendente numa unica transacao (ver {@link GridEditController#apply}). */
+	private void applyPendingChanges(GridEditController editController, ResultGrid grid,
+			ResultStatusBar resultStatusBar, Runnable refreshEditUi) {
+		if (!editController.hasPendingChanges()) {
+			return;
+		}
+		if (!connectionManager().isConnected()) {
+			statusBar.setText(" Conecte-se a uma base antes de salvar alteracoes.");
+			return;
+		}
+		int pending = editController.pendingCount();
+		int ok = JOptionPane.showConfirmDialog(this,
+				"Salvar " + pending + " alteracao(oes) pendente(s) na tabela \"" + editController.target().table()
+						+ "\"?\nIsto grava direto no banco (uma unica transacao; tudo ou nada).",
+				"Salvar alteracoes", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+		if (ok != JOptionPane.YES_OPTION) {
+			return;
+		}
+		Connection conn = connectionManager().getConnection();
+		DatabaseDialect dialect = connectionManager().dialect();
+		resultStatusBar.setEditBusy(true);
+		SwingWorker<GridEditController.ApplyResult, Void> worker = new SwingWorker<>() {
+			@Override
+			protected GridEditController.ApplyResult doInBackground() throws SQLException {
+				return editController.apply(conn, dialect);
+			}
+
+			@Override
+			protected void done() {
+				// Ordem importa: primeiro devolve os 4 botoes ao habilitado
+				// "de linha de base", DEPOIS refreshEditUi corrige de novo com
+				// base no estado real (pendingCount pode ter zerado com o
+				// sucesso, ou continuar positivo se a excecao interrompeu no
+				// meio) — nunca o contrario, ou a correcao seria sobrescrita.
+				resultStatusBar.setEditBusy(false);
+				try {
+					GridEditController.ApplyResult result = get();
+					statusBar.setText(" Alteracoes salvas: " + result.inserted() + " inserida(s), "
+							+ result.updated() + " atualizada(s), " + result.deleted() + " excluida(s).");
+					grid.table().repaint();
+				} catch (Exception ex) {
+					showError("Falha ao salvar as alteracoes da grade", ex);
+				} finally {
+					refreshEditUi.run();
+				}
+			}
+		};
+		worker.execute();
 	}
 
 	/** Exporta um resultado especifico (este) para um arquivo Excel. */
@@ -2374,9 +2597,14 @@ public class MainWindow extends JFrame {
 			protected void done() {
 				try {
 					List<Vector<Object>> rows = get();
+					int before = r.model().getRowCount();
 					for (Vector<Object> row : rows) {
 						r.model().addRow(row);
 					}
+					// As linhas recem-carregadas tambem precisam de uma "foto"
+					// original se a edicao ja estiver ligada (ver GridEditController) —
+					// senao um UPDATE/DELETE nelas nao teria WHERE para ancorar.
+					((ResultTableModel) r.model()).editController().onRowsAppended(before);
 					if (rows.size() < max) {
 						c.exhausted = true;
 						c.close();
@@ -2418,9 +2646,11 @@ public class MainWindow extends JFrame {
 
 			@Override
 			protected void process(List<Vector<Object>> chunks) {
+				int before = r.model().getRowCount();
 				for (Vector<Object> row : chunks) {
 					r.model().addRow(row);
 				}
+				((ResultTableModel) r.model()).editController().onRowsAppended(before);
 				refresh.run();
 			}
 
@@ -2451,7 +2681,7 @@ public class MainWindow extends JFrame {
 	/** Fecha cursores abertos e as conexoes JDBC de TODOS os workspaces (ao fechar a janela). */
 	private void closeAllConnections() {
 		closeOpenCursors();
-		for (Workspace w : workspaces.values()) {
+		for (Conexao w : workspaces.values()) {
 			w.mgr.close();
 		}
 	}
@@ -2712,7 +2942,7 @@ public class MainWindow extends JFrame {
 	}
 
 	/** Cursor aberto (Statement + ResultSet) para paginacao sob demanda. */
-	private static final class ResultCursor {
+	static final class ResultCursor {
 		final Statement st;
 		final ResultSet rs;
 		boolean exhausted;
@@ -2737,7 +2967,7 @@ public class MainWindow extends JFrame {
 	}
 
 	private void populateTree(SchemaInfo schema) {
-		this.currentSchema = schema;
+		setCurrentSchema(schema);
 		objectSearch.setEnabled(true);
 		// preserva o texto da busca (relevante quando isto e chamado por um
 		// refresh apos DDL, em vez de uma conexao/abertura de esquema nova)
@@ -2757,7 +2987,7 @@ public class MainWindow extends JFrame {
 	 * (icone) e pelo atalho Ctrl+R.
 	 */
 	private void refreshObjectTree(boolean manual) {
-		if (!connectionManager.isConnected() || currentSchema == null) {
+		if (!connectionManager().isConnected() || currentSchema == null) {
 			if (manual && statusBar != null) {
 				statusBar.setText(" Conecte-se e abra um esquema antes de atualizar os objetos.");
 			}
@@ -2770,7 +3000,7 @@ public class MainWindow extends JFrame {
 		new SwingWorker<SchemaInfo, Void>() {
 			@Override
 			protected SchemaInfo doInBackground() throws Exception {
-				Connection conn = connectionManager.getConnection();
+				Connection conn = connectionManager().getConnection();
 				return metadataService.loadSchema(conn, schemaName);
 			}
 
@@ -2954,6 +3184,10 @@ public class MainWindow extends JFrame {
 			buildSchemaRootContextMenu().show(objectTree, e.getX(), e.getY());
 			return;
 		}
+		if (obj.type() == NodeType.CATEGORY && "TABLE".equals(obj.kind())) {
+			buildTablesCategoryContextMenu().show(objectTree, e.getX(), e.getY());
+			return;
+		}
 		if (!isOpenableObject(obj.type())) {
 			return;
 		}
@@ -2979,6 +3213,28 @@ public class MainWindow extends JFrame {
 		}
 		switchSchema.addActionListener(a -> switchSchema());
 		menu.add(switchSchema);
+		menu.addSeparator();
+		JMenuItem createSchema = new JMenuItem("Criar esquema...");
+		createSchema.addActionListener(a -> createSchema());
+		menu.add(createSchema);
+		JMenuItem createTable = new JMenuItem("Nova tabela...");
+		createTable.addActionListener(a -> createTable());
+		menu.add(createTable);
+		return menu;
+	}
+
+	/**
+	 * Menu de contexto do NO "Tabelas" (categoria) na arvore de objetos — hoje
+	 * so oferece "Nova tabela...", mesmo atalho disponivel na raiz do schema e
+	 * no menu de contexto de uma tabela ja existente (ver
+	 * {@link #buildObjectContextMenu}), para quem prefere clicar direto em
+	 * cima da categoria.
+	 */
+	private JPopupMenu buildTablesCategoryContextMenu() {
+		JPopupMenu menu = new JPopupMenu();
+		JMenuItem createTable = new JMenuItem("Nova tabela...");
+		createTable.addActionListener(a -> createTable());
+		menu.add(createTable);
 		return menu;
 	}
 
@@ -3014,9 +3270,119 @@ public class MainWindow extends JFrame {
 			return;
 		}
 		activeWorkspace.schema = null;
-		currentSchema = null;
+		setCurrentSchema(null);
 		buildSchemaPicker(activeWorkspace.schemaList);
 		statusBar.setText(" Selecione um esquema (" + activeWorkspace.schemaList.size() + " disponiveis).");
+	}
+
+	/**
+	 * Cria um novo esquema (banco) no servidor da conexao ativa — pedido
+	 * explicito do usuario, acessivel pelo botao de cabecalho do navegador de
+	 * objetos e pelo menu de contexto da raiz do esquema. Funciona tanto na
+	 * tela de lista de esquemas quanto com um esquema ja aberto (nesse caso
+	 * so atualiza {@code schemaList} em segundo plano, sem navegar para fora
+	 * do que o usuario esta vendo).
+	 */
+	private void createSchema() {
+		if (activeWorkspace == null || !activeWorkspace.mgr.isConnected()) {
+			statusBar.setText(" Conecte-se a um servidor antes de criar um esquema.");
+			return;
+		}
+		String input = JOptionPane.showInputDialog(this, "Nome do novo esquema:", "");
+		if (input == null || input.trim().isEmpty()) {
+			return;
+		}
+		String schemaName = input.trim();
+		Conexao ws = activeWorkspace;
+		statusBar.setText(" Criando esquema \"" + schemaName + "\"...");
+		new SwingWorker<List<String>, Void>() {
+			@Override
+			protected List<String> doInBackground() throws Exception {
+				Connection conn = ws.mgr.getConnection();
+				try (Statement st = conn.createStatement()) {
+					st.executeUpdate(dialect.createSchemaStatement(schemaName));
+				}
+				return metadataService.listSchemas(conn);
+			}
+
+			@Override
+			protected void done() {
+				try {
+					List<String> schemas = get();
+					ws.schemaList = schemas;
+					statusBar.setText(" Esquema \"" + schemaName + "\" criado.");
+					if (ws == activeWorkspace && ws.schema == null) {
+						// Na tela de lista de esquemas: atualiza para mostrar o recem-criado.
+						buildSchemaPicker(schemas);
+					}
+					int open = JOptionPane.showConfirmDialog(MainWindow.this,
+							"Esquema \"" + schemaName + "\" criado.\n\nDeseja abri-lo agora?",
+							"Criar esquema", JOptionPane.YES_NO_OPTION);
+					if (open == JOptionPane.YES_OPTION && ws == activeWorkspace) {
+						openSchema(schemaName);
+					}
+				} catch (Exception ex) {
+					showError("Falha ao criar esquema", ex);
+					statusBar.setText(" Falha ao criar esquema.");
+				}
+			}
+		}.execute();
+	}
+
+	/**
+	 * Cria uma tabela nova no esquema aberto — acessivel pelo menu de
+	 * contexto (clique direito) da raiz do esquema, do no "Tabelas" e de
+	 * qualquer tabela ja existente (ver {@link #buildSchemaRootContextMenu},
+	 * {@link #buildTablesCategoryContextMenu} e {@link #buildObjectContextMenu}).
+	 * Coleta a especificacao via {@link CreateTableDialog}, monta o DDL pelo
+	 * dialeto ativo (ver {@code DatabaseDialect#createTableStatement}) e, apos
+	 * executar, atualiza a arvore de objetos (mesmo caminho de
+	 * {@link #refreshObjectTree}) para a tabela nova aparecer sem precisar de
+	 * um refresh manual.
+	 */
+	private void createTable() {
+		if (activeWorkspace == null || !activeWorkspace.mgr.isConnected() || currentSchema == null) {
+			statusBar.setText(" Abra um esquema antes de criar uma tabela.");
+			return;
+		}
+		Set<String> existingNames = new HashSet<>();
+		for (TableInfo t : currentSchema.tables()) {
+			existingNames.add(t.name().toLowerCase(Locale.ROOT));
+		}
+		for (TableInfo v : currentSchema.views()) {
+			existingNames.add(v.name().toLowerCase(Locale.ROOT));
+		}
+		NewTableSpec spec = CreateTableDialog.show(this, name -> existingNames.contains(name.toLowerCase(Locale.ROOT)));
+		if (spec == null) {
+			return; // cancelado
+		}
+		Conexao ws = activeWorkspace;
+		String schemaName = currentSchema.name();
+		statusBar.setText(" Criando tabela \"" + spec.name() + "\"...");
+		new SwingWorker<Void, Void>() {
+			@Override
+			protected Void doInBackground() throws Exception {
+				Connection conn = ws.mgr.getConnection();
+				try (Statement st = conn.createStatement()) {
+					st.executeUpdate(dialect.createTableStatement(spec));
+				}
+				return null;
+			}
+
+			@Override
+			protected void done() {
+				try {
+					get();
+					statusBar.setText(" Tabela \"" + spec.name() + "\" criada.");
+					if (ws == activeWorkspace && schemaName.equals(currentSchema.name())) {
+						refreshObjectTree(false);
+					}
+				} catch (Exception ex) {
+					showError("Falha ao criar tabela", ex);
+					statusBar.setText(" Falha ao criar tabela.");
+				}
+			}
+		}.execute();
 	}
 
 	private JPopupMenu buildObjectContextMenu(ObjNode obj) {
@@ -3032,6 +3398,12 @@ public class MainWindow extends JFrame {
 		JMenuItem copyName = new JMenuItem("Copiar nome (Ctrl+C)");
 		copyName.addActionListener(a -> copySelectedObjectNames());
 		menu.add(copyName);
+		if (obj.type() == NodeType.TABLE) {
+			menu.addSeparator();
+			JMenuItem createTable = new JMenuItem("Nova tabela...");
+			createTable.addActionListener(a -> createTable());
+			menu.add(createTable);
+		}
 		return menu;
 	}
 
@@ -3157,7 +3529,7 @@ public class MainWindow extends JFrame {
 		new SwingWorker<TableDetails, Void>() {
 			@Override
 			protected TableDetails doInBackground() throws Exception {
-				Connection conn = connectionManager.getConnection();
+				Connection conn = connectionManager().getConnection();
 				return metadataService.loadTableDetails(conn, currentSchema.name(), obj.name());
 			}
 
@@ -3208,10 +3580,10 @@ public class MainWindow extends JFrame {
 		new SwingWorker<String, Void>() {
 			@Override
 			protected String doInBackground() throws Exception {
-				if (!connectionManager.isConnected()) {
+				if (!connectionManager().isConnected()) {
 					return "Sem conexao ativa.";
 				}
-				Connection conn = connectionManager.getConnection();
+				Connection conn = connectionManager().getConnection();
 				String sql = dialect.definitionQuery(obj.kind(), obj.name());
 				try (Statement st = conn.createStatement(); ResultSet rs = st.executeQuery(sql)) {
 					if (rs.next()) {
@@ -3306,49 +3678,4 @@ public class MainWindow extends JFrame {
 		JOptionPane.showMessageDialog(this, scroll, title, JOptionPane.ERROR_MESSAGE);
 	}
 
-	/**
-	 * Workspace de uma conexao: sua sessao JDBC, esquema e abas de SQL proprias.
-	 */
-	private static final class Workspace {
-		final String name; // nome da conexao (ou SCRATCH)
-		final ConnectionProfile profile; // null para o workspace sem conexao
-		final ConnectionManager mgr; // gerenciador JDBC proprio
-		SchemaInfo schema; // esquema carregado (ou null)
-		List<String> schemaList; // lista de esquemas (schema em branco)
-		List<SessionStore.Tab> tabs = new ArrayList<>();
-		int selectedTab = 0;
-		/**
-		 * Ultimos resultados de cada aba de SQL deste workspace, indexados
-		 * pela POSICAO da aba (0-based, mesma ordem de {@code tabs} —
-		 * indice, nao a instancia de SqlEditorPane: ao trocar de workspace e
-		 * voltar, {@code rebuildEditorTabs} cria instancias NOVAS de
-		 * SqlEditorPane a partir do texto salvo em {@code tabs}, entao a
-		 * instancia antiga (chave usada em {@code MainWindow#resultsByTab}
-		 * enquanto este workspace estava ativo) nao serve mais de chave).
-		 * Preenchido em {@code saveActiveTabs} (ao SAIR deste workspace) e
-		 * consumido em {@code rebuildEditorTabs} (ao VOLTAR pra ele).
-		 */
-		Map<Integer, List<QueryResult>> tabResults = new HashMap<>();
-
-		Workspace(String name, ConnectionProfile profile, ConnectionManager mgr) {
-			this.name = name;
-			this.profile = profile;
-			this.mgr = mgr;
-		}
-	}
-
-	/**
-	 * Resultado de um statement: grade (model != null) ou mensagem (update/erro).
-	 */
-	private record QueryResult(String title, String sql, DefaultTableModel model, String message, boolean error,
-			long execMs, long fetchMs, ResultCursor cursor) {
-		static QueryResult grid(String title, String sql, DefaultTableModel model, long execMs, long fetchMs,
-				ResultCursor cursor) {
-			return new QueryResult(title, sql, model, null, false, execMs, fetchMs, cursor);
-		}
-
-		static QueryResult message(String title, String sql, String message, boolean error, long execMs) {
-			return new QueryResult(title, sql, null, message, error, execMs, 0L, null);
-		}
-	}
 }

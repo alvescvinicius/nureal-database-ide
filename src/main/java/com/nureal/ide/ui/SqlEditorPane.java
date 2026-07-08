@@ -3,8 +3,13 @@ package com.nureal.ide.ui;
 import com.nureal.ide.core.autocomplete.SqlCompletionProvider;
 import com.nureal.ide.core.format.SqlFormatter;
 import org.fife.ui.autocomplete.AutoCompletion;
+import org.fife.ui.rsyntaxtextarea.AbstractTokenMakerFactory;
 import org.fife.ui.rsyntaxtextarea.RSyntaxTextArea;
+import org.fife.ui.rsyntaxtextarea.Style;
 import org.fife.ui.rsyntaxtextarea.SyntaxConstants;
+import org.fife.ui.rsyntaxtextarea.SyntaxScheme;
+import org.fife.ui.rsyntaxtextarea.TokenMakerFactory;
+import org.fife.ui.rsyntaxtextarea.TokenTypes;
 import org.fife.ui.rtextarea.RTextScrollPane;
 import org.fife.ui.rtextarea.SearchContext;
 import org.fife.ui.rtextarea.SearchEngine;
@@ -51,10 +56,31 @@ public class SqlEditorPane extends JPanel {
     private static final int MIN_FONT_SIZE = 8;
     private static final int MAX_FONT_SIZE = 42;
 
+    static {
+        // Troca o TokenMaker padrao de SQL do RSyntaxTextArea pelo nosso
+        // (ver SqlHighlightTokenMaker) — GARANTE que palavras-chave sejam
+        // destacadas independente de maiusculas/minusculas ("select" e
+        // "SELECT" ficam identicos), sem depender de detalhes internos da
+        // versao exata da biblioteca. TokenMakerFactory e um registro
+        // compartilhado/estatico do processo inteiro, entao isto so precisa
+        // rodar UMA vez — um bloco {@code static} nesta classe (que sempre
+        // roda antes do primeiro RSyntaxTextArea ser criado, ja que e esta
+        // mesma classe que cria) e o lugar natural, sem exigir um ponto de
+        // inicializacao separado em MainWindow.
+        AbstractTokenMakerFactory factory = (AbstractTokenMakerFactory) TokenMakerFactory.getDefaultInstance();
+        factory.putMapping(SyntaxConstants.SYNTAX_STYLE_SQL, SqlHighlightTokenMaker.class.getName());
+    }
+
 	private final RSyntaxTextArea textArea;
     private final Supplier<SqlFormatter> formatterSupplier;
     private int fontSize = BASE_FONT_SIZE;
     private String fontFamily; // null/vazio = escolha automatica
+
+    // Id estavel desta aba (UUID), definido pelo chamador na criacao — usado
+    // para religar corretamente os resultados salvos (ver Conexao#tabResults)
+    // independente da POSICAO da aba na lista, que pode mudar (fechar/reabrir
+    // abas em outra ordem).
+    private final String tabId;
 
     // Id da query salva (ver SavedQueryStore) a que esta aba esta "ligada" —
     // null enquanto a aba nunca foi salva OU foi aberta sem vir de uma query
@@ -70,10 +96,11 @@ public class SqlEditorPane extends JPanel {
     private JToggleButton wholeWordBtn;
     private JLabel findStatus;
 
-    public SqlEditorPane(SqlCompletionProvider provider, Runnable onRun,
+    public SqlEditorPane(String tabId, SqlCompletionProvider provider, Runnable onRun,
             Supplier<SqlFormatter> formatterSupplier, String fontFamily) {
         super(new BorderLayout());
 
+        this.tabId = tabId;
         this.formatterSupplier = formatterSupplier;
         this.fontFamily = fontFamily;
 
@@ -83,6 +110,19 @@ public class SqlEditorPane extends JPanel {
         textArea.setTabSize(2);
         textArea.setText("");
         textArea.setFont(pickEditorFont(fontFamily, BASE_FONT_SIZE));
+        // Nomes de tabela/view/procedure/alias (ver SqlHighlightTokenMaker,
+        // que os reclassifica para DATA_TYPE) devem ficar em NEGRITO, mas
+        // SEM mudar de cor — o padrao de fabrica do RSyntaxTextArea pinta
+        // DATA_TYPE de um teal proprio, que o usuario relatou cansar a
+        // vista ("queria apenas que ficasse negrito, nao de outra cor").
+        // Sobrescreve so o FONT (bold, mesma familia/tamanho do editor) e
+        // deixa a cor null — igual o estilo de IDENTIFIER (texto comum),
+        // que usa a cor padrao do componente. changeBaseFont() do proprio
+        // RSyntaxTextArea (chamado automaticamente por setFont(), zoom
+        // incluso) atualiza o tamanho desta fonte junto com o resto do
+        // editor, ja que ela deriva da MESMA fonte base.
+        SyntaxScheme scheme = textArea.getSyntaxScheme();
+        scheme.setStyle(TokenTypes.DATA_TYPE, new Style(null, null, textArea.getFont().deriveFont(Font.BOLD)));
         textArea.setAntiAliasingEnabled(true);
         textArea.setFractionalFontMetricsEnabled(true);
         textArea.setPaintTabLines(true);
@@ -123,16 +163,28 @@ public class SqlEditorPane extends JPanel {
             }
         });
 
-        // Ctrl+F / Ctrl+H abrem a barra de localizar e substituir
+        // Ctrl+F / Ctrl+H abrem a MESMA barra (localizar + substituir ja
+        // aparecem juntos, sem aba separada) — mas cada um foca o campo que
+        // o usuario espera pelo atalho: Ctrl+F -> "Localizar", Ctrl+H ->
+        // "Substituir" (convencao de Word/VS Code/etc.). Antes os dois
+        // focavam sempre "Localizar", entao Ctrl+H nao se comportava
+        // diferente de Ctrl+F — corrigido aqui.
         AbstractAction showFind = new AbstractAction() {
             @Override
             public void actionPerformed(ActionEvent e) {
-                showFindBar();
+                showFindBar(false);
+            }
+        };
+        AbstractAction showReplace = new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                showFindBar(true);
             }
         };
         textArea.getInputMap().put(KeyStroke.getKeyStroke("control F"), "show-find");
-        textArea.getInputMap().put(KeyStroke.getKeyStroke("control H"), "show-find");
+        textArea.getInputMap().put(KeyStroke.getKeyStroke("control H"), "show-replace");
         textArea.getActionMap().put("show-find", showFind);
+        textArea.getActionMap().put("show-replace", showReplace);
 
         // Caixa: Ctrl+U / Ctrl+Shift+U -> MAIUSCULAS ; Ctrl+L / Ctrl+Shift+L -> minusculas
         AbstractAction toUpper = new AbstractAction() {
@@ -153,6 +205,34 @@ public class SqlEditorPane extends JPanel {
         textArea.getInputMap().put(KeyStroke.getKeyStroke("control shift U"), "to-upper");
         textArea.getInputMap().put(KeyStroke.getKeyStroke("control L"), "to-lower");
         textArea.getInputMap().put(KeyStroke.getKeyStroke("control shift L"), "to-lower");
+        // Reforco: os bindings de InputMap/ActionMap acima as vezes NAO
+        // disparavam (usuario relatou Ctrl+U/Ctrl+L sem nenhum efeito numa
+        // selecao grande). Causa provavel: o Swing notifica TODOS os
+        // KeyListener's registrados no editor (inclusive o da biblioteca de
+        // autocomplete, instalada logo acima via ac.install(textArea)) ANTES
+        // de processar os key bindings do InputMap — se qualquer um deles
+        // consumir o evento (e.consume()) por algum motivo proprio, o
+        // binding de InputMap simplesmente nunca chega a rodar, sem erro
+        // nenhum, exatamente o sintoma relatado. Um KeyListener proprio,
+        // registrado diretamente, sempre RODA (listeners nao impedem uns aos
+        // outros de serem chamados so por consumir o evento) — chamando
+        // changeCase(...) daqui direto, o atalho funciona independente do
+        // que mais estiver escutando teclas no editor.
+        textArea.addKeyListener(new java.awt.event.KeyAdapter() {
+            @Override
+            public void keyPressed(KeyEvent e) {
+                if (!e.isControlDown() || e.isAltDown()) {
+                    return;
+                }
+                if (e.getKeyCode() == KeyEvent.VK_U) {
+                    changeCase(true);
+                    e.consume();
+                } else if (e.getKeyCode() == KeyEvent.VK_L) {
+                    changeCase(false);
+                    e.consume();
+                }
+            }
+        });
 
         // Zoom: Ctrl + '=' / '+' / numpad+  aumenta; Ctrl + '-' diminui; Ctrl+0 reseta
         textArea.getActionMap().put("zoom-in", new AbstractAction() {
@@ -194,6 +274,11 @@ public class SqlEditorPane extends JPanel {
 
     public RSyntaxTextArea textArea() {
         return textArea;
+    }
+
+    /** Id estavel desta aba (UUID), definido na criacao pelo chamador. */
+    String tabId() {
+        return tabId;
     }
 
     /** Usa a selecao, se houver; caso contrario, o texto inteiro. */
@@ -343,15 +428,24 @@ public class SqlEditorPane extends JPanel {
         });
     }
 
-    private void showFindBar() {
+    /**
+     * Mostra a barra de localizar/substituir (as duas linhas ja aparecem
+     * juntas — nao ha um "modo" separado) e foca o campo correspondente ao
+     * atalho usado.
+     *
+     * @param focusReplace {@code true} quando veio de Ctrl+H (foca "Substituir");
+     *                     {@code false} quando veio de Ctrl+F (foca "Localizar").
+     */
+    private void showFindBar(boolean focusReplace) {
         String sel = textArea.getSelectedText();
         if (sel != null && !sel.isEmpty() && !sel.contains("\n")) {
             findField.setText(sel);
         }
         findBar.setVisible(true);
         revalidate();
-        findField.requestFocusInWindow();
-        findField.selectAll();
+        JTextField target = focusReplace ? replaceField : findField;
+        target.requestFocusInWindow();
+        target.selectAll();
     }
 
     private void hideFindBar() {

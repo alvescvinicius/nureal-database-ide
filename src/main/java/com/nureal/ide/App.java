@@ -1,11 +1,17 @@
 package com.nureal.ide;
 
+import java.awt.AWTEvent;
+import java.awt.Component;
+import java.awt.Cursor;
 import java.awt.Font;
 import java.awt.GraphicsEnvironment;
+import java.awt.Toolkit;
+import java.awt.event.MouseEvent;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
 
+import javax.swing.AbstractButton;
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
 
@@ -39,7 +45,37 @@ public class App {
         FoldParserManager.get().addFoldParserMapping(
                 SyntaxConstants.SYNTAX_STYLE_SQL, new SqlFoldParser());
 
+        // Maozinha (cursor de clique) ao passar o mouse sobre qualquer botao/icone
+        // clicavel do app, sem precisar setCursor(...) em cada botao individualmente.
+        installHandCursorOnButtons();
+
         SwingUtilities.invokeLater(() -> new MainWindow().setVisible(true));
+    }
+
+    /**
+     * Registra um listener global de mouse que troca o cursor para "maozinha"
+     * sempre que o ponteiro entra em qualquer {@link AbstractButton} habilitado
+     * (JButton, JToggleButton, itens de menu, checkboxes, etc.) em qualquer
+     * janela/dialogo do app, e devolve ao cursor padrao ao sair. Evita ter que
+     * chamar setCursor(...) manualmente em cada botao/icone espalhado pelo
+     * codigo (toolbar, cabecalhos de painel, barra de status dos resultados
+     * etc.), inclusive nos criados no futuro.
+     */
+    private static void installHandCursorOnButtons() {
+        Cursor hand = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR);
+        Cursor normal = Cursor.getDefaultCursor();
+        Toolkit.getDefaultToolkit().addAWTEventListener(event -> {
+            if (!(event instanceof MouseEvent me)) return;
+            Component c = me.getComponent();
+            if (!(c instanceof AbstractButton b)) return;
+            if (me.getID() == MouseEvent.MOUSE_ENTERED) {
+                if (b.isEnabled()) {
+                    c.setCursor(hand);
+                }
+            } else if (me.getID() == MouseEvent.MOUSE_EXITED) {
+                c.setCursor(normal);
+            }
+        }, AWTEvent.MOUSE_EVENT_MASK);
     }
 
     /** Primeira fonte de interface moderna disponivel no sistema. */

@@ -96,6 +96,14 @@ final class ColumnMetadataPopup {
             hide();
             return;
         }
+        if (ResultTableHeader.columnAtDivider(header, e.getPoint()) >= 0) {
+            // Mouse em cima da divisoria (cursor de redimensionar, ver
+            // ResultTableHeader#mouseMoved): o popup de metadados so atrapalha
+            // quem esta tentando agarrar a divisoria pra redimensionar a
+            // coluna — pedido explicito do usuario.
+            hide();
+            return;
+        }
         if (col == shownForColumn && current != null && current.isVisible()) {
             return; // ja mostrando esta coluna
         }

@@ -1,6 +1,7 @@
 package com.nureal.ide.core.dialect;
 
 import com.nureal.ide.core.connection.ConnectionProfile;
+import com.nureal.ide.core.metadata.model.NewTableSpec;
 
 import java.util.List;
 
@@ -80,4 +81,31 @@ public interface DatabaseDialect {
 
     /** Palavras-chave da linguagem para o autocomplete. */
     List<String> keywords();
+
+    /**
+     * Envolve um identificador (tabela ou coluna) nas aspas/crases do
+     * dialeto, escapando ocorrencias internas do proprio caractere de aspa —
+     * usado para montar UPDATE/INSERT/DELETE com nomes seguros ao aplicar
+     * edicoes feitas direto na grade de resultados (ver GridEditController).
+     */
+    String quoteIdentifier(String ident);
+
+    /**
+     * Comando para criar um novo esquema (banco). {@code name} ja deve vir
+     * validado/limpo pelo chamador (ver {@code MainWindow#createSchema}) — o
+     * identificador e apenas envolvido em aspas seguras via
+     * {@link #quoteIdentifier}, nao ha parametro (?) possivel aqui: DDL de
+     * nome de esquema nao aceita bind variable em nenhum banco.
+     */
+    String createSchemaStatement(String name);
+
+    /**
+     * Comando para criar uma tabela nova a partir da especificacao coletada
+     * pelo {@code CreateTableDialog} (com.nureal.ide.ui) — nome da tabela,
+     * colunas (tipo, tamanho, nulo, chave primaria, auto increment, default,
+     * comentario) e comentario da tabela. Todo identificador (tabela/coluna)
+     * ja deve sair envolvido em {@link #quoteIdentifier} pela implementacao;
+     * valores literais (DEFAULT, COMMENT) devem ser escapados por ela.
+     */
+    String createTableStatement(NewTableSpec spec);
 }
