@@ -39,6 +39,12 @@ public class MySqlDialect implements DatabaseDialect {
         // url.append("?connectionTimeZone=UTC");
         // url.append("&forceConnectionTimeZoneToSession=true");
         url.append("?preserveInstants=true");
+        // Sem isto, o driver MySQL Connector/J lanca "Zero date value prohibited"
+        // (SQLException) ao LER qualquer linha cuja coluna DATE/DATETIME/TIMESTAMP
+        // contenha '0000-00-00' ou '0000-00-00 00:00:00' — mesmo em um SELECT
+        // simples, sem nenhum filtro por data. CONVERT_TO_NULL faz o driver
+        // devolver NULL para esses valores em vez de abortar a query inteira.
+        url.append("&zeroDateTimeBehavior=CONVERT_TO_NULL");
 
         return url.toString();
 
