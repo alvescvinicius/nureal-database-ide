@@ -2749,6 +2749,29 @@ public class MainWindow extends JFrame {
 			}
 		});
 
+		// "Modo de edicao": comeca sempre DESLIGADO (ver tryEnableEditing
+		// abaixo) — pedido explicito do usuario para o resultado se
+		// comportar como puramente visual/navegacao ate ele ligar de
+		// proposito. Desligar de novo so e permitido sem alteracoes
+		// pendentes (senao o usuario perderia edicoes sem perceber, ja que
+		// desligado a grade some visualmente com Nova linha/Excluir/Salvar);
+		// com pendencias, avisa e mantem ligado.
+		resultStatusBar.onToggleEditMode(() -> {
+			if (editController.isEditModeOn()) {
+				if (editController.hasPendingChanges()) {
+					JOptionPane.showMessageDialog(this,
+							"Salve ou descarte as alteracoes pendentes antes de desativar o modo de edicao.",
+							"Modo de edicao", JOptionPane.WARNING_MESSAGE);
+					return;
+				}
+				editController.setEditModeOn(false);
+			} else {
+				editController.setEditModeOn(true);
+			}
+			resultStatusBar.setEditModeOn(editController.isEditModeOn());
+			refreshEditUi.run();
+		});
+
 		resultStatusBar.onAddRow(grid::addNewRowAndReveal);
 		resultStatusBar.onDeleteRows(() -> {
 			int[] rows = grid.selectedModelRows();
@@ -2764,6 +2787,7 @@ public class MainWindow extends JFrame {
 
 		tryEnableEditing(schemaName, model, () -> {
 			resultStatusBar.showEditControls(true);
+			resultStatusBar.setEditModeOn(false);
 			refreshEditUi.run();
 		});
 	}

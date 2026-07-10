@@ -42,6 +42,18 @@ final class GridEditController {
     private EditableTarget target;
     private Runnable onChange;
 
+    /**
+     * {@code true} somente quando o usuario LIGOU explicitamente o "Modo de
+     * edicao" (botao dedicado na barra de resultado, ver {@code ResultStatusBar}).
+     * Ter um {@link #target} resolvido (ver {@link #enable}) so significa que
+     * este resultado E CAPAZ de ser editado — pedido explicito do usuario:
+     * enquanto o modo estiver desligado, o resultado deve se comportar como
+     * puramente visual/navegacao (mesmo que capaz), e so incluir/editar/excluir
+     * depois que o usuario ligar o modo de proposito. Comeca sempre desligado,
+     * mesmo quando {@link #enable} acaba de resolver um alvo editavel.
+     */
+    private boolean editModeOn;
+
     /** Linhas adicionadas nesta sessao de edicao (ainda nao inseridas no banco). */
     private final Set<Integer> newRows = new HashSet<>();
     /** Linhas marcadas para exclusao (linhas normais OU novas — nesse caso, so somem localmente). */
@@ -158,6 +170,23 @@ final class GridEditController {
         return target;
     }
 
+    /** {@code true} quando o usuario ligou o "Modo de edicao" — ver {@link #editModeOn}. */
+    boolean isEditModeOn() {
+        return editModeOn;
+    }
+
+    /**
+     * Liga/desliga o "Modo de edicao". Desligar com alteracoes pendentes NAO
+     * e impedido AQUI (fica a cargo de {@code MainWindow}, que pergunta ao
+     * usuario antes de chamar isto — ver {@code ResultStatusBar#onToggleEditMode});
+     * este metodo so aplica a mudanca de estado e notifica quem estiver
+     * ouvindo, pra atualizar botoes/editabilidade das celulas.
+     */
+    void setEditModeOn(boolean on) {
+        this.editModeOn = on;
+        fireChange();
+    }
+
     /** Chamado depois que paginas adicionais sao carregadas (ver MainWindow#loadPage/#loadAll). */
     void onRowsAppended(int firstNewRow) {
         if (target == null) {
@@ -181,7 +210,7 @@ final class GridEditController {
     }
 
     boolean isCellEditable(int row, int column) {
-        return target != null && !deletedRows.contains(row) && target.isEditableColumn(column);
+        return target != null && editModeOn && !deletedRows.contains(row) && target.isEditableColumn(column);
     }
 
     boolean isNewRow(int row) {

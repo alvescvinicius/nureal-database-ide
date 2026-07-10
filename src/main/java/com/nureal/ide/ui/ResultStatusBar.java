@@ -57,6 +57,17 @@ final class ResultStatusBar {
 
     // ---------- Barra de edicao (so aparece quando GridEditController.isEditable()) ----------
     private final JPanel editBar = new JPanel(new BorderLayout());
+    /**
+     * Alterna o "Modo de edicao" (ver {@link GridEditController#setEditModeOn}) —
+     * SEMPRE visivel quando o resultado e capaz de ser editado (mesmo antes
+     * de o usuario ligar o modo), diferente dos demais botoes desta barra
+     * (ver {@link #setEditModeUi}). Pedido explicito do usuario: enquanto o
+     * resultado e so exibido, a grade deve se comportar como puramente
+     * visual/navegacao — incluir/editar/excluir so ficam disponiveis depois
+     * que o usuario liga o modo de proposito, evitando edicoes acidentais
+     * so por estar navegando/selecionando linhas para copiar.
+     */
+    private final JButton editModeToggle = new JButton("Ativar edicao");
     private final JButton addRowButton = new JButton("Nova linha");
     private final JButton deleteRowsButton = new JButton("Excluir linha(s)");
     private final JLabel pendingLabel = new JLabel();
@@ -105,12 +116,14 @@ final class ResultStatusBar {
      * copiar (ver {@link GridClipboard}).
      */
     private JComponent buildEditBar() {
+        editModeToggle.setIcon(Icons.get(IconType.EDIT, 13, MainWindow.ACCENT));
         addRowButton.setIcon(Icons.get(IconType.NEW, 13, new java.awt.Color(0x334155)));
         deleteRowsButton.setIcon(Icons.get(IconType.DELETE, 13, new java.awt.Color(0x334155)));
         saveChangesButton.setIcon(Icons.get(IconType.SAVE, 13, MainWindow.ACCENT));
         pendingLabel.setForeground(GridTheme.MUTED_TEXT);
 
         JPanel editLeft = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 3));
+        editLeft.add(editModeToggle);
         editLeft.add(addRowButton);
         editLeft.add(deleteRowsButton);
         editLeft.add(pendingLabel);
@@ -121,6 +134,9 @@ final class ResultStatusBar {
         editBar.add(editLeft, BorderLayout.WEST);
         editBar.add(editRight, BorderLayout.EAST);
         editBar.setVisible(false);
+        // Comeca com o modo desligado: so o botao de alternar aparece ate o
+        // usuario ligar de proposito (ver setEditModeUi/javadoc de editModeToggle).
+        setEditModeUi(false);
         return editBar;
     }
 
@@ -144,6 +160,10 @@ final class ResultStatusBar {
         exportAllItem.addActionListener(e -> action.run());
     }
 
+    void onToggleEditMode(Runnable action) {
+        editModeToggle.addActionListener(e -> action.run());
+    }
+
     void onAddRow(Runnable action) {
         addRowButton.addActionListener(e -> action.run());
     }
@@ -160,13 +180,34 @@ final class ResultStatusBar {
         discardButton.addActionListener(e -> action.run());
     }
 
-    /** Mostra/esconde a barra de edicao inteira — chamado uma vez quando a edicao e habilitada. */
+    /** Mostra/esconde a barra de edicao inteira (o botao de alternar + o resto) — chamado uma vez quando o resultado e capaz de ser editado. */
     void showEditControls(boolean visible) {
         editBar.setVisible(visible);
     }
 
+    /**
+     * Atualiza o texto do botao de alternar e mostra/esconde TUDO que so faz
+     * sentido com o modo ligado (Nova linha, Excluir, pendencias, Descartar,
+     * Salvar) — o proprio botao de alternar permanece sempre visivel (ver
+     * {@link #editModeToggle}). Chamado ao ligar/desligar o modo e uma vez ao
+     * habilitar a edicao (comecando desligado).
+     */
+    void setEditModeOn(boolean on) {
+        setEditModeUi(on);
+    }
+
+    private void setEditModeUi(boolean on) {
+        editModeToggle.setText(on ? "Desativar edicao" : "Ativar edicao");
+        addRowButton.setVisible(on);
+        deleteRowsButton.setVisible(on);
+        pendingLabel.setVisible(on);
+        discardButton.setVisible(on);
+        saveChangesButton.setVisible(on);
+    }
+
     /** Desabilita os botoes de edicao enquanto {@code apply} roda em segundo plano — evita clique duplo em "Salvar". */
     void setEditBusy(boolean busy) {
+        editModeToggle.setEnabled(!busy);
         addRowButton.setEnabled(!busy);
         deleteRowsButton.setEnabled(!busy);
         discardButton.setEnabled(!busy);

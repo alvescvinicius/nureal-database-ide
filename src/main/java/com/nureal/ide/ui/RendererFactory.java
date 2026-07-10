@@ -60,7 +60,7 @@ final class RendererFactory {
 
     enum Group { IDENTIFIER, NUMERIC, TEMPORAL, LOGICAL, BINARY, TEXTUAL }
 
-    /** Classifica e instala o renderer de cada coluna de {@code table}. */
+    /** Classifica e instala o renderer (e, para colunas TEMPORAIS, o editor) de cada coluna de {@code table}. */
     static void installOn(javax.swing.JTable table, ResultTableModel model) {
         for (int c = 0; c < table.getColumnModel().getColumnCount(); c++) {
             TableColumn column = table.getColumnModel().getColumn(c);
@@ -68,6 +68,17 @@ final class RendererFactory {
             Group group = classify(model.sqlType(modelColumn), model.getColumnClass(modelColumn),
                     model.getColumnName(modelColumn));
             column.setCellRenderer(rendererFor(group));
+            if (group == Group.TEMPORAL) {
+                // Precisa de um editor PROPRIO (ver TemporalCellEditor): o
+                // editor generico padrao do JTable mostra/espera um formato
+                // diferente do que a grade exibe e nao consegue reconstruir
+                // tipos java.time.* (LocalDate/LocalDateTime nao tem
+                // construtor(String)) — edicao de data falhava em silencio.
+                // Instancia NOVA por coluna: guarda estado por edicao em
+                // andamento (classe alvo, valor parseado), nao pode ser
+                // compartilhada entre colunas/grades.
+                column.setCellEditor(new TemporalCellEditor());
+            }
         }
     }
 

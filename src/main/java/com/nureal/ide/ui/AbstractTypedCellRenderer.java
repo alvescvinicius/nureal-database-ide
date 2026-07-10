@@ -111,20 +111,23 @@ abstract class AbstractTypedCellRenderer extends DefaultTableCellRenderer {
 
     /**
      * Zebra discreta (linhas pares/impares) + destaque suave de hover — SO
-     * quando a linha nao esta selecionada. Selecionada, o fundo e sempre o
-     * que {@code super.getTableCellRendererComponent} ja aplicou (cinza
-     * neutro configurado na tabela) e nunca e sobrescrito aqui.
+     * quando a linha nao esta selecionada E nao tem estado de edicao
+     * pendente. Selecionada (sem estado de edicao), o fundo e sempre o que
+     * {@code super.getTableCellRendererComponent} ja aplicou (cinza neutro
+     * configurado na tabela) e nunca e sobrescrito aqui.
      *
-     * Prioridade adicional (tambem so quando NAO selecionada, pelo mesmo
-     * motivo): estado de edicao pendente (ver {@link GridEditController}) —
-     * linha nova (verde), linha marcada para exclusao (vermelho) ou, faltando
-     * essas duas, a celula especifica editada (amarelo) — sobrepoe a
-     * zebra/hover normal, na ordem linha-toda antes de celula-a-celula.
+     * Estado de edicao pendente (ver {@link GridEditController}) — linha
+     * nova (verde), linha marcada para exclusao (vermelho) ou, faltando
+     * essas duas, a celula especifica editada (amarelo) — SEMPRE aparece,
+     * mesmo quando a celula/linha esta selecionada (ver {@link #blendWithSelection}):
+     * antes, esse destaque so pintava quando a linha NAO estava selecionada,
+     * mas selecionar a linha e EXATAMENTE o que o usuario precisa fazer para
+     * marca-la para exclusao (botao "Excluir linha(s)" usa a selecao) — o
+     * resultado era a linha ficar cinza-selecionada, sem NENHUM sinal
+     * visivel de que a exclusao foi marcada, dando a impressao de que o
+     * botao "nao fazia nada" mesmo com o contador de pendencias subindo.
      */
     private void applyRowBackground(JTable table, boolean isSelected, int row, int column) {
-        if (isSelected) {
-            return;
-        }
         setOpaque(true);
         GridEditController edit = editControllerFor(table);
         if (edit != null && edit.isEditable()) {
@@ -134,17 +137,20 @@ abstract class AbstractTypedCellRenderer extends DefaultTableCellRenderer {
             int modelRow = table.convertRowIndexToModel(row);
             int modelColumn = table.convertColumnIndexToModel(column);
             if (edit.isDeletedRow(modelRow)) {
-                setBackground(GridTheme.EDIT_DELETED_ROW);
+                setBackground(isSelected ? blendWithSelection(GridTheme.EDIT_DELETED_ROW) : GridTheme.EDIT_DELETED_ROW);
                 return;
             }
             if (edit.isNewRow(modelRow)) {
-                setBackground(GridTheme.EDIT_NEW_ROW);
+                setBackground(isSelected ? blendWithSelection(GridTheme.EDIT_NEW_ROW) : GridTheme.EDIT_NEW_ROW);
                 return;
             }
             if (edit.isDirtyCell(modelRow, modelColumn)) {
-                setBackground(GridTheme.EDIT_DIRTY_CELL);
+                setBackground(isSelected ? blendWithSelection(GridTheme.EDIT_DIRTY_CELL) : GridTheme.EDIT_DIRTY_CELL);
                 return;
             }
+        }
+        if (isSelected) {
+            return;
         }
         boolean hover = SelectionManager.hoverRow(table) == row;
         if (hover) {
@@ -152,6 +158,21 @@ abstract class AbstractTypedCellRenderer extends DefaultTableCellRenderer {
         } else {
             setBackground((row % 2 == 0) ? GridTheme.ZEBRA_EVEN : GridTheme.ZEBRA_ODD);
         }
+    }
+
+    /**
+     * Media simples entre a cor de estado de edicao e o cinza de selecao da
+     * grade — usada quando uma linha/celula marcada (nova/excluida/suja)
+     * TAMBEM esta selecionada, pra continuar transmitindo os dois sinais ao
+     * mesmo tempo (a borda da celula ativa, ver {@link #paintActiveCellBorder},
+     * ja distingue o foco preciso dentro da selecao).
+     */
+    private static Color blendWithSelection(Color editColor) {
+        Color sel = GridTheme.SELECTION_BACKGROUND;
+        return new Color(
+                (editColor.getRed() + sel.getRed()) / 2,
+                (editColor.getGreen() + sel.getGreen()) / 2,
+                (editColor.getBlue() + sel.getBlue()) / 2);
     }
 
     private static GridEditController editControllerFor(JTable table) {
