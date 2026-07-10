@@ -32,6 +32,17 @@ import java.util.Set;
  * formatacao de quebra so acontece no nivel 0 de parenteses (exceto dentro
  * de chamadas JSON marcadas para quebra); dentro de outros parenteses
  * (funcoes, listas IN, subconsultas) o conteudo fica em linha.
+ *
+ * Alias de tabela (FROM/JOIN/UPDATE, com ou sem AS) e de coluna (AS, em
+ * SELECT/RETURNING) tem a caixa normalizada pela REGRA DA MAIORIA: cada
+ * instrucao formatada conta quantos alias o usuario escreveu todo maiusculo
+ * vs. todo minusculo e, havendo maioria clara, reescreve TODOS os alias
+ * (inclusive os de caixa mista) para essa caixa — alias de tabela tambem
+ * propaga a normalizacao para toda referencia qualificada "alias.coluna" no
+ * resto da instrucao, mesmo longe de onde foram definidos (protege contra o
+ * MySQL enxergar "p" e "P" como alias diferentes dentro da mesma query).
+ * Identificadores entre crases/aspas nunca entram nessa conta nem sao
+ * alterados — ver {@link #format(String)} / metodo privado normalizeAliasCase.
  */
 public final class SqlFormatter {
 
@@ -64,6 +75,7 @@ public final class SqlFormatter {
             return sql == null ? "" : sql;
         }
         List<Tok> tokens = tokenize(sql);
+        tokens = normalizeAliasCase(tokens);
         Set<Integer> jsonBreaks = computeJsonBreakPositions(tokens, indentJson);
         return new Run(keywordCase, style, jsonBreaks).run(tokens);
     }
@@ -324,6 +336,208 @@ public final class SqlFormatter {
             }
         }
         return result;
+    }
+
+    // ================= Regra da maioria para caixa de alias =================
+
+    private enum AliasKind { TABLE, COLUMN }
+
+    private record AliasDef(int tokenIndex, String text, AliasKind kind) {
+    }
+
+    /** Contexto de clausula usado apenas para achar aliases (independente do Run/layout). */
+    private static final int CLAUSE_OTHER = 0;
+    private static final int CLAUSE_SELECT = 1;
+    private static final int CLAUSE_FROM = 2;
+
+    private static boolean isReservedWord(String lower) {
+        return KEYWORDS.contains(lower);
+    }
+
+    /**
+     * +1 se o texto e todo maiusculo (e tem letra), -1 se e todo minusculo,
+     * 0 se nao tem letra ou e caixa mista (nao vota na maioria).
+     */
+    private static int aliasCaseVote(String text) {
+        boolean hasLetter = false;
+        for (int i = 0; i < text.length(); i++) {
+            if (Character.isLetter(text.charAt(i))) {
+                hasLetter = true;
+                break;
+            }
+        }
+        if (!hasLetter) {
+            return 0;
+        }
+        String upper = text.toUpperCase(Locale.ROOT);
+        String lower = text.toLowerCase(Locale.ROOT);
+        if (text.equals(upper) && !text.equals(lower)) {
+            return 1;
+        }
+        if (text.equals(lower) && !text.equals(upper)) {
+            return -1;
+        }
+        return 0;
+    }
+
+    /**
+     * Encontra toda definicao de alias de TABELA (em FROM/JOIN/UPDATE,
+     * explicita via AS ou implicita — "tabela t"/"tabela AS t") e de COLUNA
+     * (explicita via AS em SELECT/RETURNING), conta quantas foram escritas
+     * toda maiuscula vs toda minuscula pelo PROPRIO usuario e, se houver uma
+     * maioria clara, reescreve TODOS os alias (definicao + toda referencia
+     * "alias.coluna" de alias de tabela) para essa caixa — protege contra o
+     * MySQL tratar alias de tabela como case-sensitive de forma inconsistente
+     * dentro da mesma instrucao (ex.: "FROM pedidos P ... WHERE p.status=..."
+     * vira "FROM pedidos P ... WHERE P.status=..." se a maioria for maiuscula).
+     * <p>
+     * So identificadores ENTRE CRASES/ASPAS (T.QUOTED) nunca sao tocados —
+     * quem usa crase esta pedindo preservacao exata do nome. Sem maioria
+     * clara (empate ou nenhum alias encontrado), os tokens voltam inalterados.
+     */
+    private static List<Tok> normalizeAliasCase(List<Tok> toks) {
+        List<AliasDef> defs = new ArrayList<>();
+        int depth = 0;
+        int clause = CLAUSE_OTHER;
+        boolean expectTableName = false;
+
+        for (int i = 0; i < toks.size(); i++) {
+            Tok t = toks.get(i);
+            if (t.type() == T.PUNCT) {
+                switch (t.text()) {
+                    case "(" -> depth++;
+                    case ")" -> depth = Math.max(0, depth - 1);
+                    case "," -> {
+                        if (depth == 0 && clause == CLAUSE_FROM) {
+                            expectTableName = true;
+                        }
+                    }
+                    case ";" -> {
+                        clause = CLAUSE_OTHER;
+                        depth = 0;
+                        expectTableName = false;
+                    }
+                    default -> {
+                    }
+                }
+                continue;
+            }
+            if (t.type() != T.WORD || depth != 0) {
+                continue;
+            }
+            String low = t.text().toLowerCase(Locale.ROOT);
+
+            if (low.equals("select") || low.equals("returning")) {
+                clause = CLAUSE_SELECT;
+                expectTableName = false;
+                continue;
+            }
+            if (low.equals("from") || low.equals("update")) {
+                clause = CLAUSE_FROM;
+                expectTableName = true;
+                continue;
+            }
+            if (JOIN_WORDS.contains(low)) {
+                clause = CLAUSE_FROM;
+                expectTableName = true;
+                continue;
+            }
+            if (low.equals("on") || low.equals("using")) {
+                clause = CLAUSE_OTHER;
+                expectTableName = false;
+                continue;
+            }
+            if (low.equals("as")) {
+                if (i + 1 < toks.size() && toks.get(i + 1).type() == T.WORD) {
+                    Tok aliasTok = toks.get(i + 1);
+                    if (!isReservedWord(aliasTok.text().toLowerCase(Locale.ROOT))) {
+                        AliasKind kind = (clause == CLAUSE_FROM) ? AliasKind.TABLE : AliasKind.COLUMN;
+                        defs.add(new AliasDef(i + 1, aliasTok.text(), kind));
+                    }
+                }
+                expectTableName = false;
+                continue;
+            }
+            if (CLAUSE_STARTERS.contains(low)) {
+                clause = CLAUSE_OTHER;
+                expectTableName = false;
+                continue;
+            }
+            if (clause == CLAUSE_FROM && expectTableName) {
+                expectTableName = false;
+                // "schema.tabela": pula o "." e o proximo nome, o alias (se
+                // houver) vem so depois dele.
+                int j = i;
+                while (j + 2 < toks.size() && toks.get(j + 1).type() == T.PUNCT
+                        && toks.get(j + 1).text().equals(".")
+                        && (toks.get(j + 2).type() == T.WORD || toks.get(j + 2).type() == T.QUOTED)) {
+                    j += 2;
+                }
+                if (j + 1 < toks.size() && toks.get(j + 1).type() == T.PUNCT
+                        && toks.get(j + 1).text().equals("(")) {
+                    continue; // funcao de tabela — nao arriscamos achar alias aqui
+                }
+                if (j + 1 < toks.size()) {
+                    Tok next = toks.get(j + 1);
+                    if (next.type() == T.WORD && !isReservedWord(next.text().toLowerCase(Locale.ROOT))) {
+                        defs.add(new AliasDef(j + 1, next.text(), AliasKind.TABLE));
+                    }
+                }
+            }
+        }
+
+        if (defs.isEmpty()) {
+            return toks;
+        }
+        int upperVotes = 0;
+        int lowerVotes = 0;
+        for (AliasDef d : defs) {
+            int v = aliasCaseVote(d.text());
+            if (v > 0) {
+                upperVotes++;
+            } else if (v < 0) {
+                lowerVotes++;
+            }
+        }
+        if (upperVotes == lowerVotes) {
+            return toks; // empate (ou so alias de caixa mista) — nao mexe
+        }
+        boolean targetUpper = upperVotes > lowerVotes;
+
+        Set<String> tableAliasNamesLower = new HashSet<>();
+        for (AliasDef d : defs) {
+            if (d.kind() == AliasKind.TABLE) {
+                tableAliasNamesLower.add(d.text().toLowerCase(Locale.ROOT));
+            }
+        }
+
+        List<Tok> out = new ArrayList<>(toks);
+        for (AliasDef d : defs) {
+            Tok orig = out.get(d.tokenIndex());
+            out.set(d.tokenIndex(), new Tok(T.WORD, recase(orig.text(), targetUpper)));
+        }
+        // Propaga a mesma caixa para toda referencia qualificada "alias.coluna"
+        // de um alias de TABELA (ex.: normaliza tanto "P.nome" quanto "p.nome"
+        // para a mesma caixa escolhida, mesmo longe da clausula FROM/JOIN).
+        for (int i = 0; i < out.size() - 1; i++) {
+            Tok t = out.get(i);
+            if (t.type() != T.WORD) {
+                continue;
+            }
+            String low = t.text().toLowerCase(Locale.ROOT);
+            if (!tableAliasNamesLower.contains(low)) {
+                continue;
+            }
+            Tok next = out.get(i + 1);
+            if (next.type() == T.PUNCT && next.text().equals(".")) {
+                out.set(i, new Tok(T.WORD, recase(t.text(), targetUpper)));
+            }
+        }
+        return out;
+    }
+
+    private static String recase(String text, boolean upper) {
+        return upper ? text.toUpperCase(Locale.ROOT) : text.toLowerCase(Locale.ROOT);
     }
 
     // ================= Execucao da formatacao =================

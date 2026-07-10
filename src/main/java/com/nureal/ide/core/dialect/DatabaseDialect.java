@@ -1,6 +1,9 @@
 package com.nureal.ide.core.dialect;
 
 import com.nureal.ide.core.connection.ConnectionProfile;
+import com.nureal.ide.core.metadata.model.ForeignKeyInfo;
+import com.nureal.ide.core.metadata.model.IndexInfo;
+import com.nureal.ide.core.metadata.model.NewColumnSpec;
 import com.nureal.ide.core.metadata.model.NewTableSpec;
 
 import java.util.List;
@@ -101,13 +104,28 @@ public interface DatabaseDialect {
 
     /**
      * Comando para criar uma tabela nova a partir da especificacao coletada
-     * pelo {@code CreateTableDialog} (com.nureal.ide.ui) — nome da tabela,
+     * pelo {@code DdlAssistantDialog} (com.nureal.ide.ui) — nome da tabela,
      * colunas (tipo, tamanho, nulo, chave primaria, auto increment, default,
      * comentario) e comentario da tabela. Todo identificador (tabela/coluna)
      * ja deve sair envolvido em {@link #quoteIdentifier} pela implementacao;
      * valores literais (DEFAULT, COMMENT) devem ser escapados por ela.
      */
     String createTableStatement(NewTableSpec spec);
+
+    /**
+     * Monta um (ou mais) comando(s) ALTER TABLE para ADICIONAR colunas,
+     * chaves estrangeiras e/ou indices novos a uma tabela EXISTENTE — usado
+     * pelo assistente de DDL ({@code com.nureal.ide.ui.DdlAssistantDialog})
+     * no modo "alterar tabela". E SEMPRE ADITIVO (ADD COLUMN/ADD CONSTRAINT/
+     * ADD INDEX): nunca gera MODIFY/DROP — mudar ou remover algo que ja
+     * existe fica fora do escopo guiado do assistente, pois arrisca perda de
+     * dados e merece revisao manual do usuario. Qualquer uma das 3 listas
+     * pode vir vazia; se as 3 vierem vazias, retorna lista vazia (nada a
+     * fazer). Todo identificador (tabela/coluna) ja deve sair envolvido em
+     * {@link #quoteIdentifier} pela implementacao.
+     */
+    List<String> alterTableAddStatements(String tableName, List<NewColumnSpec> newColumns,
+            List<ForeignKeyInfo> newForeignKeys, List<IndexInfo> newIndexes);
 
     /**
      * Consulta minima e barata para "keep-alive" da conexao (um SELECT de

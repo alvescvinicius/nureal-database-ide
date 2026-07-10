@@ -1,9 +1,12 @@
 package com.nureal.ide.core.dialect;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
 import com.nureal.ide.core.connection.ConnectionProfile;
+import com.nureal.ide.core.metadata.model.ForeignKeyInfo;
+import com.nureal.ide.core.metadata.model.IndexInfo;
 import com.nureal.ide.core.metadata.model.NewColumnSpec;
 import com.nureal.ide.core.metadata.model.NewTableSpec;
 
@@ -108,7 +111,7 @@ public class MySqlDialect implements DatabaseDialect {
 
     /**
      * Monta o CREATE TABLE a partir da especificacao coletada pelo
-     * CreateTableDialog. Uma unica PRIMARY KEY (composta, se mais de uma
+     * com.nureal.ide.ui.DdlAssistantDialog. Uma unica PRIMARY KEY (composta, se mais de uma
      * coluna marcar {@code primaryKey}) e adicionada ao final, se houver
      * pelo menos uma. AUTO_INCREMENT so e emitido se a propria coluna pedir
      * (nao valida aqui se faz sentido — isso e responsabilidade do MySQL, que
@@ -121,10 +124,14 @@ public class MySqlDialect implements DatabaseDialect {
 
         List<String> pkColumns = new java.util.ArrayList<>();
         List<NewColumnSpec> cols = spec.columns();
+        List<ForeignKeyInfo> fks = spec.foreignKeys() == null ? List.of() : spec.foreignKeys();
+        List<IndexInfo> idxs = spec.indexes() == null ? List.of() : spec.indexes();
+        int extraClauses = (pkColumnNames(cols).isEmpty() ? 0 : 1) + fks.size() + idxs.size();
+
         for (int i = 0; i < cols.size(); i++) {
             NewColumnSpec c = cols.get(i);
             sql.append("  ").append(columnDefinition(c));
-            if (i < cols.size() - 1 || !pkColumnNames(cols).isEmpty()) {
+            if (i < cols.size() - 1 || extraClauses > 0) {
                 sql.append(",\n");
             } else {
                 sql.append("\n");
@@ -133,14 +140,91 @@ public class MySqlDialect implements DatabaseDialect {
                 pkColumns.add(quoteIdentifier(c.name()));
             }
         }
+        int remaining = extraClauses;
         if (!pkColumns.isEmpty()) {
-            sql.append("  PRIMARY KEY (").append(String.join(", ", pkColumns)).append(")\n");
+            sql.append("  PRIMARY KEY (").append(String.join(", ", pkColumns)).append(")");
+            remaining--;
+            sql.append(remaining > 0 ? ",\n" : "\n");
+        }
+        for (IndexInfo idx : idxs) {
+            sql.append("  ").append(indexDefinition(idx));
+            remaining--;
+            sql.append(remaining > 0 ? ",\n" : "\n");
+        }
+        for (ForeignKeyInfo fk : fks) {
+            sql.append("  ").append(foreignKeyDefinition(spec.name(), fk));
+            remaining--;
+            sql.append(remaining > 0 ? ",\n" : "\n");
         }
         sql.append(")");
         if (spec.comment() != null && !spec.comment().isBlank()) {
             sql.append(" COMMENT=").append(quoteLiteral(spec.comment()));
         }
         return sql.toString();
+    }
+
+    /**
+     * Monta um ALTER TABLE unico e aditivo (todas as colunas/FKs/indices
+     * novos numa so instrucao, atomica) — ver javadoc da interface
+     * {@link DatabaseDialect#alterTableAddStatements}.
+     */
+    @Override
+    public List<String> alterTableAddStatements(String tableName, List<NewColumnSpec> newColumns,
+            List<ForeignKeyInfo> newForeignKeys, List<IndexInfo> newIndexes) {
+        List<NewColumnSpec> cols = newColumns == null ? List.of() : newColumns;
+        List<ForeignKeyInfo> fks = newForeignKeys == null ? List.of() : newForeignKeys;
+        List<IndexInfo> idxs = newIndexes == null ? List.of() : newIndexes;
+        if (cols.isEmpty() && fks.isEmpty() && idxs.isEmpty()) {
+            return List.of();
+        }
+        List<String> parts = new ArrayList<>();
+        for (NewColumnSpec c : cols) {
+            parts.add("ADD COLUMN " + columnDefinition(c));
+        }
+        for (IndexInfo idx : idxs) {
+            parts.add("ADD " + indexDefinition(idx));
+        }
+        for (ForeignKeyInfo fk : fks) {
+            parts.add("ADD " + foreignKeyDefinition(tableName, fk));
+        }
+        String sql = "ALTER TABLE " + quoteIdentifier(tableName) + "\n  "
+                + String.join(",\n  ", parts);
+        return List.of(sql);
+    }
+
+    /** Nome padrao (limitado a 64 chars, limite de identificador do MySQL) quando o usuario deixa em branco. */
+    private static String autoName(String... parts) {
+        String base = String.join("_", parts);
+        return base.length() > 64 ? base.substring(0, 64) : base;
+    }
+
+    private String indexDefinition(IndexInfo idx) {
+        List<String> quotedCols = idx.columns().stream().map(this::quoteIdentifier).toList();
+        String name = (idx.name() == null || idx.name().isBlank())
+                ? autoName(idx.unique() ? "uq" : "idx", String.join("_", idx.columns()))
+                : idx.name();
+        String kind = idx.unique() ? "UNIQUE INDEX" : "INDEX";
+        return kind + " " + quoteIdentifier(name) + " (" + String.join(", ", quotedCols) + ")";
+    }
+
+    private String foreignKeyDefinition(String tableName, ForeignKeyInfo fk) {
+        List<String> localCols = fk.columns().stream().map(this::quoteIdentifier).toList();
+        List<String> refCols = fk.referencedColumns().stream().map(this::quoteIdentifier).toList();
+        String name = (fk.name() == null || fk.name().isBlank())
+                ? autoName("fk", tableName, String.join("_", fk.columns()))
+                : fk.name();
+        StringBuilder def = new StringBuilder();
+        def.append("CONSTRAINT ").append(quoteIdentifier(name))
+                .append(" FOREIGN KEY (").append(String.join(", ", localCols)).append(")")
+                .append(" REFERENCES ").append(quoteIdentifier(fk.referencedTable()))
+                .append(" (").append(String.join(", ", refCols)).append(")");
+        if (fk.onUpdate() != null && !fk.onUpdate().isBlank() && !"NO ACTION".equalsIgnoreCase(fk.onUpdate())) {
+            def.append(" ON UPDATE ").append(fk.onUpdate().toUpperCase(Locale.ROOT));
+        }
+        if (fk.onDelete() != null && !fk.onDelete().isBlank() && !"NO ACTION".equalsIgnoreCase(fk.onDelete())) {
+            def.append(" ON DELETE ").append(fk.onDelete().toUpperCase(Locale.ROOT));
+        }
+        return def.toString();
     }
 
     private static List<String> pkColumnNames(List<NewColumnSpec> cols) {

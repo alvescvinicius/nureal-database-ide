@@ -103,7 +103,6 @@ import com.nureal.ide.core.metadata.model.ColumnInfo;
 import com.nureal.ide.core.metadata.model.ForeignKeyInfo;
 import com.nureal.ide.core.metadata.model.IndexInfo;
 import com.nureal.ide.core.metadata.model.SchemaInfo;
-import com.nureal.ide.core.metadata.model.NewTableSpec;
 import com.nureal.ide.core.metadata.model.TableDetails;
 import com.nureal.ide.core.metadata.model.TableInfo;
 import com.nureal.ide.core.queries.SavedQueryStore;
@@ -187,6 +186,10 @@ public class MainWindow extends JFrame {
 	private JButton saveQueryButton;
 	private JButton themeButton;
 	private JComponent resultsOverlay;
+	private JLabel workspaceContextLabel;
+	private JComponent workspaceContextBar;
+	/** Nome da conexao em processo de conectar agora (ver {@link #setConnectingState}), ou null. */
+	private String connectingWorkspaceName;
 	private SwingWorker<List<QueryResult>, Void> runWorker;
 	private volatile Statement runningStatement;
 
@@ -1154,6 +1157,8 @@ public class MainWindow extends JFrame {
 		connStatusLabel.setText("Desconectado");
 		connStatusLabel.setForeground(new Color(0xB91C1C));
 		connProgress.setVisible(false);
+		connectingWorkspaceName = null;
+		updateWorkspaceContextBar();
 	}
 
 	private void setConnectingState(String name) {
@@ -1161,6 +1166,8 @@ public class MainWindow extends JFrame {
 		connStatusLabel.setText("Conectando a " + name + "...");
 		connStatusLabel.setForeground(new Color(0xB45309));
 		connProgress.setVisible(true);
+		connectingWorkspaceName = name;
+		updateWorkspaceContextBar();
 	}
 
 	private void setConnectedState(String label) {
@@ -1168,6 +1175,113 @@ public class MainWindow extends JFrame {
 		connStatusLabel.setText("Conectado: " + label);
 		connStatusLabel.setForeground(new Color(0x047857));
 		connProgress.setVisible(false);
+		connectingWorkspaceName = null;
+		updateWorkspaceContextBar();
+	}
+
+	// ---------- Barra de contexto do workspace (conexao/banco/esquema ativos) ----------
+
+	/**
+	 * Paleta fixa de cores usada para diferenciar visualmente cada CONEXAO
+	 * (nao o tema claro/escuro) — a mesma conexao sempre cai na mesma cor
+	 * (indice pelo hash do nome), entao o usuario aprende a associar "essa
+	 * cor = esse banco" ao longo do uso, inclusive entre sessoes.
+	 */
+	private static final Color[] WORKSPACE_PALETTE = {
+			new Color(0x2563EB), // azul
+			new Color(0x7C3AED), // roxo
+			new Color(0xDB2777), // rosa
+			new Color(0xEA580C), // laranja
+			new Color(0x0D9488), // teal
+			new Color(0xCA8A04), // amarelo escuro
+			new Color(0xDC2626), // vermelho
+			new Color(0x4F46E5), // indigo
+	};
+
+	private static Color colorForWorkspace(String name) {
+		if (name == null || name.isBlank()) {
+			return MUTED;
+		}
+		int idx = Math.floorMod(name.hashCode(), WORKSPACE_PALETTE.length);
+		return WORKSPACE_PALETTE[idx];
+	}
+
+	/**
+	 * Faixa fina, sempre visivel, colada diretamente acima das abas do editor
+	 * SQL — mostra SEM AMBIGUIDADE a qual conexao/banco/esquema qualquer
+	 * instrucao da aba ativa sera enviada ao clicar Executar. Existe porque,
+	 * com varias conexoes abertas ao mesmo tempo (cada uma com seu proprio
+	 * conjunto de abas — ver {@link #activateWorkspace}), o rodape (bem menor
+	 * e mais longe do editor) e facil de nao notar ao trocar de workspace.
+	 * A cor (ver {@link #colorForWorkspace}) e a MESMA em toda troca para a
+	 * mesma conexao, funcionando como uma "etiqueta" visual reconhecivel.
+	 */
+	private JComponent buildWorkspaceContextBar() {
+		workspaceContextLabel = new JLabel(" ");
+		workspaceContextLabel.setFont(workspaceContextLabel.getFont().deriveFont(Font.BOLD, 12f));
+		workspaceContextLabel.setBorder(BorderFactory.createEmptyBorder(4, 12, 4, 12));
+		workspaceContextLabel.setIconTextGap(8);
+
+		workspaceContextBar = new JPanel(new BorderLayout());
+		workspaceContextBar.add(workspaceContextLabel, BorderLayout.WEST);
+		updateWorkspaceContextBar();
+		return workspaceContextBar;
+	}
+
+	/**
+	 * Atualiza o texto/cor/borda da {@link #buildWorkspaceContextBar()} a
+	 * partir do workspace ativo — chamado sempre que o rodape de conexao
+	 * muda (ver {@code setConnectedState}/{@code setConnectingState}/
+	 * {@code setDisconnectedState}), que ja e disparado em todos os pontos
+	 * relevantes (conectar, trocar de workspace, trocar de esquema,
+	 * desconectar).
+	 */
+	private void updateWorkspaceContextBar() {
+		if (workspaceContextLabel == null || workspaceContextBar == null) {
+			return; // ainda nao construida (chamada durante a montagem inicial)
+		}
+		if (connectingWorkspaceName != null) {
+			Color tag = colorForWorkspace(connectingWorkspaceName);
+			workspaceContextLabel.setIcon(ConnectionsPanel.statusDot(new Color(0xF59E0B)));
+			workspaceContextLabel.setForeground(new Color(0xB45309));
+			workspaceContextLabel.setText("Conectando a " + connectingWorkspaceName + "...");
+			workspaceContextBar.setBorder(BorderFactory.createMatteBorder(0, 0, 2, 0, tag));
+			return;
+		}
+		Conexao w = activeWorkspace;
+		if (w == null || w.profile() == null) {
+			workspaceContextLabel.setIcon(ConnectionsPanel.statusDot(new Color(0xC4C9D1)));
+			workspaceContextLabel.setForeground(MUTED);
+			workspaceContextLabel.setText(
+					"Rascunho — sem conexao (as instrucoes aqui nao serao executadas em nenhum banco)");
+			workspaceContextBar
+					.setBorder(BorderFactory.createMatteBorder(0, 0, 2, 0, new Color(0xE2E5EA)));
+			return;
+		}
+		boolean connected = w.mgr().isConnected();
+		Color tag = colorForWorkspace(w.name());
+		String schemaPart;
+		if (currentSchema != null && connected) {
+			schemaPart = currentSchema.name();
+		} else if (w.schemaList() != null && connected) {
+			schemaPart = "selecione um esquema";
+		} else {
+			schemaPart = "-";
+		}
+		StringBuilder text = new StringBuilder();
+		if (connected) {
+			text.append("Executando em: ").append(w.name())
+					.append("   ·   schema: ").append(schemaPart)
+					.append("   ·   ").append(w.profile().host()).append(':').append(w.profile().port());
+		} else {
+			text.append("Desconectado: ").append(w.name())
+					.append("   ·   ultimo schema: ").append(w.schema() != null ? w.schema().name() : "-");
+		}
+		workspaceContextLabel.setIcon(ConnectionsPanel.statusDot(connected ? tag : new Color(0xC4C9D1)));
+		workspaceContextLabel.setForeground(connected ? tag.darker() : MUTED);
+		workspaceContextLabel.setText(text.toString());
+		workspaceContextBar.setBorder(
+				BorderFactory.createMatteBorder(0, 0, 2, 0, connected ? tag : new Color(0xE2E5EA)));
 	}
 
 	// ---------- Lado esquerdo ----------
@@ -1380,7 +1494,14 @@ public class MainWindow extends JFrame {
 		// com a quina das conexões
 		panel.setBorder(BorderFactory.createEmptyBorder(0, 0, 4, 0));
 
-		panel.add(buildToolbar(), BorderLayout.NORTH);
+		// Empilha toolbar + faixa de contexto (conexao/schema ativos) acima
+		// das abas do editor — ver buildWorkspaceContextBar().
+		JPanel north = new JPanel();
+		north.setLayout(new BoxLayout(north, BoxLayout.Y_AXIS));
+		north.add(buildToolbar());
+		north.add(buildWorkspaceContextBar());
+
+		panel.add(north, BorderLayout.NORTH);
 		panel.add(editorTabs, BorderLayout.CENTER);
 		return panel;
 	}
@@ -2149,7 +2270,6 @@ public class MainWindow extends JFrame {
 						ws.schemaList = null;
 					}
 					activateWorkspace(ws);
-					setTitle("Nureal Database IDE - " + target.name());
 					if (pickSchema) {
 						statusBar.setText(
 								" Conectado  (" + ((List<?>) result).size() + " esquema(s) - duplo-clique para abrir)");
@@ -3089,9 +3209,11 @@ public class MainWindow extends JFrame {
 
 	/**
 	 * Cria o modelo (cabecalhos + tipos + origem real + tipo SQL de cada coluna)
-	 * para uma consulta.
+	 * para uma consulta. Visibilidade de pacote (nao mais private): reaproveitado
+	 * por {@link FkInspectorWindow} para montar a grade do Inspetor Flutuante de FK
+	 * com o MESMO caminho usado pelas abas de resultado normais.
 	 */
-	private static ResultTableModel createModel(ResultSet rs) throws SQLException {
+	static ResultTableModel createModel(ResultSet rs) throws SQLException {
 		ResultSetMetaData md = rs.getMetaData();
 		int cols = md.getColumnCount();
 		Vector<String> names = new Vector<>();
@@ -3177,8 +3299,11 @@ public class MainWindow extends JFrame {
 		}
 	}
 
-	/** Anexa ate {@code max} linhas do ResultSet ao modelo; retorna quantas leu. */
-	private static int appendPage(DefaultTableModel model, ResultSet rs, int max) throws SQLException {
+	/**
+	 * Anexa ate {@code max} linhas do ResultSet ao modelo; retorna quantas leu.
+	 * Visibilidade de pacote: tambem usado por {@link FkInspectorWindow}.
+	 */
+	static int appendPage(DefaultTableModel model, ResultSet rs, int max) throws SQLException {
 		int cols = model.getColumnCount();
 		int read = 0;
 		while (read < max && rs.next()) {
@@ -3615,12 +3740,13 @@ public class MainWindow extends JFrame {
 	}
 
 	/**
-	 * Cria uma tabela nova no esquema aberto — acessivel pelo menu de
-	 * contexto (clique direito) da raiz do esquema, do no "Tabelas" e de
-	 * qualquer tabela ja existente (ver {@link #buildSchemaRootContextMenu},
-	 * {@link #buildTablesCategoryContextMenu} e {@link #buildObjectContextMenu}).
-	 * Coleta a especificacao via {@link CreateTableDialog}, monta o DDL pelo
-	 * dialeto ativo (ver {@code DatabaseDialect#createTableStatement}) e, apos
+	 * Abre o assistente de DDL ({@link DdlAssistantDialog}) no modo "criar
+	 * tabela nova" — acessivel pelo menu de contexto (clique direito) da
+	 * raiz do esquema, do no "Tabelas" e de qualquer tabela ja existente (ver
+	 * {@link #buildSchemaRootContextMenu}, {@link #buildTablesCategoryContextMenu}
+	 * e {@link #buildObjectContextMenu}). O assistente coleta colunas, chaves
+	 * estrangeiras e indices de forma guiada, mostra sugestoes de
+	 * normalizacao e uma pre-visualizacao do DDL antes de executar; apos
 	 * executar, atualiza a arvore de objetos (mesmo caminho de
 	 * {@link #refreshObjectTree}) para a tabela nova aparecer sem precisar de
 	 * um refresh manual.
@@ -3637,19 +3763,81 @@ public class MainWindow extends JFrame {
 		for (TableInfo v : currentSchema.views()) {
 			existingNames.add(v.name().toLowerCase(Locale.ROOT));
 		}
-		NewTableSpec spec = CreateTableDialog.show(this, name -> existingNames.contains(name.toLowerCase(Locale.ROOT)));
-		if (spec == null) {
-			return; // cancelado
+		Conexao ws = activeWorkspace;
+		String schemaName = currentSchema.name();
+		DdlAssistantDialog.openCreate(this, currentSchema, dialect,
+				name -> existingNames.contains(name.toLowerCase(Locale.ROOT)),
+				(statements, onOk, onErr) -> runDdlStatements(ws, statements, onOk, onErr),
+				this::sendDdlToEditor,
+				() -> {
+					if (ws == activeWorkspace && schemaName.equals(currentSchema.name())) {
+						refreshObjectTree(false);
+					}
+				});
+	}
+
+	/**
+	 * Abre o assistente de DDL no modo "alterar tabela existente" — acessivel
+	 * pelo menu de contexto de uma tabela ja existente (ver
+	 * {@link #buildObjectContextMenu}). So permite ADICIONAR colunas, chaves
+	 * estrangeiras e indices (nunca modificar/remover o que ja existe — ver
+	 * javadoc de {@link DdlAssistantDialog}); carrega a estrutura atual da
+	 * tabela (colunas/indices/FKs) antes de abrir o assistente para dar
+	 * contexto e alimentar as sugestoes de normalizacao.
+	 */
+	private void alterTable(ObjNode obj) {
+		if (activeWorkspace == null || !activeWorkspace.mgr.isConnected() || currentSchema == null) {
+			statusBar.setText(" Abra um esquema antes de alterar uma tabela.");
+			return;
 		}
 		Conexao ws = activeWorkspace;
 		String schemaName = currentSchema.name();
-		statusBar.setText(" Criando tabela \"" + spec.name() + "\"...");
+		String tableName = obj.name();
+		statusBar.setText(" Carregando estrutura de \"" + tableName + "\"...");
+		new SwingWorker<TableDetails, Void>() {
+			@Override
+			protected TableDetails doInBackground() throws Exception {
+				Connection conn = ws.mgr.getConnection();
+				return metadataService.loadTableDetails(conn, schemaName, tableName);
+			}
+
+			@Override
+			protected void done() {
+				try {
+					TableDetails details = get();
+					statusBar.setText(" Pronto.");
+					DdlAssistantDialog.openAlter(MainWindow.this, currentSchema, tableName, details, dialect,
+							(statements, onOk, onErr) -> runDdlStatements(ws, statements, onOk, onErr),
+							MainWindow.this::sendDdlToEditor,
+							() -> {
+								if (ws == activeWorkspace && schemaName.equals(currentSchema.name())) {
+									refreshObjectTree(false);
+								}
+							});
+				} catch (Exception ex) {
+					showError("Falha ao carregar estrutura da tabela", ex);
+					statusBar.setText(" Falha ao carregar estrutura da tabela.");
+				}
+			}
+		}.execute();
+	}
+
+	/**
+	 * Executa uma lista de comandos DDL (ja prontos, montados pelo
+	 * {@link DdlAssistantDialog}) em background na conexao do workspace
+	 * informado, chamando {@code onOk}/{@code onErr} de volta na EDT —
+	 * mesmo padrao ja usado por {@link #createTable()} e {@link #createSchema()}.
+	 */
+	private void runDdlStatements(Conexao ws, List<String> statements, Runnable onOk,
+			java.util.function.Consumer<Exception> onErr) {
 		new SwingWorker<Void, Void>() {
 			@Override
 			protected Void doInBackground() throws Exception {
 				Connection conn = ws.mgr.getConnection();
 				try (Statement st = conn.createStatement()) {
-					st.executeUpdate(dialect.createTableStatement(spec));
+					for (String sql : statements) {
+						st.executeUpdate(sql);
+					}
 				}
 				return null;
 			}
@@ -3658,16 +3846,29 @@ public class MainWindow extends JFrame {
 			protected void done() {
 				try {
 					get();
-					statusBar.setText(" Tabela \"" + spec.name() + "\" criada.");
-					if (ws == activeWorkspace && schemaName.equals(currentSchema.name())) {
-						refreshObjectTree(false);
-					}
+					onOk.run();
+				} catch (java.util.concurrent.ExecutionException ex) {
+					Throwable cause = ex.getCause();
+					onErr.accept(cause instanceof Exception e2 ? e2 : ex);
 				} catch (Exception ex) {
-					showError("Falha ao criar tabela", ex);
-					statusBar.setText(" Falha ao criar tabela.");
+					onErr.accept(ex);
 				}
 			}
 		}.execute();
+	}
+
+	/** Abre uma aba de editor nova com o DDL gerado pelo assistente — botao "Enviar para o editor". */
+	private void sendDdlToEditor(String ddl) {
+		String title = "DDL";
+		int n = 1;
+		while (titleExists(title)) {
+			title = "DDL " + (++n);
+		}
+		if (addQueryTab(title, ddl)) {
+			statusBar.setText(" DDL enviado para uma nova aba do editor.");
+		} else {
+			statusBar.setText(" Nao foi possivel abrir uma aba nova (limite de abas atingido).");
+		}
 	}
 
 	private JPopupMenu buildObjectContextMenu(ObjNode obj) {
@@ -3685,6 +3886,9 @@ public class MainWindow extends JFrame {
 		menu.add(copyName);
 		if (obj.type() == NodeType.TABLE) {
 			menu.addSeparator();
+			JMenuItem alterTable = new JMenuItem("Alterar tabela... (assistente de DDL)");
+			alterTable.addActionListener(a -> alterTable(obj));
+			menu.add(alterTable);
 			JMenuItem createTable = new JMenuItem("Nova tabela...");
 			createTable.addActionListener(a -> createTable());
 			menu.add(createTable);

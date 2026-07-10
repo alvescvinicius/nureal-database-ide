@@ -18,7 +18,30 @@ O que já funciona:
   - demais posições → palavras-chave + tabelas + colunas
 - Editor SQL com syntax highlighting; execução com F5; resultados em grade
 - **Formatador de SQL** (Ctrl+Shift+F) com 3 presets de estilo (RIVER, STANDARD,
-  COMMA_FIRST) e caixa de palavra-chave configurável
+  COMMA_FIRST), caixa de palavra-chave configurável e **regra da maioria para
+  caixa de alias**: conta quantos alias de tabela/coluna o usuário escreveu
+  maiúsculo vs. minúsculo e normaliza todos (definição + toda referência
+  `alias.coluna`) para a maioria — protege contra o MySQL enxergar `p` e `P`
+  como alias diferentes na mesma instrução
+- **Faixa de contexto do workspace**, colada acima das abas do editor SQL,
+  com cor própria por conexão: mostra sem ambiguidade a qual conexão/banco/
+  esquema qualquer instrução da aba ativa será enviada ao Executar — essencial
+  com várias conexões abertas ao mesmo tempo
+- **Assistente de DDL guiado** (menu de contexto: "Nova tabela..." / "Alterar
+  tabela..."): cria uma tabela do zero ou adiciona colunas/chaves estrangeiras/
+  índices a uma existente (sempre aditivo no modo alterar — nunca MODIFY/DROP),
+  com abas para colunas, FKs, índices, **sugestões automáticas de normalização**
+  (chave primária ausente, tipos de dado, grupos repetitivos, dependência
+  parcial/transitiva, índices de FK ausentes) e pré-visualização do DDL já
+  formatado antes de executar
+- **Inspetor Flutuante de Chave Estrangeira**: botão direito num valor de FK
+  no resultado (ex.: o `5` da coluna `cliente_id`) → "Visualizar Origem" abre
+  uma janela **não-modal** (não bloqueia a IDE, pode ser arrastada/redimensionada/
+  levada para outro monitor) já filtrada pelo registro de origem, com barra de
+  filtro editável por coluna referenciada (apagar/trocar o valor ou limpar para
+  ver todos os registros). A grade interna é um resultado de verdade — suporta
+  o mesmo menu de contexto, inclusive abrir **outro** inspetor a partir de uma
+  FK vista dentro do inspetor (navegação em cadeia pelas relações)
 - **Confirmação de segurança** antes de rodar comandos de risco (DELETE/UPDATE
   sem WHERE, DROP, TRUNCATE, ALTER/CREATE/RENAME)
 - **Exportação dos resultados para Excel** (.xlsx, via Apache POI/SXSSF)

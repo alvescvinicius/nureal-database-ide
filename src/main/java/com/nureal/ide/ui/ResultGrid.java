@@ -152,7 +152,22 @@ final class ResultGrid extends JPanel {
                 clearFilterUi();
             }
         };
-        ResultContextMenu.install(table, sorter, metadataSource, filterController, exportExcel);
+        // "Visualizar Origem" (Inspetor Flutuante de FK): monta os valores
+        // das coluna(s) LOCAIS da chave estrangeira NESTA linha (na MESMA
+        // ordem de ForeignKeyInfo#columns() — suporta FK composta) e abre o
+        // FkInspectorWindow ja filtrado por eles. Uma coluna local que nao
+        // esteja presente neste resultado (SELECT nao trouxe aquele campo)
+        // vira null na lista — o inspetor so filtra pelas que resolveu.
+        ResultContextMenu.FkOriginHandler fkOrigin = (colMeta, viewRow) -> {
+            int modelRow = table.convertRowIndexToModel(viewRow);
+            List<Object> localValues = new ArrayList<>();
+            for (String localCol : colMeta.foreignKey().columns()) {
+                localValues.add(findColumnValue(model, colMeta.sourceTable(), localCol, modelRow));
+            }
+            FkInspectorWindow.open(DialogUtil.owner(table), connectionManager, schema, metadataCache, scale,
+                    colMeta.foreignKey(), localValues);
+        };
+        ResultContextMenu.install(table, sorter, metadataSource, filterController, exportExcel, fkOrigin);
         ResultHeaderContextMenu.install(table, header, sorter, metadataSource, filterController, this::persistLayout);
         ResultContextMenu.installOnCorner(corner, table, sorter, metadataSource, filterController, exportExcel);
 
@@ -173,6 +188,27 @@ final class ResultGrid extends JPanel {
 
         add(buildFilterBar(model), BorderLayout.NORTH);
         add(scroll, BorderLayout.CENTER);
+    }
+
+    /**
+     * Acha, entre as colunas do resultado, aquela cuja tabela/coluna REAIS de
+     * origem (ver {@code ResultTableModel#sourceTable}/{@code #realColumnName})
+     * batem com {@code sourceTable}/{@code localColumnName} (case-insensitive)
+     * e devolve o valor dela em {@code modelRow} — usado por "Visualizar
+     * Origem" para montar o filtro do {@link FkInspectorWindow}. {@code null}
+     * se a coluna nao estiver neste resultado (SELECT parcial).
+     */
+    private static Object findColumnValue(ResultTableModel model, String sourceTable, String localColumnName,
+            int modelRow) {
+        for (int c = 0; c < model.getColumnCount(); c++) {
+            String rc = model.realColumnName(c);
+            String st = model.sourceTable(c);
+            if (rc != null && rc.equalsIgnoreCase(localColumnName)
+                    && (sourceTable == null || st == null || st.equalsIgnoreCase(sourceTable))) {
+                return model.getValueAt(modelRow, c);
+            }
+        }
+        return null;
     }
 
     JTable table() {

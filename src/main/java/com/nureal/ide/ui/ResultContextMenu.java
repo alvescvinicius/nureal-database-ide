@@ -1,5 +1,7 @@
 package com.nureal.ide.ui;
 
+import com.nureal.ide.core.metadata.model.ForeignKeyInfo;
+
 import javax.swing.JFileChooser;
 import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
@@ -28,8 +30,24 @@ final class ResultContextMenu {
         void clearFilter();
     }
 
+    /**
+     * Recebe o pedido de "Visualizar Origem" (Inspetor Flutuante de FK) —
+     * implementado por {@link ResultGrid}, que ja tem a conexao/schema/cache
+     * de metadados a mao para abrir {@link FkInspectorWindow}. {@code row} e
+     * o indice de VIEW da linha clicada (o handler converte para modelo e le
+     * o valor de cada coluna local da FK, suportando FKs compostas).
+     */
+    interface FkOriginHandler {
+        void openOrigin(ColumnMetadata metadata, int viewRow);
+    }
+
     static void install(JTable table, ColumnSorter sorter, ColumnHeaderRenderer.MetadataSource metadataSource,
             FilterController filter, Runnable exportExcel) {
+        install(table, sorter, metadataSource, filter, exportExcel, null);
+    }
+
+    static void install(JTable table, ColumnSorter sorter, ColumnHeaderRenderer.MetadataSource metadataSource,
+            FilterController filter, Runnable exportExcel, FkOriginHandler fkOrigin) {
         table.addMouseListener(new MouseAdapter() {
             @Override
             public void mousePressed(MouseEvent e) {
@@ -50,7 +68,7 @@ final class ResultContextMenu {
                 if (row >= 0 && col >= 0 && !table.isCellSelected(row, col)) {
                     table.changeSelection(row, col, false, false);
                 }
-                buildMenu(table, sorter, metadataSource, filter, exportExcel, row, col)
+                buildMenu(table, sorter, metadataSource, filter, exportExcel, row, col, fkOrigin)
                         .show(table, e.getX(), e.getY());
             }
         });
@@ -86,7 +104,7 @@ final class ResultContextMenu {
                 if (row >= 0 && !table.isRowSelected(row)) {
                     selection.selectRow(row, false, false);
                 }
-                buildMenu(table, sorter, metadataSource, filter, exportExcel, row, -1)
+                buildMenu(table, sorter, metadataSource, filter, exportExcel, row, -1, null)
                         .show(gutter, e.getX(), e.getY());
             }
         });
@@ -119,7 +137,7 @@ final class ResultContextMenu {
                 if (table.getRowCount() > 0 && table.getSelectedRowCount() < table.getRowCount()) {
                     table.selectAll();
                 }
-                buildMenu(table, sorter, metadataSource, filter, exportExcel, -1, -1)
+                buildMenu(table, sorter, metadataSource, filter, exportExcel, -1, -1, null)
                         .show(corner, e.getX(), e.getY());
             }
         });
@@ -127,7 +145,7 @@ final class ResultContextMenu {
 
     private static JPopupMenu buildMenu(JTable table, ColumnSorter sorter,
             ColumnHeaderRenderer.MetadataSource metadataSource, FilterController filter,
-            Runnable exportExcel, int row, int col) {
+            Runnable exportExcel, int row, int col, FkOriginHandler fkOrigin) {
         JPopupMenu menu = new JPopupMenu();
 
         menu.add(item("Copiar", () -> GridClipboard.copySelectionAuto(table)));
@@ -152,6 +170,15 @@ final class ResultContextMenu {
             menu.add(item("Filtrar por este valor", () -> filter.filterByValue(modelColumn, text)));
             menu.add(item("Ver conteudo completo", () ->
                     CellContentViewer.show(table, table.getColumnName(col), value)));
+            if (fkOrigin != null && metadataSource != null) {
+                ColumnMetadata meta = metadataSource.metadataFor(modelColumn);
+                if (meta != null && meta.hasForeignKey()) {
+                    ForeignKeyInfo fk = meta.foreignKey();
+                    final int viewRow = row;
+                    menu.add(item("Visualizar Origem (" + fk.referencedTable() + ")",
+                            () -> fkOrigin.openOrigin(meta, viewRow)));
+                }
+            }
         }
         menu.add(item("Limpar filtro", filter::clearFilter));
 

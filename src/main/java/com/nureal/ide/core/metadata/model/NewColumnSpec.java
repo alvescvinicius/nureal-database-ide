@@ -2,10 +2,11 @@ package com.nureal.ide.core.metadata.model;
 
 /**
  * Especificacao de UMA coluna a ser criada por um CREATE TABLE (ver
- * {@link NewTableSpec}). Vem direto do formulario do usuario (ver
- * {@code CreateTableDialog} em com.nureal.ide.ui) — nenhuma validacao de SQL
- * acontece aqui, so a montagem do DDL em si (ver
- * {@code DatabaseDialect#createTableStatement}).
+ * {@link NewTableSpec}) ou adicionada por um ALTER TABLE aditivo. Vem direto
+ * do formulario do usuario (ver {@code DdlAssistantDialog} em
+ * com.nureal.ide.ui) — nenhuma validacao de SQL acontece aqui, so a
+ * montagem do DDL em si (ver {@code DatabaseDialect#createTableStatement}/
+ * {@code DatabaseDialect#alterTableAddStatements}).
  *
  * @param name           nome da coluna (sem aspas/crases).
  * @param sqlType        tipo base (ex.: "VARCHAR", "INT", "DECIMAL").
