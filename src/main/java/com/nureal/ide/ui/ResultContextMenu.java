@@ -3,6 +3,7 @@ package com.nureal.ide.ui;
 import com.nureal.ide.core.metadata.model.ForeignKeyInfo;
 
 import javax.swing.JFileChooser;
+import javax.swing.JMenu;
 import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
 import javax.swing.JPopupMenu;
@@ -148,19 +149,27 @@ final class ResultContextMenu {
             Runnable exportExcel, int row, int col, FkOriginHandler fkOrigin) {
         JPopupMenu menu = new JPopupMenu();
 
+        // "Copiar" (atalho direto, o mais usado) fica solto no topo; as
+        // demais variantes (com cabecalhos, como INSERT/UPDATE/IN/JSON/CSV)
+        // ficam agrupadas num submenu — eram 7 itens soltos antes, dificultando
+        // escanear o menu rapido (pedido explicito: menu flat longo demais).
         menu.add(item("Copiar", () -> GridClipboard.copySelectionAuto(table)));
-        menu.add(item("Copiar com cabecalhos", () -> GridClipboard.copySelectionWithHeader(table)));
-        menu.add(item("Copiar linha", () -> GridClipboard.copyRows(table)));
-        menu.add(item("Copiar como INSERT", () -> GridClipboard.copyAsInsert(table, table)));
-        menu.add(item("Copiar como UPDATE", () -> GridClipboard.copyAsUpdate(table, table)));
-        menu.add(item("Copiar como IN", () -> GridClipboard.copyAsIn(table)));
-        menu.add(item("Copiar como JSON", () -> GridClipboard.copyAsJson(table)));
-        menu.add(item("Copiar como CSV", () -> GridClipboard.copyAsCsv(table)));
+        JMenu copyMore = new JMenu("Copiar como...");
+        copyMore.add(item("Com cabecalhos", () -> GridClipboard.copySelectionWithHeader(table)));
+        copyMore.add(item("Linha", () -> GridClipboard.copyRows(table)));
+        copyMore.add(item("INSERT", () -> GridClipboard.copyAsInsert(table, table)));
+        copyMore.add(item("UPDATE", () -> GridClipboard.copyAsUpdate(table, table)));
+        copyMore.add(item("IN (...)", () -> GridClipboard.copyAsIn(table)));
+        copyMore.add(item("JSON", () -> GridClipboard.copyAsJson(table)));
+        copyMore.add(item("CSV", () -> GridClipboard.copyAsCsv(table)));
+        menu.add(copyMore);
         menu.addSeparator();
 
-        menu.add(item("Exportar Excel...", exportExcel));
-        menu.add(item("Exportar CSV...", () -> exportToFile(table, "csv")));
-        menu.add(item("Exportar JSON...", () -> exportToFile(table, "json")));
+        JMenu exportMenu = new JMenu("Exportar");
+        exportMenu.add(item("Excel...", exportExcel));
+        exportMenu.add(item("CSV...", () -> exportToFile(table, "csv")));
+        exportMenu.add(item("JSON...", () -> exportToFile(table, "json")));
+        menu.add(exportMenu);
         menu.addSeparator();
 
         int modelColumn = (col >= 0) ? table.getColumnModel().getColumn(col).getModelIndex() : -1;

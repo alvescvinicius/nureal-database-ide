@@ -45,6 +45,7 @@ import javax.swing.Box;
 import javax.swing.ButtonGroup;
 import javax.swing.BoxLayout;
 import javax.swing.DefaultListCellRenderer;
+import javax.swing.Icon;
 import javax.swing.JButton;
 import javax.swing.JCheckBoxMenuItem;
 import javax.swing.JComboBox;
@@ -186,8 +187,6 @@ public class MainWindow extends JFrame {
 	private JButton saveQueryButton;
 	private JButton themeButton;
 	private JComponent resultsOverlay;
-	private JLabel workspaceContextLabel;
-	private JComponent workspaceContextBar;
 	/** Nome da conexao em processo de conectar agora (ver {@link #setConnectingState}), ou null. */
 	private String connectingWorkspaceName;
 	private SwingWorker<List<QueryResult>, Void> runWorker;
@@ -1182,106 +1181,76 @@ public class MainWindow extends JFrame {
 	// ---------- Barra de contexto do workspace (conexao/banco/esquema ativos) ----------
 
 	/**
-	 * Paleta fixa de cores usada para diferenciar visualmente cada CONEXAO
-	 * (nao o tema claro/escuro) — a mesma conexao sempre cai na mesma cor
-	 * (indice pelo hash do nome), entao o usuario aprende a associar "essa
-	 * cor = esse banco" ao longo do uso, inclusive entre sessoes.
+	 * Delega para {@link ConnectionsPanel#colorForWorkspace} — a paleta e a
+	 * logica de atribuicao de cor por conexao moraram para la porque so ali
+	 * existe a ORDEM ESTAVEL de cadastro das conexoes, necessaria pra garantir
+	 * uma cor DIFERENTE para cada conexao (indice na lista, nao mais hash do
+	 * nome — hash podia repetir cor entre duas conexoes abertas ao mesmo
+	 * tempo).
 	 */
-	private static final Color[] WORKSPACE_PALETTE = {
-			new Color(0x2563EB), // azul
-			new Color(0x7C3AED), // roxo
-			new Color(0xDB2777), // rosa
-			new Color(0xEA580C), // laranja
-			new Color(0x0D9488), // teal
-			new Color(0xCA8A04), // amarelo escuro
-			new Color(0xDC2626), // vermelho
-			new Color(0x4F46E5), // indigo
-	};
-
-	private static Color colorForWorkspace(String name) {
-		if (name == null || name.isBlank()) {
-			return MUTED;
-		}
-		int idx = Math.floorMod(name.hashCode(), WORKSPACE_PALETTE.length);
-		return WORKSPACE_PALETTE[idx];
+	private Color colorForWorkspace(String name) {
+		return connectionsPanel.colorForWorkspace(name);
 	}
 
 	/**
-	 * Faixa fina, sempre visivel, colada diretamente acima das abas do editor
-	 * SQL — mostra SEM AMBIGUIDADE a qual conexao/banco/esquema qualquer
-	 * instrucao da aba ativa sera enviada ao clicar Executar. Existe porque,
-	 * com varias conexoes abertas ao mesmo tempo (cada uma com seu proprio
-	 * conjunto de abas — ver {@link #activateWorkspace}), o rodape (bem menor
-	 * e mais longe do editor) e facil de nao notar ao trocar de workspace.
-	 * A cor (ver {@link #colorForWorkspace}) e a MESMA em toda troca para a
-	 * mesma conexao, funcionando como uma "etiqueta" visual reconhecivel.
-	 */
-	private JComponent buildWorkspaceContextBar() {
-		workspaceContextLabel = new JLabel(" ");
-		workspaceContextLabel.setFont(workspaceContextLabel.getFont().deriveFont(Font.BOLD, 12f));
-		workspaceContextLabel.setBorder(BorderFactory.createEmptyBorder(4, 12, 4, 12));
-		workspaceContextLabel.setIconTextGap(8);
-
-		workspaceContextBar = new JPanel(new BorderLayout());
-		workspaceContextBar.add(workspaceContextLabel, BorderLayout.WEST);
-		updateWorkspaceContextBar();
-		return workspaceContextBar;
-	}
-
-	/**
-	 * Atualiza o texto/cor/borda da {@link #buildWorkspaceContextBar()} a
-	 * partir do workspace ativo — chamado sempre que o rodape de conexao
-	 * muda (ver {@code setConnectedState}/{@code setConnectingState}/
-	 * {@code setDisconnectedState}), que ja e disparado em todos os pontos
-	 * relevantes (conectar, trocar de workspace, trocar de esquema,
-	 * desconectar).
+	 * Atualiza o pequeno DOT colorido no icone de cada aba do editor (todas
+	 * pertencem sempre ao mesmo workspace ATIVO — trocar de conexao
+	 * reconstroi o conjunto inteiro de abas, ver {@code rebuildEditorTabs}) —
+	 * chamado sempre que o estado de conexao muda (conectar, trocar de
+	 * workspace, trocar de esquema, desconectar; ver {@code setConnectedState}/
+	 * {@code setConnectingState}/{@code setDisconnectedState}) e tambem ao
+	 * criar/restaurar abas (ver {@code addQueryTab}/{@code rebuildEditorTabs}).
+	 * <p>
+	 * Antes havia uma faixa de texto fixa acima das abas ("Executando em:
+	 * conexao · schema: X · host:porta") — removida a pedido do usuario, por
+	 * nao combinar com o resto da aplicacao. A mesma informacao continua
+	 * disponivel (tooltip do dot/aba), so nao ocupa mais uma linha inteira
+	 * permanentemente; a cor de identidade da conexao (ver
+	 * {@link #colorForWorkspace}) fica so no dot, no mesmo lugar onde antes
+	 * havia so um marcador neutro.
 	 */
 	private void updateWorkspaceContextBar() {
-		if (workspaceContextLabel == null || workspaceContextBar == null) {
+		if (editorTabs == null) {
 			return; // ainda nao construida (chamada durante a montagem inicial)
 		}
+		Icon dot;
+		String tooltip;
 		if (connectingWorkspaceName != null) {
-			Color tag = colorForWorkspace(connectingWorkspaceName);
-			workspaceContextLabel.setIcon(ConnectionsPanel.statusDot(new Color(0xF59E0B)));
-			workspaceContextLabel.setForeground(new Color(0xB45309));
-			workspaceContextLabel.setText("Conectando a " + connectingWorkspaceName + "...");
-			workspaceContextBar.setBorder(BorderFactory.createMatteBorder(0, 0, 2, 0, tag));
-			return;
-		}
-		Conexao w = activeWorkspace;
-		if (w == null || w.profile() == null) {
-			workspaceContextLabel.setIcon(ConnectionsPanel.statusDot(new Color(0xC4C9D1)));
-			workspaceContextLabel.setForeground(MUTED);
-			workspaceContextLabel.setText(
-					"Rascunho — sem conexao (as instrucoes aqui nao serao executadas em nenhum banco)");
-			workspaceContextBar
-					.setBorder(BorderFactory.createMatteBorder(0, 0, 2, 0, new Color(0xE2E5EA)));
-			return;
-		}
-		boolean connected = w.mgr().isConnected();
-		Color tag = colorForWorkspace(w.name());
-		String schemaPart;
-		if (currentSchema != null && connected) {
-			schemaPart = currentSchema.name();
-		} else if (w.schemaList() != null && connected) {
-			schemaPart = "selecione um esquema";
+			dot = ConnectionsPanel.statusDot(new Color(0xF59E0B));
+			tooltip = "Conectando a " + connectingWorkspaceName + "...";
 		} else {
-			schemaPart = "-";
+			Conexao w = activeWorkspace;
+			if (w == null || w.profile() == null) {
+				dot = ConnectionsPanel.statusDot(new Color(0xC4C9D1));
+				tooltip = "Rascunho — sem conexao (as instrucoes aqui nao serao executadas em nenhum banco)";
+			} else {
+				boolean connected = w.mgr().isConnected();
+				Color tag = colorForWorkspace(w.name());
+				dot = ConnectionsPanel.statusDot(connected ? tag : new Color(0xC4C9D1));
+				String schemaPart;
+				if (currentSchema != null && connected) {
+					schemaPart = currentSchema.name();
+				} else if (w.schemaList() != null && connected) {
+					schemaPart = "selecione um esquema";
+				} else {
+					schemaPart = "-";
+				}
+				if (connected) {
+					tooltip = "Executando em: " + w.name() + "   ·   schema: " + schemaPart
+							+ "   ·   " + w.profile().host() + ":" + w.profile().port();
+				} else {
+					tooltip = "Desconectado: " + w.name() + "   ·   ultimo schema: "
+							+ (w.schema() != null ? w.schema().name() : "-");
+				}
+			}
 		}
-		StringBuilder text = new StringBuilder();
-		if (connected) {
-			text.append("Executando em: ").append(w.name())
-					.append("   ·   schema: ").append(schemaPart)
-					.append("   ·   ").append(w.profile().host()).append(':').append(w.profile().port());
-		} else {
-			text.append("Desconectado: ").append(w.name())
-					.append("   ·   ultimo schema: ").append(w.schema() != null ? w.schema().name() : "-");
+		for (int i = 0; i < editorTabs.getTabCount(); i++) {
+			if (editorTabs.getComponentAt(i) == plusTab) {
+				continue;
+			}
+			editorTabs.setIconAt(i, dot);
+			editorTabs.setToolTipTextAt(i, tooltip);
 		}
-		workspaceContextLabel.setIcon(ConnectionsPanel.statusDot(connected ? tag : new Color(0xC4C9D1)));
-		workspaceContextLabel.setForeground(connected ? tag.darker() : MUTED);
-		workspaceContextLabel.setText(text.toString());
-		workspaceContextBar.setBorder(
-				BorderFactory.createMatteBorder(0, 0, 2, 0, connected ? tag : new Color(0xE2E5EA)));
 	}
 
 	// ---------- Lado esquerdo ----------
@@ -1488,20 +1457,17 @@ public class MainWindow extends JFrame {
 
 		// Inicializa o workspace "sem conexao" com as abas salvas (+ aba "+").
 		initWorkspaces();
+		// Dot inicial nas abas ja criadas por initWorkspaces() acima — ver
+		// updateWorkspaceContextBar() (chamada de novo a cada troca de estado
+		// de conexao, alem de ao criar/restaurar abas).
+		updateWorkspaceContextBar();
 
 		JPanel panel = new JPanel(new BorderLayout());
 		// CORREÇÃO: Removemos o 8 da esquerda e da direita para alinhar perfeitamente
 		// com a quina das conexões
 		panel.setBorder(BorderFactory.createEmptyBorder(0, 0, 4, 0));
 
-		// Empilha toolbar + faixa de contexto (conexao/schema ativos) acima
-		// das abas do editor — ver buildWorkspaceContextBar().
-		JPanel north = new JPanel();
-		north.setLayout(new BoxLayout(north, BoxLayout.Y_AXIS));
-		north.add(buildToolbar());
-		north.add(buildWorkspaceContextBar());
-
-		panel.add(north, BorderLayout.NORTH);
+		panel.add(buildToolbar(), BorderLayout.NORTH);
 		panel.add(editorTabs, BorderLayout.CENTER);
 		return panel;
 	}
@@ -1591,6 +1557,10 @@ public class MainWindow extends JFrame {
 		// aqui na mao — sem isto, uma aba nova (sempre vazia) mostrava "Salvar"
 		// habilitado ate o usuario clicar em outra aba e voltar.
 		updateSaveButtonState();
+		// Aba nova criada fora de uma troca de estado de conexao (ex.: clique
+		// no "+") nao ganharia o dot de identidade ate o proximo evento de
+		// conexao — aplica de imediato (ver updateWorkspaceContextBar).
+		updateWorkspaceContextBar();
 		return true;
 	}
 
@@ -1930,6 +1900,8 @@ public class MainWindow extends JFrame {
 			}
 		}
 		connectionsPanel.setConnectedNames(connected);
+		connectionsPanel.setActiveName(
+				(activeWorkspace != null && activeWorkspace.profile != null) ? activeWorkspace.name : null);
 		if (activeWorkspace != null && activeWorkspace.profile != null && activeWorkspace.mgr.isConnected()) {
 			setConnectedState(activeWorkspace.profile.label());
 		} else {

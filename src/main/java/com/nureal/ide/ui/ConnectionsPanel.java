@@ -66,6 +66,10 @@ public class ConnectionsPanel extends JPanel {
     private final Set<String> connectedNames = new HashSet<>();
     private List<ConnectionProfile> all = new ArrayList<>();
     private String connectingName;
+    /** Qual conexao e a workspace ATIVA agora (aba do editor visivel no momento) —
+     * ver {@link #setActiveName}. Diferente de "conectada": varias podem estar
+     * conectadas ao mesmo tempo, mas so uma tem suas abas na tela. */
+    private String activeName;
 
     public ConnectionsPanel(ConnectionStore store, Consumer<ConnectionProfile> connectAction,
             Consumer<ConnectionProfile> disconnectAction) {
@@ -209,6 +213,68 @@ public class ConnectionsPanel extends JPanel {
                     "Conexoes", JOptionPane.WARNING_MESSAGE);
         }
         applyFilter();
+    }
+
+    /**
+     * Paleta fixa de cores usada para diferenciar visualmente cada CONEXAO
+     * (nao o tema claro/escuro) — usada no dot da lista (ver
+     * {@link ConnectionRenderer}), no dot de cada aba do editor (ver
+     * {@code MainWindow#updateWorkspaceContextBar}) e na faixa do inspetor de
+     * FK, pra dar a MESMA identidade visual em toda a IDE.
+     * <p>
+     * DE PROPOSITO sem vermelho, laranja ou amarelo: essas cores ja tem
+     * significado de STATUS nesta mesma IDE (amarelo/laranja = "conectando",
+     * vermelho = erro/perigo) — usa-las tambem como identidade de conexao
+     * fazia uma conexao perfeitamente conectada "parecer" com problema/
+     * desconectada so pela cor calhar de cair no vermelho/laranja (bug visual
+     * relatado pelo usuario). Paleta toda em tons frios (azul/roxo/rosa/teal/
+     * indigo/ciano/fucsia/ardosia), sem nenhuma dessas 3 cores de status.
+     */
+    private static final Color[] WORKSPACE_PALETTE = {
+            new Color(0x2563EB), // azul
+            new Color(0x0891B2), // ciano
+            new Color(0x0D9488), // teal
+            new Color(0x4F46E5), // indigo
+            new Color(0x7C3AED), // roxo
+            new Color(0xC026D3), // fucsia
+            new Color(0xDB2777), // rosa
+            new Color(0x64748B), // ardosia (azul-acinzentado neutro)
+    };
+
+    /**
+     * Cor de identidade da conexao {@code name} — pacote-privado (nao mais
+     * private): {@code MainWindow} tambem usa (ver
+     * {@code MainWindow#colorForWorkspace}, que so delega pra ca).
+     * <p>
+     * Indice pela POSICAO da conexao na ordem de cadastro ({@link #all} —
+     * NAO a lista exibida, que reordena as conectadas pra cima em
+     * {@link #applyFilter}), nao mais pelo hash do nome: hash podia (e
+     * acontecia na pratica) atribuir a MESMA cor a duas conexoes diferentes
+     * abertas ao mesmo tempo, confundindo a identidade visual (bug relatado
+     * pelo usuario). Por posicao de cadastro, cada uma das primeiras 8
+     * conexoes cadastradas ganha uma cor diferente garantida; so se repete a
+     * partir da 9a conexao cadastrada.
+     */
+    Color colorForWorkspace(String name) {
+        if (name == null || name.isBlank()) {
+            return new Color(0x6B7280);
+        }
+        int idx = -1;
+        for (int i = 0; i < all.size(); i++) {
+            if (all.get(i).name().equals(name)) {
+                idx = i;
+                break;
+            }
+        }
+        // Fallback (conexao nao encontrada em "all" — ex.: ja foi excluida,
+        // mas uma aba antiga ainda guarda o nome): hash do nome, melhor que
+        // nao ter cor nenhuma, mesmo sem a garantia de unicidade de acima.
+        if (idx < 0) {
+            idx = Math.floorMod(name.hashCode(), WORKSPACE_PALETTE.length);
+        } else {
+            idx = idx % WORKSPACE_PALETTE.length;
+        }
+        return WORKSPACE_PALETTE[idx];
     }
 
     private void persist() {
@@ -355,6 +421,20 @@ public class ConnectionsPanel extends JPanel {
     }
 
     /**
+     * Marca qual conexao e a workspace ATIVA agora — a que "dono" das abas
+     * visiveis no editor neste exato momento (ver {@code MainWindow#activateWorkspace}).
+     * So ELA ganha a tarja de identidade (cor propria, ver {@link ConnectionRenderer}):
+     * com varias conexoes conectadas ao mesmo tempo, e a unica forma de saber,
+     * so olhando a lista, qual delas e a que esta na tela agora (as outras
+     * continuam com o dot verde normal de "conectada", sem a tarja).
+     * {@code name == null} = nenhuma (rascunho sem conexao ativo).
+     */
+    public void setActiveName(String name) {
+        this.activeName = name;
+        list.repaint();
+    }
+
+    /**
      * Pequeno circulo de status (verde = conectado, ambar = conectando, cinza
      * = desconectado). Visibilidade de pacote (nao private): reaproveitado
      * por {@link ObjectTreeCellRenderer} para a MESMA bolinha na raiz da
@@ -404,8 +484,17 @@ public class ConnectionsPanel extends JPanel {
             setBorder(BorderFactory.createEmptyBorder(4, 12, 4, 12));
             setIconTextGap(10);
             if (value instanceof ConnectionProfile p) {
+                // Cor do dot: status de conexao (conectado/conectando/ocioso) —
+                // sinal PRINCIPAL, nao muda com a identidade do workspace.
+                // A tarja lateral (cor propria da conexao, ver
+                // #colorForWorkspace) so aparece na conexao ATIVA
+                // (a dona das abas visiveis no editor agora, ver setActiveName) —
+                // com varias conectadas ao mesmo tempo, e o unico jeito de saber
+                // qual delas e a que esta na tela sem clicar em cada uma.
                 Color dotColor;
-                if (connectedNames.contains(p.name())) {
+                boolean connected = connectedNames.contains(p.name());
+                boolean active = p.name().equals(activeName);
+                if (connected) {
                     dotColor = new Color(0x059669);
                 } else if (p.name().equals(connectingName)) {
                     dotColor = new Color(0xF59E0B);
@@ -413,6 +502,11 @@ public class ConnectionsPanel extends JPanel {
                     dotColor = new Color(0xC4C9D1);
                 }
                 setIcon(statusDot(dotColor));
+                setBorder(active
+                        ? BorderFactory.createCompoundBorder(
+                                BorderFactory.createMatteBorder(0, 3, 0, 0, colorForWorkspace(p.name())),
+                                BorderFactory.createEmptyBorder(4, 9, 4, 12))
+                        : BorderFactory.createEmptyBorder(4, 12, 4, 12));
                 setText(p.name());
                 setFont(getFont().deriveFont(connectedNames.contains(p.name()) ? Font.BOLD : Font.PLAIN));
                 setToolTipText(p.user() + "@" + p.host() + ":" + p.port() + "/" + p.schema());
