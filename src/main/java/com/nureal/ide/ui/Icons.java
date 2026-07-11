@@ -62,20 +62,93 @@ final class Icons {
         return get(type, size, IconTheme.colorFor(type));
     }
 
-    /** Icone totalmente customizado (tamanho e cor explicitos — ex.: status dinamico). */
+    /**
+     * Icone totalmente customizado (tamanho e cor explicitos — ex.: status
+     * dinamico). Cada {@link IconType} com um arquivo SVG cadastrado em
+     * {@link #SVG_RESOURCES} (todo o catalogo, hoje) e renderizado a partir
+     * dele via {@link FlatSVGIcon} — o desenho vetorial a mao (primitivas
+     * geometricas, ver {@link #REGISTRY} abaixo) fica so como rede de
+     * seguranca para um IconType que por acaso fique sem SVG cadastrado.
+     * <p>
+     * Historico: ate aqui so {@code REFRESH} tinha sido migrado para SVG (um
+     * icone Tabler, estilo de traco); pedido do usuario foi trocar TODOS os
+     * icones por equivalentes do Material Icons/Symbols (fonts.google.com/icons,
+     * licenca Apache 2.0) — os arquivos foram baixados e cadastrados em
+     * {@code src/main/resources/com/nureal/ide/icon/}, um por conceito.
+     */
     static Icon get(IconType type, int size, Color color) {
-    	// Intercepta o REFRESH para usar o novo arquivo SVG
-        if (type == IconType.REFRESH) {
-            FlatSVGIcon svgIcon = new FlatSVGIcon("com/nureal/ide/icon/refresh.svg", size, size);
-            
-            // Aplica a cor dinâmica recebida por parâmetro (ex: a cor MUTED que você definiu)
+        String resource = SVG_RESOURCES.get(type);
+        if (resource != null) {
+            FlatSVGIcon svgIcon = new FlatSVGIcon("com/nureal/ide/icon/" + resource, size, size);
+            // Os SVGs baixados nao usam "currentColor" (o Material Icons
+            // publica os paths com fill preto implicito) — o ColorFilter
+            // ignora a cor original do arquivo e sempre devolve a cor pedida
+            // pelo chamador, entao funciona igual para eles e para o
+            // refresh.svg (que já usava stroke="currentColor").
             svgIcon.setColorFilter(new FlatSVGIcon.ColorFilter(c -> color));
             return svgIcon;
         }
 
-        // Comportamento original para todos os outros ícones da aplicação
+        // Rede de seguranca: nenhum IconType do catalogo deveria cair aqui.
         Glyph glyph = REGISTRY.getOrDefault(type, Icons::drawFallback);
         return new VectorIcon(size, color, glyph);
+    }
+
+    /**
+     * IconType -> nome do arquivo (sem extensao "so o nome") em
+     * {@code com/nureal/ide/icon/}. Um valor por conceito do catalogo inteiro
+     * (ver {@link IconType}) — mantido como Map em vez de convencionar
+     * "nome do enum em minusculas" porque alguns arquivos usam nomes
+     * diferentes do IconType (ex.: {@code PRIMARY_KEY -> primary_key.svg} bate,
+     * mas manter explicito evita surpresa se o enum for renomeado).
+     */
+    private static final Map<IconType, String> SVG_RESOURCES = buildSvgResources();
+
+    private static Map<IconType, String> buildSvgResources() {
+        Map<IconType, String> m = new EnumMap<>(IconType.class);
+        m.put(IconType.NEW, "new.svg");
+        m.put(IconType.OPEN, "open.svg");
+        m.put(IconType.SAVE, "save.svg");
+        m.put(IconType.EDIT, "edit.svg");
+        m.put(IconType.DELETE, "delete.svg");
+        m.put(IconType.COPY, "copy.svg");
+        m.put(IconType.PASTE, "paste.svg");
+        m.put(IconType.CLOSE, "close.svg");
+        m.put(IconType.FAVORITE, "favorite.svg");
+        m.put(IconType.RUN, "run.svg");
+        m.put(IconType.STOP, "stop.svg");
+        m.put(IconType.FORMAT, "format.svg");
+        m.put(IconType.SEARCH, "search.svg");
+        m.put(IconType.FILTER, "filter.svg");
+        m.put(IconType.DATABASE, "database.svg");
+        m.put(IconType.SCHEMA, "schema.svg");
+        m.put(IconType.TABLE, "table.svg");
+        m.put(IconType.VIEW, "view.svg");
+        m.put(IconType.FUNCTION, "function.svg");
+        m.put(IconType.PROCEDURE, "procedure.svg");
+        m.put(IconType.TRIGGER, "trigger.svg");
+        m.put(IconType.COLUMN, "column.svg");
+        m.put(IconType.INDEX, "index.svg");
+        m.put(IconType.PRIMARY_KEY, "primary_key.svg");
+        m.put(IconType.FOREIGN_KEY, "foreign_key.svg");
+        m.put(IconType.EXPORT, "export.svg");
+        m.put(IconType.SETTINGS, "settings.svg");
+        m.put(IconType.HELP, "help.svg");
+        m.put(IconType.INFO, "info.svg");
+        m.put(IconType.WARNING, "warning.svg");
+        m.put(IconType.SUCCESS, "success.svg");
+        m.put(IconType.ERROR, "error.svg");
+        m.put(IconType.REFRESH, "refresh.svg");
+        m.put(IconType.CONNECTION, "connection.svg");
+        m.put(IconType.DISCONNECT, "disconnect.svg");
+        m.put(IconType.STATUS_DOT, "status_dot.svg");
+        m.put(IconType.PANEL_LEFT, "panel_left.svg");
+        m.put(IconType.PANEL_BOTTOM, "panel_bottom.svg");
+        m.put(IconType.CHEVRON_LEFT, "chevron_left.svg");
+        m.put(IconType.CHEVRON_RIGHT, "chevron_right.svg");
+        m.put(IconType.THEME_LIGHT, "theme_light.svg");
+        m.put(IconType.THEME_DARK, "theme_dark.svg");
+        return m;
     }
 
     // ====================================================================

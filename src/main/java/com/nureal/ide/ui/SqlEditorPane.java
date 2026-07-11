@@ -1,5 +1,6 @@
 package com.nureal.ide.ui;
 
+import com.formdev.flatlaf.FlatLaf;
 import com.nureal.ide.core.autocomplete.SqlCompletionProvider;
 import com.nureal.ide.core.editor.EditorUndoManager;
 import com.nureal.ide.core.format.SqlFormatter;
@@ -12,6 +13,7 @@ import org.fife.ui.rsyntaxtextarea.RSyntaxTextArea;
 import org.fife.ui.rsyntaxtextarea.Style;
 import org.fife.ui.rsyntaxtextarea.SyntaxConstants;
 import org.fife.ui.rsyntaxtextarea.SyntaxScheme;
+import org.fife.ui.rsyntaxtextarea.Theme;
 import org.fife.ui.rsyntaxtextarea.Token;
 import org.fife.ui.rsyntaxtextarea.TokenTypes;
 import org.fife.ui.rtextarea.RTextScrollPane;
@@ -37,6 +39,8 @@ import javax.swing.text.Highlighter;
 import javax.swing.text.JTextComponent;
 import javax.swing.undo.CannotRedoException;
 import javax.swing.undo.CannotUndoException;
+import java.io.IOException;
+import java.io.InputStream;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Cursor;
@@ -80,6 +84,14 @@ public class SqlEditorPane extends JPanel {
     private int fontSize = BASE_FONT_SIZE;
     private String fontFamily; // null/vazio = escolha automatica
 
+    // Guardados para poder REAPLICAR as cores quando o usuario alterna
+    // claro/escuro com a aba ja aberta (ver #applyEditorPalette/#applyGutterPalette,
+    // chamados de novo por #refreshTheme) — sem isto so abas NOVAS pegariam
+    // o tema certo, abas ja abertas ficariam presas na cor de quando foram
+    // criadas.
+    private RTextScrollPane scrollPane;
+    private JComponent breadcrumbBar;
+
     /**
      * Desfazer/refazer deste editor — ver {@link EditorUndoManager}. Ligado
      * diretamente no {@link javax.swing.text.Document}, independente do
@@ -100,6 +112,18 @@ public class SqlEditorPane extends JPanel {
     // salva. Uma vez definido, salvar de novo SOBRESCREVE em vez de perguntar
     // o titulo (ver MainWindow#onSaveQuery).
     private String savedQueryId;
+
+    // Nome do ESQUEMA a que esta aba "pertence" dentro da conexao ativa (ou
+    // null, aba ainda sem esquema definido) — definido na criacao da aba
+    // (herda o esquema aberto no momento) e atualizado sempre que o usuario
+    // abre/troca de esquema com esta aba selecionada (ver
+    // MainWindow#openSchema). Persistido junto com titulo/SQL/id (ver
+    // SessionStore.Tab#schema) para que a aba "lembre" seu esquema entre
+    // sessoes. Usado por MainWindow#onRun para conectar automaticamente no
+    // esquema certo ANTES de rodar a instrucao desta aba, mesmo que o
+    // esquema "atual" da conexao (compartilhado por todas as abas) esteja
+    // apontando para outro lugar no momento.
+    private String schema;
 
     private final SearchContext searchContext = new SearchContext();
     private JPanel findBar;
@@ -138,16 +162,6 @@ public class SqlEditorPane extends JPanel {
 
     private final ObjectOpenHandler onOpenObject;
 
-    /**
-     * Chamado quando o usuario aperta ALT+Seta-esquerda no editor (secao 8.6
-     * do pedido "Navegacao Inteligente e Interativa") — pede pra
-     * {@code MainWindow} voltar ao objeto anterior no historico de navegacao
-     * (ver {@code MainWindow#navigateBack}). Sem nocao de "objeto atual" aqui
-     * no editor: quem guarda o historico e quem decide o que fazer e o
-     * chamador.
-     */
-    private final Runnable onNavigateBack;
-
     public SqlEditorPane(String tabId, SqlCompletionProvider provider, Runnable onRun,
             Supplier<SqlFormatter> formatterSupplier, String fontFamily, Supplier<SchemaInfo> schemaSupplier,
             ObjectOpenHandler onOpenObject, Runnable onNavigateBack) {
@@ -158,8 +172,6 @@ public class SqlEditorPane extends JPanel {
         this.fontFamily = fontFamily;
         this.schemaSupplier = schemaSupplier;
         this.onOpenObject = onOpenObject;
-        this.onNavigateBack = onNavigateBack;
-
         textArea = new RSyntaxTextArea(20, 80) {
             private static final long serialVersionUID = 1L;
 
@@ -208,12 +220,14 @@ public class SqlEditorPane extends JPanel {
         textArea.setFractionalFontMetricsEnabled(true);
         textArea.setPaintTabLines(true);
         textArea.setHighlightCurrentLine(true);
-        // Fundo do editor em cinza bem claro (nao branco puro) p/ cansar menos a vista
-        textArea.setBackground(new Color(0xF6, 0xF7, 0xF9));
-        // Realces translucidos (verde da marca) para um visual mais suave
-        textArea.setCurrentLineHighlightColor(new Color(0x05, 0x96, 0x69, 22));
-        textArea.setSelectionColor(new Color(0x05, 0x96, 0x69, 60));
-        textArea.setMarkAllHighlightColor(new Color(0x22, 0xC5, 0x5E, 90));
+        // Cores do editor (fundo, realces) dependem do tema ativo no momento
+        // em que a aba e criada — ver #applyEditorPalette. ANTES o fundo era
+        // fixo em cinza claro (0xF6F7F9) MESMO com o app inteiro no tema
+        // escuro: a aba de SQL virava uma caixa clara "fora do tema" (o
+        // mesmo bug relatado na grade de resultados, ver GridTheme). Os
+        // realces translucidos continuam na mesma familia de cor (verde da
+        // marca), so a base (fundo/selecao) muda com o tema.
+        applyEditorPalette();
         installCurrentStatementHighlight(textArea);
         installObjectHover(textArea);
         installReferenceHighlight(textArea);
@@ -423,10 +437,9 @@ public class SqlEditorPane extends JPanel {
                 KeyStroke.getKeyStroke(KeyEvent.VK_LEFT, InputEvent.ALT_DOWN_MASK), "navigate-back");
 
         RTextScrollPane scroll = new RTextScrollPane(textArea);
+        this.scrollPane = scroll;
         scroll.setBorder(BorderFactory.createEmptyBorder());
-        // Gutter (numeros de linha) num cinza levemente mais fechado que o editor
-        scroll.getGutter().setBackground(new Color(0xEC, 0xEE, 0xF1));
-        scroll.getGutter().setBorderColor(new Color(0xE0, 0xE3, 0xE7));
+        applyGutterPalette();
         // Ctrl + roda do mouse = zoom; sem Ctrl, repassa ao scroll (rola normalmente).
         // IMPORTANTE: ao adicionar um MouseWheelListener no textArea, o Swing para de
         // propagar a roda para o scroll pane -> por isso precisamos repassar manualmente.
@@ -443,6 +456,133 @@ public class SqlEditorPane extends JPanel {
         add(scroll, BorderLayout.CENTER);
         add(buildFindBar(), BorderLayout.SOUTH);
         installBreadcrumbSync(textArea);
+    }
+
+    /**
+     * Fundo/cores de sintaxe do editor de texto propriamente dito — le
+     * {@link FlatLaf#isLafDark()} NA HORA (nunca cacheado), entao chamar de
+     * novo (ver {@link #refreshTheme}) sempre reflete o tema atual, mesmo
+     * numa aba que ja estava aberta antes da troca de claro/escuro.
+     * <p>
+     * ANTES o fundo era fixo em 0xF6F7F9 (cinza claro) e a cor de texto
+     * padrao vinha do esquema de sintaxe PADRAO do RSyntaxTextArea (afinado
+     * para fundo claro: texto/palavras-chave escuros) — no tema escuro isso
+     * dava texto quase preto sobre fundo tambem escurecido manualmente,
+     * ilegivel. Em vez de recolorir token por token na mao (arriscado e
+     * dificil de manter consistente), usa os temas PRONTOS que o proprio
+     * RSyntaxTextArea distribui ({@code dark.xml}/{@code default.xml}) —
+     * cobrem fundo, texto padrao, palavras-chave, strings, comentarios,
+     * numeros etc. de uma vez, testados pela propria biblioteca.
+     */
+    private void applyEditorPalette() {
+        boolean dark = FlatLaf.isLafDark();
+        String resource = dark ? "/org/fife/ui/rsyntaxtextarea/themes/dark.xml"
+                : "/org/fife/ui/rsyntaxtextarea/themes/default.xml";
+        try (InputStream in = getClass().getResourceAsStream(resource)) {
+            if (in != null) {
+                Theme.load(in).apply(textArea);
+            }
+        } catch (IOException ex) {
+            // Segue com o que a textArea ja tinha — os realces abaixo
+            // continuam sendo aplicados de qualquer forma.
+        }
+        // O tema recem-carregado reseta o SyntaxScheme inteiro — reaplica o
+        // NEGRITO de nomes de tabela/view/procedure (ver o comentario
+        // original no construtor: so o FONT muda, a cor continua vindo do
+        // tema, clara ou escura).
+        SyntaxScheme scheme = textArea.getSyntaxScheme();
+        scheme.setStyle(TokenTypes.DATA_TYPE, new Style(null, null, textArea.getFont().deriveFont(Font.BOLD)));
+        if (dark) {
+            softenDarkSyntaxColors(scheme);
+        }
+        // Realces de fundo do editor. NO TEMA ESCURO a primeira tentativa
+        // reusou o MESMO verde da marca so que numa variante mais clara/
+        // saturada (0x22C55E) supondo que precisaria de mais "peso" pra
+        // aparecer sobre fundo escuro — resultado foi o oposto do esperado:
+        // cor saturada sobre fundo quase preto "salta" muito mais do que a
+        // mesma cor sobre fundo claro, e a linha atual (que fica acesa o
+        // tempo todo, a cada movimento do cursor) ficava com uma barra verde
+        // vibrante demais, cansando a vista (relatado pelo usuario). Ajustes:
+        // - linha atual: neutro (branco bem translucido) em vez de colorido,
+        //   igual a maioria dos editores escuros (destaque discreto, nao um
+        //   letreiro); e o unico realce que fica ligado o tempo todo, entao
+        //   e o que mais precisa ser discreto.
+        // - selecao/"marcar tudo": mesmo verde da marca do tema CLARO
+        //   (0x059669), so com alpha um pouco maior — mantem a identidade
+        //   visual sem trocar para um tom mais saturado.
+        textArea.setCurrentLineHighlightColor(
+                dark ? new Color(0xFF, 0xFF, 0xFF, 12) : new Color(0x05, 0x96, 0x69, 22));
+        textArea.setSelectionColor(dark ? new Color(0x05, 0x96, 0x69, 90) : new Color(0x05, 0x96, 0x69, 60));
+        textArea.setMarkAllHighlightColor(dark ? new Color(0x05, 0x96, 0x69, 130) : new Color(0x22, 0xC5, 0x5E, 90));
+    }
+
+    /**
+     * O {@code dark.xml} pronto do RSyntaxTextArea (carregado em
+     * {@link #applyEditorPalette}) resolve fundo/gutter/selecao padrao, mas
+     * colore palavras-chave (SELECT, FROM, WHERE...) num verde bem saturado
+     * — pensado pra linguagens de programacao em geral, nao afinado pra SQL
+     * nem pro uso prolongado que este editor tem. Usuario relatou "contraste
+     * muito agressivo". Sobrescreve so as cores (fonte/negrito continuam
+     * como o tema definiu) por uma paleta mais suave e desaturada — mesma
+     * ideia de "menos neon, mais legivel" ja aplicada aos realces de fundo
+     * acima. So roda no tema ESCURO: o tema claro nunca foi alvo da queixa.
+     */
+    private void softenDarkSyntaxColors(SyntaxScheme scheme) {
+        setStyleColor(scheme, TokenTypes.RESERVED_WORD, new Color(0x7F, 0xB0, 0x99)); // SELECT/FROM/WHERE...
+        setStyleColor(scheme, TokenTypes.RESERVED_WORD_2, new Color(0x7F, 0xB0, 0x99));
+        setStyleColor(scheme, TokenTypes.FUNCTION, new Color(0xC9, 0xA9, 0x7B)); // COUNT()/NOW()...
+        setStyleColor(scheme, TokenTypes.IDENTIFIER, new Color(0xD4, 0xD8, 0xDC)); // texto comum/colunas
+        setStyleColor(scheme, TokenTypes.LITERAL_STRING_DOUBLE_QUOTE, new Color(0xC3, 0x8F, 0x6B)); // 'valor'
+        setStyleColor(scheme, TokenTypes.LITERAL_CHAR, new Color(0xC3, 0x8F, 0x6B));
+        setStyleColor(scheme, TokenTypes.LITERAL_NUMBER_DECIMAL_INT, new Color(0x8C, 0xA9, 0xD1));
+        setStyleColor(scheme, TokenTypes.LITERAL_NUMBER_FLOAT, new Color(0x8C, 0xA9, 0xD1));
+        setStyleColor(scheme, TokenTypes.LITERAL_NUMBER_HEXADECIMAL, new Color(0x8C, 0xA9, 0xD1));
+        setStyleColor(scheme, TokenTypes.LITERAL_BOOLEAN, new Color(0x8C, 0xA9, 0xD1));
+        setStyleColor(scheme, TokenTypes.COMMENT_EOL, new Color(0x6B, 0x76, 0x7D));
+        setStyleColor(scheme, TokenTypes.COMMENT_MULTILINE, new Color(0x6B, 0x76, 0x7D));
+        setStyleColor(scheme, TokenTypes.COMMENT_DOCUMENTATION, new Color(0x6B, 0x76, 0x7D));
+        setStyleColor(scheme, TokenTypes.OPERATOR, new Color(0x9A, 0xA3, 0xAF));
+        setStyleColor(scheme, TokenTypes.SEPARATOR, new Color(0x8A, 0x93, 0x9E));
+        setStyleColor(scheme, TokenTypes.VARIABLE, new Color(0xB0, 0x9C, 0xD1));
+        // DATA_TYPE (nomes de tabela/view/procedure) fica de fora de proposito:
+        // continua so em NEGRITO, cor null (herda a de IDENTIFIER acima) —
+        // exatamente o comportamento pedido originalmente (ver o comentario
+        // no construtor).
+    }
+
+    /** Troca so a cor de um tipo de token, preservando fonte/negrito/italico que o tema ja definiu. */
+    private static void setStyleColor(SyntaxScheme scheme, int tokenType, Color color) {
+        Style existing = scheme.getStyle(tokenType);
+        Style updated = (existing != null) ? (Style) existing.clone() : new Style();
+        updated.foreground = color;
+        scheme.setStyle(tokenType, updated);
+    }
+
+    /** Gutter (numeros de linha) — mesma logica de {@link #applyEditorPalette}. */
+    private void applyGutterPalette() {
+        boolean dark = FlatLaf.isLafDark();
+        scrollPane.getGutter().setBackground(dark ? new Color(0x1A, 0x1B, 0x1E) : new Color(0xEC, 0xEE, 0xF1));
+        scrollPane.getGutter().setBorderColor(dark ? new Color(0x33, 0x36, 0x3A) : new Color(0xE0, 0xE3, 0xE7));
+    }
+
+    /**
+     * Chamado por {@code MainWindow#toggleTheme} em toda aba ja aberta,
+     * assim que o usuario alterna claro/escuro — sem isto, so abas NOVAS
+     * (criadas DEPOIS da troca) ficariam com a cor certa; as que ja estavam
+     * na tela ficariam presas na cor de quando foram criadas (o fundo do
+     * editor e o gutter sao definidos uma unica vez no construtor, nao a
+     * cada pintura).
+     */
+    public void refreshTheme() {
+        applyEditorPalette();
+        applyGutterPalette();
+        if (breadcrumbBar != null) {
+            breadcrumbBar.setBackground(FlatLaf.isLafDark() ? new Color(0x1A, 0x1B, 0x1E) : new Color(0xEC, 0xEE, 0xF1));
+        }
+        if (breadcrumbLabel != null) {
+            breadcrumbLabel.setForeground(breadcrumbForeground());
+        }
+        repaint();
     }
 
     /**
@@ -677,7 +817,9 @@ public class SqlEditorPane extends JPanel {
     }
 
     /** Cor do texto do breadcrumb — ver {@link #buildBreadcrumbBar}. */
-    private static final Color BREADCRUMB_FG = new Color(0x60, 0x6B, 0x7A);
+    private static Color breadcrumbForeground() {
+        return FlatLaf.isLafDark() ? new Color(0x9A, 0xA3, 0xAF) : new Color(0x60, 0x6B, 0x7A);
+    }
 
     private JLabel breadcrumbLabel;
 
@@ -692,12 +834,13 @@ public class SqlEditorPane extends JPanel {
      */
     private JComponent buildBreadcrumbBar() {
         breadcrumbLabel = new JLabel(" ");
-        breadcrumbLabel.setForeground(BREADCRUMB_FG);
+        breadcrumbLabel.setForeground(breadcrumbForeground());
         breadcrumbLabel.setFont(breadcrumbLabel.getFont().deriveFont(Font.PLAIN, 11f));
         JPanel bar = new JPanel(new BorderLayout());
         bar.setBorder(BorderFactory.createEmptyBorder(3, 8, 3, 8));
-        bar.setBackground(new Color(0xEC, 0xEE, 0xF1));
+        bar.setBackground(FlatLaf.isLafDark() ? new Color(0x1A, 0x1B, 0x1E) : new Color(0xEC, 0xEE, 0xF1));
         bar.add(breadcrumbLabel, BorderLayout.WEST);
+        this.breadcrumbBar = bar;
         return bar;
     }
 
@@ -972,6 +1115,15 @@ public class SqlEditorPane extends JPanel {
         this.savedQueryId = savedQueryId;
     }
 
+    /** Esquema a que esta aba pertence, ou {@code null} se ainda nao definido. */
+    public String getSchema() {
+        return schema;
+    }
+
+    public void setSchema(String schema) {
+        this.schema = schema;
+    }
+
     /** Ajusta o tamanho da fonte do editor (preservando o peso semibold). */
     public void setFontSize(int size) {
         fontSize = Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, size));
@@ -1079,7 +1231,8 @@ public class SqlEditorPane extends JPanel {
         findBar = new JPanel();
         findBar.setLayout(new BoxLayout(findBar, BoxLayout.Y_AXIS));
         findBar.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(1, 0, 0, 0, new Color(0xE5E7EB)),
+                BorderFactory.createMatteBorder(1, 0, 0, 0,
+                        FlatLaf.isLafDark() ? new Color(0x3A, 0x3D, 0x41) : new Color(0xE5, 0xE7, 0xEB)),
                 BorderFactory.createEmptyBorder(2, 6, 2, 6)));
         findBar.add(row1);
         findBar.add(row2);

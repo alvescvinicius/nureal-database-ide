@@ -34,7 +34,12 @@ abstract class AbstractTypedCellRenderer extends DefaultTableCellRenderer {
 
     private static final long serialVersionUID = 1L;
 
-    static final Color COLOR_NULL = GridTheme.COLOR_NULL;
+    // ANTES era "static final Color COLOR_NULL = GridTheme.COLOR_NULL" — uma
+    // copia feita UMA VEZ, no carregamento da classe. GridTheme.COLOR_NULL
+    // agora muda quando o usuario alterna claro/escuro (ver GridTheme#applyPalette),
+    // mas aquela copia ficava presa para sempre no valor do primeiro
+    // carregamento — a cor de "null" nunca acompanhava a troca de tema. Le
+    // GridTheme.COLOR_NULL diretamente (linha abaixo) em vez de cachear.
 
     @Override
     public final Component getTableCellRendererComponent(JTable table, Object value,
@@ -55,7 +60,7 @@ abstract class AbstractTypedCellRenderer extends DefaultTableCellRenderer {
 
         if (isNull) {
             setHorizontalAlignment(SwingConstants.LEFT);
-            setForeground(COLOR_NULL);
+            setForeground(GridTheme.COLOR_NULL);
             setFont(getFont().deriveFont(Font.ITALIC));
         } else {
             setHorizontalAlignment(alignment(value));

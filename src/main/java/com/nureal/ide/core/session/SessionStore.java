@@ -43,8 +43,16 @@ public class SessionStore {
         return file;
     }
 
-    /** Uma aba salva: titulo + SQL completo + id estavel (usado p/ religar resultados). */
-    public record Tab(String title, String sql, String id) {
+    /**
+     * Uma aba salva: titulo + SQL completo + id estavel (usado p/ religar
+     * resultados) + esquema a que a aba pertence ({@code null} = ainda sem
+     * esquema definido, ou sessao salva antes desta versao). Guardar o
+     * esquema por aba (em vez de so por conexao) e o que permite abrir a
+     * instrucao certa no schema certo automaticamente ao rodar (ver
+     * MainWindow#onRun), mesmo com varias abas de esquemas diferentes
+     * abertas na mesma conexao.
+     */
+    public record Tab(String title, String sql, String id, String schema) {
     }
 
     /** A sessao de uma conexao: abas + indice da aba selecionada. */
@@ -65,6 +73,7 @@ public class SessionStore {
         String title = null;
         String sql = null;
         String id = null;
+        String schema = null;
 
         for (String raw : lines) {
             String line = raw.strip();
@@ -72,20 +81,22 @@ public class SessionStore {
                 continue;
             }
             if (line.equals(CONN_HEADER)) {
-                flush(result, connName, tabs, title, sql, id, selected);
+                flush(result, connName, tabs, title, sql, id, schema, selected);
                 connName = "";
                 selected = 0;
                 tabs = new ArrayList<>();
                 title = null;
                 sql = null;
                 id = null;
+                schema = null;
                 continue;
             }
             if (line.equals(TAB_HEADER)) {
-                addTab(tabs, title, sql, id);
+                addTab(tabs, title, sql, id, schema);
                 title = "SQL Query";
                 sql = "";
                 id = null;
+                schema = null;
                 continue;
             }
             int eq = line.indexOf('=');
@@ -100,33 +111,39 @@ public class SessionStore {
                 case "title" -> title = value.trim();
                 case "sql" -> sql = decode(value.trim());
                 case "id" -> id = value.trim();
+                // "schema" e novo (versoes anteriores nao gravam esta chave) —
+                // sessoes antigas simplesmente nao encontram esta linha e a
+                // aba fica com schema=null, tratado por MainWindow como "ainda
+                // nao definido" (mesmo comportamento de antes desta feature).
+                case "schema" -> schema = value.trim();
                 default -> {
                     // ignora chaves desconhecidas
                 }
             }
         }
-        flush(result, connName, tabs, title, sql, id, selected);
+        flush(result, connName, tabs, title, sql, id, schema, selected);
         return result;
     }
 
     private static void flush(Map<String, Session> result, String connName,
-            List<Tab> tabs, String title, String sql, String id, int selected) {
+            List<Tab> tabs, String title, String sql, String id, String schema, int selected) {
         if (connName == null) {
             return;
         }
-        addTab(tabs, title, sql, id);
+        addTab(tabs, title, sql, id, schema);
         int sel = (selected < 0 || selected >= tabs.size()) ? 0 : selected;
         result.put(connName, new Session(new ArrayList<>(tabs), sel));
     }
 
-    private static void addTab(List<Tab> tabs, String title, String sql, String id) {
+    private static void addTab(List<Tab> tabs, String title, String sql, String id, String schema) {
         if (title != null) {
             // Sessoes salvas ANTES desta versao nao tem "id=" no bloco [tab] (id
             // fica null aqui) — geramos um UUID novo na hora, para a aba ganhar
             // uma identidade estavel a partir de agora (persistida na proxima
             // gravacao). Sessoes ja migradas simplesmente reutilizam o id salvo.
             String tabId = (id == null || id.isBlank()) ? UUID.randomUUID().toString() : id;
-            tabs.add(new Tab(title, sql == null ? "" : sql, tabId));
+            String tabSchema = (schema == null || schema.isBlank()) ? null : schema;
+            tabs.add(new Tab(title, sql == null ? "" : sql, tabId, tabSchema));
         }
     }
 
@@ -151,6 +168,7 @@ public class SessionStore {
                 sb.append("title=").append(nullToEmpty(t.title())).append('\n');
                 sb.append("sql=").append(encode(nullToEmpty(t.sql()))).append('\n');
                 sb.append("id=").append(nullToEmpty(t.id())).append('\n');
+                sb.append("schema=").append(nullToEmpty(t.schema())).append('\n');
             }
             sb.append('\n');
         }

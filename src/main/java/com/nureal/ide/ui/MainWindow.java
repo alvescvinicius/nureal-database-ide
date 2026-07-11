@@ -187,6 +187,7 @@ public class MainWindow extends JFrame {
 	private JButton saveQueryButton;
 	private JButton themeButton;
 	private JComponent resultsOverlay;
+	private JPanel executingCard;
 	/** Nome da conexao em processo de conectar agora (ver {@link #setConnectingState}), ou null. */
 	private String connectingWorkspaceName;
 	private SwingWorker<List<QueryResult>, Void> runWorker;
@@ -598,7 +599,10 @@ public class MainWindow extends JFrame {
 		// --- Separador sutil antes do grupo de icones de layout/tema ---
 		JSeparator divider = new JSeparator(SwingConstants.VERTICAL);
 		divider.setPreferredSize(new Dimension(1, 18));
-		divider.setForeground(new Color(0xE2E5EA));
+		// Era uma cor fixa clara (0xE2E5EA) — virava um tracinho claro
+		// "aceso" numa barra de ferramentas escura. UIManager.getColor segue
+		// o FlatLaf ativo (claro/escuro) automaticamente.
+		divider.setForeground(UIManager.getColor("Separator.foreground"));
 		gbc.gridx = 5;
 		gbc.weightx = 0.0;
 		gbc.insets = new Insets(0, 6, 0, 10);
@@ -1215,6 +1219,12 @@ public class MainWindow extends JFrame {
 		}
 		Icon dot;
 		String tooltip;
+		// Numa conexao com varios esquemas, cada aba pode estar "ligada" a um
+		// esquema diferente do que a conexao tem aberto agora (ver
+		// SqlEditorPane#getSchema e onRun) — nesse caso o tooltip generico
+		// abaixo (mesmo pra todas as abas) e substituido por um por-aba mais
+		// abaixo, no loop.
+		boolean perTabSchema = false;
 		if (connectingWorkspaceName != null) {
 			dot = ConnectionsPanel.statusDot(new Color(0xF59E0B));
 			tooltip = "Conectando a " + connectingWorkspaceName + "...";
@@ -1238,6 +1248,7 @@ public class MainWindow extends JFrame {
 				if (connected) {
 					tooltip = "Executando em: " + w.name() + "   ·   schema: " + schemaPart
 							+ "   ·   " + w.profile().host() + ":" + w.profile().port();
+					perTabSchema = w.schemaList() != null;
 				} else {
 					tooltip = "Desconectado: " + w.name() + "   ·   ultimo schema: "
 							+ (w.schema() != null ? w.schema().name() : "-");
@@ -1245,11 +1256,18 @@ public class MainWindow extends JFrame {
 			}
 		}
 		for (int i = 0; i < editorTabs.getTabCount(); i++) {
-			if (editorTabs.getComponentAt(i) == plusTab) {
+			Component c = editorTabs.getComponentAt(i);
+			if (c == plusTab) {
 				continue;
 			}
 			editorTabs.setIconAt(i, dot);
-			editorTabs.setToolTipTextAt(i, tooltip);
+			String tabTooltip = tooltip;
+			if (perTabSchema && c instanceof SqlEditorPane sep) {
+				String tabSchema = (sep.getSchema() != null) ? sep.getSchema() : "selecione um esquema";
+				tabTooltip = "Executando em: " + activeWorkspace.name() + "   ·   schema desta aba: " + tabSchema
+						+ "   ·   " + activeWorkspace.profile().host() + ":" + activeWorkspace.profile().port();
+			}
+			editorTabs.setToolTipTextAt(i, tabTooltip);
 		}
 	}
 
@@ -1496,19 +1514,44 @@ public class MainWindow extends JFrame {
 		return false;
 	}
 
-	/** Abre uma aba NOVA (id gerado agora) — usado por "+", "abrir query salva" etc. */
+	/**
+	 * Abre uma aba NOVA (id gerado agora) — usado por "+", "abrir query salva"
+	 * etc. Herda o esquema ABERTO NO MOMENTO na conexao ativa (se houver),
+	 * para que uma aba criada com um esquema ja selecionado "lembre" dele
+	 * desde o inicio (ver {@link #onRun}).
+	 */
 	private boolean addQueryTab(String title, String sql) {
-		return addQueryTab(title, sql, UUID.randomUUID().toString());
+		return addQueryTab(title, sql, UUID.randomUUID().toString(), currentActiveSchemaName());
 	}
 
 	/**
-	 * Abre uma aba com o id ESPECIFICADO — usado ao restaurar uma aba salva em
-	 * disco/{@code Conexao#tabs} (ver {@code rebuildEditorTabs}), para que a
-	 * nova instancia de SqlEditorPane reutilize o mesmo id da aba original e
-	 * assim religue corretamente aos resultados salvos em
-	 * {@code Conexao#tabResults} (indexados por esse id).
+	 * Abre uma aba com o id ESPECIFICADO mas SEM esquema explicito (herda o
+	 * esquema aberto no momento, mesma regra do "+") — hoje sem chamadores
+	 * diretos (a restauracao de sessao usa a variante de 4 argumentos, com o
+	 * esquema persistido daquela aba), mantido para quem precisar de um id
+	 * fixo sem amarrar a um esquema especifico.
 	 */
 	private boolean addQueryTab(String title, String sql, String tabId) {
+		return addQueryTab(title, sql, tabId, currentActiveSchemaName());
+	}
+
+	/**
+	 * Nome do esquema aberto no momento na conexao ativa, ou {@code null} se
+	 * nao houver conexao ativa ou nenhum esquema selecionado ainda. Usado
+	 * para que abas NOVAS ja nascam "ligadas" ao esquema atual (ver
+	 * {@code addQueryTab}).
+	 */
+	private String currentActiveSchemaName() {
+		return (activeWorkspace != null && activeWorkspace.schema() != null) ? activeWorkspace.schema().name() : null;
+	}
+
+	/**
+	 * Igual a {@link #addQueryTab(String, String, String)}, mas com o
+	 * ESQUEMA explicito da aba — usado ao restaurar uma sessao salva (o
+	 * esquema vem do que foi persistido para aquela aba especifica, ver
+	 * {@code SessionStore.Tab#schema}), em vez de herdar o esquema atual.
+	 */
+	private boolean addQueryTab(String title, String sql, String tabId, String schema) {
 		if (realTabCount() >= MAX_TABS) {
 			if (statusBar != null) {
 				statusBar.setText(" Limite de " + MAX_TABS + " abas atingido.");
@@ -1517,6 +1560,7 @@ public class MainWindow extends JFrame {
 		}
 		SqlEditorPane pane = new SqlEditorPane(tabId, completionProvider, this::onRun, this::currentSqlFormatter,
 				formatState.editorFontFamily(), () -> currentSchema, this::openEditorObject, this::navigateBack);
+		pane.setSchema(schema);
 		pane.textArea().setText(sql);
 		pane.textArea().setCaretPosition(0);
 		// Carregar o SQL salvo/restaurado NAO pode entrar no historico de
@@ -1749,7 +1793,7 @@ public class MainWindow extends JFrame {
 		} else {
 			for (SessionStore.Tab t : tabs) {
 				String title = (t.title() == null || t.title().isBlank()) ? nextQueryTitle() : t.title();
-				addQueryTab(title, t.sql(), t.id());
+				addQueryTab(title, t.sql(), t.id(), t.schema());
 			}
 		}
 		addPlusTab();
@@ -1789,7 +1833,8 @@ public class MainWindow extends JFrame {
 		for (int i = 0; i < editorTabs.getTabCount(); i++) {
 			Component c = editorTabs.getComponentAt(i);
 			if (c instanceof SqlEditorPane sep) {
-				list.add(new SessionStore.Tab(editorTabs.getTitleAt(i), sep.textArea().getText(), sep.tabId()));
+				list.add(new SessionStore.Tab(editorTabs.getTitleAt(i), sep.textArea().getText(), sep.tabId(),
+						sep.getSchema()));
 			}
 		}
 		return list;
@@ -1989,16 +2034,36 @@ public class MainWindow extends JFrame {
 		resultsCards.add(tabsPanel, "tabs");
 
 		JButton orientationToggle = new JButton();
-		orientationToggle.setBorderPainted(false);
-		orientationToggle.setContentAreaFilled(false);
 		orientationToggle.addActionListener(e -> toggleResultsOrientation());
 		updateOrientationToggleIcon(orientationToggle);
 		this.resultsOrientationButton = orientationToggle;
 
+		// Atalho para exportar TODOS os resultados abertos (mesma acao do
+		// "Exportar > Exportar todos" no rodape de cada aba de resultado, ver
+		// ResultStatusBar) — so uma segunda porta de entrada pro mesmo
+		// recurso ja existente, pensado pra ficar ao alcance sem precisar
+		// abrir o menu do botao la embaixo. Estilo identico ao restante dos
+		// icones da barra de ferramentas (ver #buildToolbar), pra esta linha
+		// nao parecer "de outro app" dentro da mesma janela.
+		JButton exportAllButton = new JButton(Icons.get(IconType.EXPORT, 14, MUTED));
+		exportAllButton.setToolTipText("Exportar todos os resultados abertos (uma aba por resultado)");
+		exportAllButton.addActionListener(e -> exportAll());
+
+		for (JButton btn : new JButton[] { exportAllButton, orientationToggle }) {
+			btn.putClientProperty("JButton.buttonType", "toolBarButton");
+			btn.putClientProperty(FlatClientProperties.STYLE, "arc: 8");
+			btn.setMargin(new Insets(5, 5, 5, 5));
+		}
+
+		JPanel headerIcons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 3, 0));
+		headerIcons.setOpaque(false);
+		headerIcons.add(exportAllButton);
+		headerIcons.add(orientationToggle);
+
 		JPanel header = new JPanel(new BorderLayout());
 		header.setOpaque(false);
 		header.add(sectionHeader("RESULTADOS"), BorderLayout.WEST);
-		header.add(orientationToggle, BorderLayout.EAST);
+		header.add(headerIcons, BorderLayout.EAST);
 
 		JPanel panel = new JPanel(new BorderLayout(0, 8));
 		panel.setBorder(BorderFactory.createEmptyBorder(4, 8, 8, 8));
@@ -2055,7 +2120,6 @@ public class MainWindow extends JFrame {
 
 		JPanel card = new JPanel();
 		card.setLayout(new BoxLayout(card, BoxLayout.Y_AXIS));
-		card.setBackground(new Color(0xFFFFFF));
 		card.setBorder(BorderFactory.createCompoundBorder(BorderFactory.createLineBorder(new Color(0xE0E3E7)),
 				BorderFactory.createEmptyBorder(18, 28, 18, 28)));
 		card.add(label);
@@ -2063,13 +2127,24 @@ public class MainWindow extends JFrame {
 		card.add(spinner);
 		card.add(Box.createVerticalStrut(14));
 		card.add(cancel);
+		executingCard = card;
 
+		// O fundo do card e o "esfumacado" por tras dele eram fixos em cores
+		// claras (branco/cinza quase branco) — no tema escuro isso aparecia
+		// como uma caixa branca chocante flutuando no meio de uma janela
+		// escura toda vez que uma consulta rodava (bug relatado: "essas
+		// funcionalidades nao ficavam boas" no tema escuro). O scrim (dim)
+		// le FlatLaf.isLafDark() dentro do proprio paintComponent — repinta
+		// a cada vez que o overlay aparece (ver showExecuting), entao esta
+		// sempre correto; o card em si e estilizado por #styleExecutingOverlay,
+		// chamado aqui E de novo em showExecuting(true), ja que o Look and
+		// Feel pode ter sido alternado enquanto o overlay estava escondido.
 		JPanel overlay = new JPanel(new GridBagLayout()) {
 			private static final long serialVersionUID = 1L;
 
 			@Override
 			protected void paintComponent(Graphics g) {
-				g.setColor(new Color(244, 245, 247, 205)); // dim translucido
+				g.setColor(FlatLaf.isLafDark() ? new Color(10, 11, 13, 190) : new Color(244, 245, 247, 205));
 				g.fillRect(0, 0, getWidth(), getHeight());
 				super.paintComponent(g);
 			}
@@ -2080,11 +2155,33 @@ public class MainWindow extends JFrame {
 		overlay.addMouseListener(new MouseAdapter() {
 		});
 		overlay.setVisible(false);
+		styleExecutingOverlay();
 		return overlay;
+	}
+
+	/**
+	 * Cores do card "Executando consulta..." — separado de {@link #buildResultsOverlay}
+	 * (chamado uma unica vez) para poder ser chamado de novo sempre que o
+	 * overlay for exibido (ver {@link #showExecuting}), pegando o tema ATUAL
+	 * mesmo que o usuario tenha alternado claro/escuro enquanto nenhuma
+	 * consulta estava rodando.
+	 */
+	private void styleExecutingOverlay() {
+		if (executingCard == null) {
+			return;
+		}
+		boolean dark = FlatLaf.isLafDark();
+		executingCard.setBackground(dark ? new Color(0x2B, 0x2D, 0x30) : new Color(0xFF, 0xFF, 0xFF));
+		executingCard.setBorder(BorderFactory.createCompoundBorder(
+				BorderFactory.createLineBorder(dark ? new Color(0x44, 0x48, 0x4D) : new Color(0xE0, 0xE3, 0xE7)),
+				BorderFactory.createEmptyBorder(18, 28, 18, 28)));
 	}
 
 	private void showExecuting(boolean executing) {
 		if (resultsOverlay != null) {
+			if (executing) {
+				styleExecutingOverlay();
+			}
 			resultsOverlay.setVisible(executing);
 			resultsOverlay.repaint();
 		}
@@ -2163,6 +2260,27 @@ public class MainWindow extends JFrame {
 		themeButton
 				.setIcon(dark ? Icons.get(IconType.THEME_LIGHT, 16, MUTED) : Icons.get(IconType.THEME_DARK, 16, MUTED));
 		styleRunButton();
+		// FlatLaf.updateUI() so atualiza componentes Swing PADRAO (botoes,
+		// paineis, arvore etc.) — a grade de resultados e o editor SQL pintam
+		// sozinhos, lendo paletas proprias (ver GridTheme e
+		// SqlEditorPane#applyEditorPalette) que NAO faziam parte do L&F e por
+		// isso ficavam escuras ou claras demais, "fora do tema", ate a
+		// conexao ser trocada. Atualiza os tres pontos manualmente:
+		GridTheme.applyPalette(dark);
+		if (editorTabs != null) {
+			for (int i = 0; i < editorTabs.getTabCount(); i++) {
+				Component c = editorTabs.getComponentAt(i);
+				if (c instanceof SqlEditorPane sep) {
+					sep.refreshTheme();
+				}
+			}
+		}
+		// Resultados ja exibidos foram construidos com a paleta antiga da
+		// grade — reconstroi a grade da aba ativa (showResultsForActiveEditor
+		// cria um ResultGrid NOVO a partir do modelo salvo) pra refletir a
+		// paleta nova imediatamente, sem esperar a proxima consulta.
+		showResultsForActiveEditor();
+		styleExecutingOverlay();
 	}
 
 	// ---------- Acoes ----------
@@ -2334,10 +2452,21 @@ public class MainWindow extends JFrame {
 						// mantem schemaList: e o que permite "Trocar esquema..." depois,
 						// sem precisar desconectar e reconectar (ver maybeShowObjectContextMenu).
 					}
+					// A aba selecionada no momento "adota" este esquema: da proxima
+					// vez que o usuario clicar em Executar nela (mesmo apos abrir
+					// outra aba de outro esquema no meio do caminho), onRun sabe
+					// para qual esquema conectar de volta automaticamente, sem
+					// precisar vir aqui escolher de novo na arvore.
+					SqlEditorPane activeEditor = currentEditor();
+					if (activeEditor != null) {
+						activeEditor.setSchema(schemaName);
+						scheduleSave();
+					}
 					metadataCache.set(schema);
 					completionProvider.refresh(schema);
 					populateTree(schema);
 					setConnectedState(schemaName);
+					updateWorkspaceContextBar();
 					statusBar.setText(" Esquema " + schemaName + "  (" + schema.tables().size() + " tabelas)");
 				} catch (Exception ex) {
 					showError("Falha ao abrir o esquema", ex);
@@ -2424,6 +2553,119 @@ public class MainWindow extends JFrame {
 		if (editor == null) {
 			return;
 		}
+		// Conexao com varios esquemas (nao um schema fixo no cadastro): cada
+		// aba pode pertencer a um esquema diferente (ver SqlEditorPane#getSchema/
+		// #setSchema). Antes de rodar, garante que a conexao esta "apontando"
+		// (USE) para o esquema DESTA aba especifica — nao o que outra aba
+		// deixou selecionado por ultimo — conectando nele primeiro se
+		// necessario. Isto elimina o erro "No database selected" e a
+		// necessidade de reabrir o esquema na arvore antes de executar.
+		if (activeWorkspace != null && activeWorkspace.schemaList() != null) {
+			String needed = editor.getSchema();
+			if (needed == null || needed.isBlank()) {
+				// Aba sem esquema proprio ainda (ex.: criada antes de qualquer
+				// esquema ter sido aberto nesta conexao, ou sessao salva antes
+				// desta funcionalidade existir) — cai no esquema aberto no
+				// momento, se houver, e passa a "adotar" ele dai em diante.
+				needed = currentActiveSchemaName();
+				if (needed == null) {
+					// Nunca foi aberto NENHUM esquema nesta conexao ainda — nao ha
+					// como adivinhar qual a aba deveria usar (a conexao pode ter
+					// dezenas deles). Em vez de so avisar na barra de status e
+					// travar a execucao (jeito antigo, que o usuario relatou como
+					// "nao executou a instrucao" — o aviso passava despercebido),
+					// pergunta o esquema agora mesmo e ja executa em seguida.
+					promptSchemaThenRun(editor);
+					return;
+				}
+				editor.setSchema(needed);
+				scheduleSave();
+			}
+			String activeName = currentActiveSchemaName();
+			if (!needed.equals(activeName)) {
+				switchToSchemaThenRun(needed, editor);
+				return;
+			}
+		}
+		runStatements(editor);
+	}
+
+	/**
+	 * Troca o "banco padrao" (USE) da conexao ativa para {@code schemaName} e
+	 * recarrega os metadados ANTES de rodar a instrucao de {@code editor} —
+	 * chamado por {@link #onRun} quando a aba a executar pertence a um
+	 * esquema diferente do que a conexao tem aberto no momento (conexao com
+	 * varios esquemas e abas de esquemas diferentes abertas ao mesmo tempo).
+	 * Espelha {@link #openSchema}, mas encadeia a execucao no final em vez de
+	 * so atualizar a arvore de objetos.
+	 */
+	private void switchToSchemaThenRun(String schemaName, SqlEditorPane editor) {
+		statusBar.setText(" Conectando no esquema \"" + schemaName + "\" desta aba...");
+		new SwingWorker<SchemaInfo, Void>() {
+			@Override
+			protected SchemaInfo doInBackground() throws Exception {
+				Connection conn = connectionManager().getConnection();
+				conn.setCatalog(schemaName); // define o banco padrao (USE schema)
+				return metadataService.loadSchema(conn, schemaName);
+			}
+
+			@Override
+			protected void done() {
+				try {
+					SchemaInfo schema = get();
+					if (activeWorkspace != null) {
+						activeWorkspace.schema = schema;
+					}
+					metadataCache.set(schema);
+					completionProvider.refresh(schema);
+					populateTree(schema);
+					setConnectedState(schemaName);
+					updateWorkspaceContextBar();
+					runStatements(editor);
+				} catch (Exception ex) {
+					showError("Falha ao conectar no esquema \"" + schemaName + "\"", ex);
+					statusBar.setText(" Erro ao trocar de esquema");
+				}
+			}
+		}.execute();
+	}
+
+	/**
+	 * Pergunta em qual esquema (dentre os disponiveis na conexao) esta aba
+	 * deveria rodar — chamado por {@link #onRun} quando a aba nunca teve um
+	 * esquema definido E a conexao tambem nunca abriu nenhum ainda (por isso
+	 * nao ha esquema "atual" nenhum para herdar). Ao escolher, a aba "adota"
+	 * esse esquema permanentemente (fica salvo com ela) e a instrucao roda
+	 * OK EM SEGUIDA, sem precisar clicar em Executar de novo.
+	 */
+	private void promptSchemaThenRun(SqlEditorPane editor) {
+		List<String> schemas = activeWorkspace.schemaList();
+		if (schemas == null || schemas.isEmpty()) {
+			statusBar.setText(" Esta conexao nao tem nenhum esquema disponivel.");
+			return;
+		}
+		JComboBox<String> combo = new JComboBox<>(schemas.toArray(new String[0]));
+		JPanel panel = new JPanel(new BorderLayout(0, 8));
+		panel.add(new JLabel("Esta aba ainda nao tem um esquema definido. Em qual esquema executar?"),
+				BorderLayout.NORTH);
+		panel.add(combo, BorderLayout.CENTER);
+		int opt = JOptionPane.showConfirmDialog(this, panel, "Escolher esquema para esta aba",
+				JOptionPane.OK_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE);
+		if (opt != JOptionPane.OK_OPTION) {
+			statusBar.setText(" Execucao cancelada: nenhum esquema escolhido para esta aba.");
+			return;
+		}
+		String chosen = (String) combo.getSelectedItem();
+		if (chosen == null) {
+			return;
+		}
+		editor.setSchema(chosen);
+		scheduleSave();
+		switchToSchemaThenRun(chosen, editor);
+	}
+
+	/** Roda de fato as instrucoes SQL da aba {@code editor} — ver {@link #onRun}. */
+	private void runStatements(SqlEditorPane editor) {
 		final List<String> statements = SqlStatementSplitter.split(editor.currentSql());
 		if (statements.isEmpty()) {
 			return;
