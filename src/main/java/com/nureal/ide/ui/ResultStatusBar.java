@@ -8,6 +8,7 @@ import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
 import javax.swing.Timer;
 import java.awt.BorderLayout;
+import java.awt.Color;
 import java.awt.Cursor;
 import java.awt.FlowLayout;
 import java.awt.event.MouseAdapter;
@@ -84,6 +85,15 @@ final class ResultStatusBar {
         exportMenu.add(exportAllItem);
         exportButton.addActionListener(e -> exportMenu.show(exportButton, 0, exportButton.getHeight()));
 
+        // Mesmo padrao "contorno" de botao secundario usado em qualquer
+        // dialogo do app (ver Buttons#styleSecondary) — antes estes eram
+        // botoes PADRAO do FlatLaf, sem o mesmo raio/borda/espacamento das
+        // acoes secundarias em outros lugares (DdlAssistantDialog,
+        // FkInspectorWindow, CellContentViewer).
+        for (JButton btn : new JButton[] { loadMoreButton, loadAllButton, exportButton }) {
+            Buttons.styleSecondary(btn);
+        }
+
         selectionSummary.setForeground(GridTheme.MUTED_TEXT);
         // Clique copia a soma — mesmo gesto do Excel (clicar no "Soma:" da
         // barra de status copia o valor pronto pra colar), pedido explicito
@@ -117,10 +127,22 @@ final class ResultStatusBar {
      */
     private JComponent buildEditBar() {
         editModeToggle.setIcon(Icons.get(IconType.EDIT, 13, MainWindow.ACCENT));
-        addRowButton.setIcon(Icons.get(IconType.NEW, 13, new java.awt.Color(0x334155)));
-        deleteRowsButton.setIcon(Icons.get(IconType.DELETE, 13, new java.awt.Color(0x334155)));
-        saveChangesButton.setIcon(Icons.get(IconType.SAVE, 13, MainWindow.ACCENT));
+        // GridTheme.HEADER_FOREGROUND, nao um literal proprio — o valor claro
+        // ja era EXATAMENTE 0x334155 (mesmo "ink" usado no cabecalho da
+        // grade), so nunca acompanhava o tema escuro (icone baixo-contraste
+        // no modo escuro).
+        addRowButton.setIcon(Icons.get(IconType.NEW, 13, GridTheme.HEADER_FOREGROUND));
+        deleteRowsButton.setIcon(Icons.get(IconType.DELETE, 13, GridTheme.HEADER_FOREGROUND));
+        saveChangesButton.setIcon(Icons.get(IconType.SAVE, 13, Color.WHITE));
         pendingLabel.setForeground(GridTheme.MUTED_TEXT);
+
+        // Mesmo padrao secundario/primario de qualquer dialogo do app (ver
+        // Buttons) — "Salvar alteracoes" e a acao de CONFIRMACAO desta barra
+        // (preenchida na cor da marca), o resto e secundario (contorno).
+        for (JButton btn : new JButton[] { editModeToggle, addRowButton, deleteRowsButton, discardButton }) {
+            Buttons.styleSecondary(btn);
+        }
+        Buttons.stylePrimary(saveChangesButton);
 
         JPanel editLeft = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 3));
         editLeft.add(editModeToggle);

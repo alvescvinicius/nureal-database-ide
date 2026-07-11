@@ -87,6 +87,10 @@ public final class ConnectionEditDialog {
             if (result != JOptionPane.OK_OPTION) {
                 return null;
             }
+            // Limpa o destaque de erro de uma tentativa anterior antes de
+            // validar de novo — sem isto o campo ficava "vermelho" para
+            // sempre mesmo depois do usuario corrigir o nome.
+            name.putClientProperty("JComponent.outline", null);
 
             int portValue;
             try {
@@ -104,6 +108,12 @@ public final class ConnectionEditDialog {
                 JOptionPane.showMessageDialog(owner,
                         "Ja existe uma conexao chamada \"" + connName + "\".\nEscolha outro nome.",
                         "Nome duplicado", JOptionPane.WARNING_MESSAGE);
+                // Destaque de erro nativo do FlatLaf (contorno vermelho) no
+                // campo especifico que precisa ser corrigido — alem do aviso
+                // em popup, agora fica claro qual campo esta errado quando o
+                // formulario reabre (estado "erro" pedido na revisao visual
+                // de inputs; antes so existia normal/foco/desabilitado).
+                name.putClientProperty("JComponent.outline", "error");
                 continue;
             }
 

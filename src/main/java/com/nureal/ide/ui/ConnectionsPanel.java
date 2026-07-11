@@ -89,10 +89,13 @@ public class ConnectionsPanel extends JPanel {
         JLabel title = new JLabel("CONEXOES");
         title.putClientProperty("FlatLaf.styleClass", "small");
         title.setFont(title.getFont().deriveFont(Font.BOLD, 11f));
-        title.setForeground(new java.awt.Color(0x6B7280));
+        title.setForeground(GridTheme.MUTED_TEXT);
 
         JButton novo = new JButton("Nova");
-        novo.setIcon(Icons.get(IconType.NEW, 13, new Color(0x334155)));
+        // GridTheme.HEADER_FOREGROUND (nao um literal proprio): valor claro
+        // ja era EXATAMENTE 0x334155, so nunca acompanhava o tema escuro —
+        // icone "sumia" (baixo contraste) com o app no modo escuro.
+        novo.setIcon(Icons.get(IconType.NEW, 13, GridTheme.HEADER_FOREGROUND));
         novo.setToolTipText("Nova conexao");
         novo.addActionListener(e -> onNew());
         novo.setIconTextGap(6);
@@ -143,7 +146,18 @@ public class ConnectionsPanel extends JPanel {
     private JComponent buildList() {
         list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         list.setFixedCellHeight(DEFAULT_ROW_HEIGHT);
+        // Sem isto, a linha selecionada usava o default do FlatLaf.properties
+        // (List.selectionBackground = accent verde SOLIDO, #059669) — bem
+        // mais "gritante" que o cinza neutro que a arvore de Objetos e a
+        // grade de resultados usam pra selecao (ver ObjectTreeCellRenderer,
+        // GridTheme.SELECTION_BACKGROUND), quebrando a consistencia visual
+        // entre as duas listas/arvores do app (pedido da revisao: "mesmos
+        // estados de... selecao"). Mesmo tom neutro da grade em vez de um
+        // terceiro cinza proprio so pra esta lista.
+        list.setSelectionBackground(GridTheme.SELECTION_BACKGROUND);
+        list.setSelectionForeground(GridTheme.SELECTION_FOREGROUND);
         list.setCellRenderer(new ConnectionRenderer());
+        TreeHoverTracker.installOnList(list);
         list.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseClicked(MouseEvent e) {
@@ -187,10 +201,10 @@ public class ConnectionsPanel extends JPanel {
         disconnect.setEnabled(connected);
         disconnect.addActionListener(a -> disconnectSelected());
         JMenuItem edit = new JMenuItem("Editar...");
-        edit.setIcon(Icons.get(IconType.EDIT, 15, new Color(0x334155)));
+        edit.setIcon(Icons.get(IconType.EDIT, 15, GridTheme.HEADER_FOREGROUND));
         edit.addActionListener(a -> onEdit());
         JMenuItem delete = new JMenuItem("Excluir");
-        delete.setIcon(Icons.get(IconType.DELETE, 15, new Color(0x334155)));
+        delete.setIcon(Icons.get(IconType.DELETE, 15, GridTheme.HEADER_FOREGROUND));
         delete.addActionListener(a -> onDelete());
         menu.add(connect);
         menu.add(disconnect);
@@ -257,7 +271,10 @@ public class ConnectionsPanel extends JPanel {
      */
     Color colorForWorkspace(String name) {
         if (name == null || name.isBlank()) {
-            return new Color(0x6B7280);
+            // Cinza neutro do tema (nao um literal proprio) — antes ficava
+            // preso no tom claro em qualquer modo, GridTheme.MUTED_TEXT
+            // acompanha claro/escuro (ver GridTheme#applyPalette).
+            return GridTheme.MUTED_TEXT;
         }
         int idx = -1;
         for (int i = 0; i < all.size(); i++) {
@@ -483,6 +500,15 @@ public class ConnectionsPanel extends JPanel {
             setHorizontalAlignment(SwingConstants.LEFT);
             setBorder(BorderFactory.createEmptyBorder(4, 12, 4, 12));
             setIconTextGap(10);
+            // Hover (linha sob o mouse, sem selecionar) — mesmo destaque suave
+            // da arvore de Objetos e da grade de resultados (ver
+            // TreeHoverTracker/GridTheme.HOVER_BACKGROUND); faltava aqui antes.
+            // Selecao sempre tem prioridade visual: so pinta hover quando a
+            // linha NAO esta selecionada.
+            if (!isSelected && index == TreeHoverTracker.hoverRow(list)) {
+                setOpaque(true);
+                setBackground(GridTheme.HOVER_BACKGROUND);
+            }
             if (value instanceof ConnectionProfile p) {
                 // Cor do dot: status de conexao (conectado/conectando/ocioso) —
                 // sinal PRINCIPAL, nao muda com a identidade do workspace.
@@ -507,7 +533,12 @@ public class ConnectionsPanel extends JPanel {
                                 BorderFactory.createMatteBorder(0, 3, 0, 0, colorForWorkspace(p.name())),
                                 BorderFactory.createEmptyBorder(4, 9, 4, 12))
                         : BorderFactory.createEmptyBorder(4, 12, 4, 12));
-                setText(p.name());
+                // A tarja lateral colorida (acima) e o UNICO sinal hoje de
+                // qual conexao esta ativa — quem nao distingue bem cor (ou so
+                // olhou rapido) nao teria como saber sem ela. Sufixo textual
+                // simples como segundo sinal, independente de cor (pedido da
+                // revisao: "identificar... sem depender apenas de cores").
+                setText(active ? p.name() + "  ·  atual" : p.name());
                 setFont(getFont().deriveFont(connectedNames.contains(p.name()) ? Font.BOLD : Font.PLAIN));
                 setToolTipText(p.user() + "@" + p.host() + ":" + p.port() + "/" + p.schema());
             }

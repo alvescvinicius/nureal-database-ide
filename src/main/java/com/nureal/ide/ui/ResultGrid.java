@@ -68,6 +68,19 @@ final class ResultGrid extends JPanel {
     private java.util.function.BiConsumer<Integer, java.math.BigDecimal> onSelectionSummary = (count, sum) -> { };
 
     /**
+     * Reaplica o fundo/borda/cor de texto do {@link #buildFilterBar} — sao
+     * setados explicitamente (nao ficam UIResource), entao NAO acompanham
+     * sozinhos uma troca de tema com a grade ja aberta numa janela (mesma
+     * causa do {@code updateUI()} de {@code table} logo abaixo). Comeca como
+     * no-op: so vira o Runnable de verdade dentro de {@link #buildFilterBar},
+     * chamado a partir do {@link #updateUI()} desta classe. O guard contra
+     * {@code null} nao e so defensivo — o PRIMEIRO {@code updateUI()} desta
+     * classe e disparado pelo proprio {@code super(new BorderLayout())} do
+     * construtor, ANTES deste campo ser de fato inicializado.
+     */
+    private Runnable filterBarChromeRefresh;
+
+    /**
      * @param model            dados + metadados da consulta (ver {@link ResultTableModel})
      * @param connectionManager conexao usada para carregar PK/FK/indices sob demanda
      * @param schema           schema atual (pode ser {@code null})
@@ -93,6 +106,34 @@ final class ResultGrid extends JPanel {
             @Override
             public String getToolTipText(MouseEvent e) {
                 return cellTooltip(this, e);
+            }
+
+            /**
+             * Sem isto, uma grade deste tipo aberta dentro de uma JANELA
+             * PROPRIA (o Inspetor de FK, {@code FkInspectorWindow}, e o unico
+             * caso hoje — nao acompanha o ciclo de vida da janela principal)
+             * ficava "presa" nas cores de fundo/selecao/grade do tema de
+             * quando foi ABERTA: alternar claro/escuro na janela principal
+             * chama {@code FlatLaf.updateUI()}, que atualiza TODAS as janelas
+             * abertas (inclusive esta) — mas so reinstala o Look and Feel
+             * PADRAO do JTable, nunca reaplica sozinho as cores explicitas
+             * que {@link #styleTable} ja tinha definido na mao (setBackground/
+             * setSelectionBackground/etc nao viram UIResource so por serem
+             * setados direto — o LookAndFeel nao mexe neles de novo).
+             * Resultado relatado pelo usuario: reabrir/olhar um Inspetor
+             * aberto antes da troca de tema mostrava a grade "bugada", com o
+             * fundo/selecao do tema ANTIGO por baixo do cabecalho/filtro
+             * (esses sim ja no tema novo, por usarem so o L&F padrao).
+             * Reaplicar {@link #styleTable} aqui, toda vez que o L&F for
+             * atualizado, resolve isso — funciona pra QUALQUER janela futura
+             * que venha a usar {@link ResultGrid}, nao so o Inspetor de FK.
+             */
+            @Override
+            public void updateUI() {
+                super.updateUI();
+                if (ResultGrid.this.table != null) {
+                    styleTable(this, scale);
+                }
             }
         };
         // getToolTipText(MouseEvent) sozinho nao basta: o ToolTipManager so
@@ -191,6 +232,23 @@ final class ResultGrid extends JPanel {
     }
 
     /**
+     * Reaplica {@link #filterBarChromeRefresh} sempre que o L&F desta grade
+     * for atualizado — inclusive quando esta grade vive dentro de uma janela
+     * QUE NAO E a MainWindow (Inspetor de FK, dialogo de propriedades de
+     * objeto etc.): {@code FlatLaf.updateUI()} (chamado em
+     * {@code MainWindow#toggleTheme}) percorre TODAS as janelas abertas, e
+     * este {@code updateUI()} e quem recebe esse aviso aqui, sem precisar
+     * fechar/reabrir a janela.
+     */
+    @Override
+    public void updateUI() {
+        super.updateUI();
+        if (filterBarChromeRefresh != null) {
+            filterBarChromeRefresh.run();
+        }
+    }
+
+    /**
      * Acha, entre as colunas do resultado, aquela cuja tabela/coluna REAIS de
      * origem (ver {@code ResultTableModel#sourceTable}/{@code #realColumnName})
      * batem com {@code sourceTable}/{@code localColumnName} (case-insensitive)
@@ -280,6 +338,18 @@ final class ResultGrid extends JPanel {
         // Selecao em cinza neutro: as cores por tipo de dado continuam visiveis por cima.
         table.setSelectionBackground(GridTheme.SELECTION_BACKGROUND);
         table.setSelectionForeground(GridTheme.SELECTION_FOREGROUND);
+        // O fundo/texto "puros" da JTable (nao usados na pintura normal —
+        // AbstractTypedCellRenderer que manda no fundo de cada celula, ver
+        // aplyRowBackground) SO importam pro editor de celula PADRAO do
+        // Swing: DefaultCellEditor pinta o JTextField de edicao com
+        // table.getBackground()/getForeground() quando a celula NAO esta
+        // selecionada (e com as cores de selecao, ja tratadas acima, quando
+        // esta). Sem isto, table.getBackground() ficava sem valor explicito
+        // e o campo de edicao aparecia com o branco padrao do Swing por cima
+        // de uma grade inteira no tema escuro — bug relatado pelo usuario
+        // ("caixa branca" ao editar uma celula no tema escuro).
+        table.setBackground(GridTheme.ZEBRA_EVEN);
+        table.setForeground(GridTheme.COLOR_TEXTUAL);
         // minWidth e um limite DURO do proprio Swing: passado disto, o
         // usuario simplesmente NAO CONSEGUE arrastar a divisoria do
         // cabecalho. De proposito um valor MINUSCULO e INDEPENDENTE da
@@ -431,14 +501,30 @@ final class ResultGrid extends JPanel {
 
         JPanel bar = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 3));
         JLabel columnLabel = new JLabel("Coluna:");
-        columnLabel.setForeground(GridTheme.MUTED_TEXT);
         bar.add(columnLabel);
         bar.add(columnSearchField);
         JLabel label = new JLabel("Filtro:");
-        label.setForeground(GridTheme.MUTED_TEXT);
         bar.add(label);
         bar.add(filterColumnBox);
         bar.add(filterField);
+
+        // ANTES esta barra nunca recebia fundo/borda proprios — so herdava o
+        // cinza generico de "Panel.background" do L&F, um tom DIFERENTE (mais
+        // claro no escuro) do resto do chrome desta grade (cabecalho, barra
+        // de filtro do Inspetor de FK etc.), destacando-se como um "remendo"
+        // fora do tema (queixa do usuario, com captura de tela: "continua com
+        // pequenas partes" fora do padrao visual). Usa o MESMO tom de
+        // cabecalho do resto da grade, com separador embaixo — e precisa ser
+        // REAPLICADO (nao so setado uma vez) sempre que o tema mudar com a
+        // grade ja aberta, ver #updateUI().
+        filterBarChromeRefresh = () -> {
+            bar.setOpaque(true);
+            bar.setBackground(GridTheme.HEADER_BACKGROUND);
+            bar.setBorder(javax.swing.BorderFactory.createMatteBorder(0, 0, 1, 0, GridTheme.HEADER_BORDER));
+            columnLabel.setForeground(GridTheme.MUTED_TEXT);
+            label.setForeground(GridTheme.MUTED_TEXT);
+        };
+        filterBarChromeRefresh.run();
         return bar;
     }
 

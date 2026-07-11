@@ -48,6 +48,7 @@ abstract class AbstractTypedCellRenderer extends DefaultTableCellRenderer {
         // renderizada por esta MESMA instancia compartilhada.
         setForeground(null);
         setFont(getFont().deriveFont(Font.PLAIN));
+        resetTypedState();
 
         boolean isNull = (value == null);
         String display = isNull ? "null" : formatValue(value);
@@ -213,5 +214,19 @@ abstract class AbstractTypedCellRenderer extends DefaultTableCellRenderer {
     /** Formata o valor para exibicao (datas/timestamps amigaveis; demais tipos usam toString()). */
     String formatValue(Object value) {
         return value.toString();
+    }
+
+    /**
+     * Gancho para subclasses limparem estado de "scratch" PROPRIO (campos de
+     * instancia usados so entre {@link #colorFor} e uma pintura customizada,
+     * ex.: {@link BadgeCellRenderer#paintComponent}) antes de CADA celula ser
+     * processada — chamado incondicionalmente aqui em cima, mesmo para
+     * valores nulos (que nunca chamam {@link #colorFor}). Sem isto, um estado
+     * setado por uma celula NAO-NULA anterior pintada por esta MESMA
+     * instancia compartilhada vazaria para a proxima celula, mesmo se ela for
+     * nula — mesma familia de bug ja vista e corrigida com COLOR_NULL (ver
+     * topo desta classe). Default: nada a limpar.
+     */
+    void resetTypedState() {
     }
 }

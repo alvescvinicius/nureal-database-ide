@@ -6,7 +6,6 @@ import java.awt.Component;
 import java.awt.Dialog;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
-import java.awt.Font;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
@@ -22,6 +21,8 @@ import java.util.Set;
 import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import com.formdev.flatlaf.FlatClientProperties;
 
 import javax.swing.BorderFactory;
 import javax.swing.DefaultCellEditor;
@@ -190,7 +191,7 @@ final class DdlAssistantDialog {
             JLabel banner = new JLabel(alterMode
                     ? "Modo ALTERAR: so adiciona colunas/chaves/indices novos (nunca modifica ou remove o que ja existe)."
                     : "Modo CRIAR: monte a tabela do zero, com sugestoes de normalizacao antes de executar.");
-            banner.setForeground(new Color(0x6B7280));
+            banner.setForeground(GridTheme.MUTED_TEXT);
             banner.setBorder(BorderFactory.createEmptyBorder(0, 10, 6, 10));
 
             JPanel wrap = new JPanel(new BorderLayout());
@@ -242,7 +243,7 @@ final class DdlAssistantDialog {
                             cd.key(), cd.defaultValue(), cd.extra() });
                 }
                 JTable existingTable = new JTable(existingModel);
-                existingTable.setRowHeight(22);
+                MetadataTableStyle.apply(existingTable);
                 JScrollPane existingScroll = new JScrollPane(existingTable);
                 existingScroll.setPreferredSize(new Dimension(880, 140));
                 JPanel existingWrap = new JPanel(new BorderLayout(0, 4));
@@ -275,7 +276,7 @@ final class DdlAssistantDialog {
                 addDefaultColumnRow(columnsModel);
             }
             JTable table = new JTable(columnsModel);
-            table.setRowHeight(24);
+            MetadataTableStyle.apply(table);
             table.getColumnModel().getColumn(1).setCellEditor(new DefaultCellEditor(new JComboBox<>(TYPES)));
             table.putClientProperty("terminateEditOnFocusLost", Boolean.TRUE);
 
@@ -293,6 +294,8 @@ final class DdlAssistantDialog {
                     columnsModel.removeRow(rows[i]);
                 }
             });
+            styleSecondaryButton(addRow);
+            styleSecondaryButton(removeRow);
             JPanel buttons = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 4));
             buttons.add(addRow);
             buttons.add(removeRow);
@@ -323,7 +326,7 @@ final class DdlAssistantDialog {
                     "ON UPDATE", "ON DELETE" };
             fkModel = new DefaultTableModel(headers, 0);
             JTable table = new JTable(fkModel);
-            table.setRowHeight(24);
+            MetadataTableStyle.apply(table);
             List<String> tableNames = new ArrayList<>();
             for (TableInfo t : schema.tables()) {
                 tableNames.add(t.name());
@@ -352,6 +355,9 @@ final class DdlAssistantDialog {
                 stopEditing(table);
                 suggestForeignKeys();
             });
+            styleSecondaryButton(addRow);
+            styleSecondaryButton(removeRow);
+            styleSecondaryButton(suggest);
             JPanel buttons = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 4));
             buttons.add(addRow);
             buttons.add(removeRow);
@@ -430,7 +436,7 @@ final class DdlAssistantDialog {
                 }
             };
             JTable table = new JTable(indexModel);
-            table.setRowHeight(24);
+            MetadataTableStyle.apply(table);
             table.putClientProperty("terminateEditOnFocusLost", Boolean.TRUE);
 
             JButton addRow = new JButton("+ Indice");
@@ -448,6 +454,9 @@ final class DdlAssistantDialog {
                 stopEditing(table);
                 suggestIndexesForForeignKeys();
             });
+            styleSecondaryButton(addRow);
+            styleSecondaryButton(removeRow);
+            styleSecondaryButton(suggest);
             JPanel buttons = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 4));
             buttons.add(addRow);
             buttons.add(removeRow);
@@ -493,6 +502,7 @@ final class DdlAssistantDialog {
             suggestionsArea.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
             JButton refresh = new JButton("Atualizar sugestoes");
             refresh.addActionListener(a -> refreshSuggestions());
+            styleSecondaryButton(refresh);
             panel.add(new JScrollPane(suggestionsArea), BorderLayout.CENTER);
             JPanel south = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 4));
             south.add(refresh);
@@ -528,7 +538,10 @@ final class DdlAssistantDialog {
             panel.setBorder(BorderFactory.createEmptyBorder(8, 10, 8, 10));
             previewArea = new JTextArea();
             previewArea.setEditable(false);
-            previewArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 13));
+            // Mesma fonte monoespacada do editor SQL principal (ver
+            // SqlEditorPane#monospaceFont), nao Font.MONOSPACED generico —
+            // consistencia tipografica entre toda area de texto de codigo do app.
+            previewArea.setFont(SqlEditorPane.monospaceFont(13));
             previewArea.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
             JButton refresh = new JButton("Atualizar pre-visualizacao");
             refresh.addActionListener(a -> refreshPreview());
@@ -543,6 +556,9 @@ final class DdlAssistantDialog {
                     sendToEditor.accept(previewArea.getText());
                 }
             });
+            styleSecondaryButton(refresh);
+            styleSecondaryButton(copy);
+            styleSecondaryButton(toEditor);
             JPanel south = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 4));
             south.add(refresh);
             south.add(copy);
@@ -582,11 +598,22 @@ final class DdlAssistantDialog {
         private JComponent buildFooter() {
             JButton close = new JButton("Fechar");
             close.addActionListener(a -> dialog.dispose());
+            styleSecondaryButton(close);
+
+            // Acao PRIMARIA: mesmo tratamento do botao "Executar" da barra de
+            // ferramentas principal (ver MainWindow#styleRunButton) — verde da
+            // marca, sem borda/fill extra do FlatLaf padrao, pra ficar
+            // inequivocamente a acao em destaque do dialogo.
             JButton execute = new JButton(alterMode ? "Executar ALTER TABLE" : "Executar CREATE TABLE");
-            execute.setBackground(new Color(0x059669));
+            execute.setBackground(MainWindow.ACCENT);
             execute.setForeground(Color.WHITE);
+            execute.setMargin(new Insets(6, 14, 6, 14));
+            execute.putClientProperty(FlatClientProperties.STYLE,
+                    "arc: 8; focusWidth: 0; innerFocusWidth: 0; borderWidth: 0");
             execute.addActionListener(a -> onExecute());
+
             JPanel panel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 8));
+            panel.setBorder(BorderFactory.createEmptyBorder(0, 10, 4, 10));
             panel.add(close);
             panel.add(execute);
             return panel;
@@ -790,6 +817,23 @@ final class DdlAssistantDialog {
                 }
             }
             return out;
+        }
+
+        /**
+         * Estilo "outline" padrao dos botoes secundarios do app (mesmo visual
+         * do "Formatar" na barra de ferramentas principal — ver
+         * {@code MainWindow#buildToolbar}): contorno fino, sem preenchimento,
+         * cantos arredondados. Aplicado a todos os botoes deste assistente
+         * que nao sejam a acao PRIMARIA (Executar CREATE/ALTER TABLE, ver
+         * {@link #buildFooter}), para o dialogo parar de misturar o estilo
+         * "cru" (fill solido padrao do FlatLaf) dos botoes de tabela
+         * (+/-/Sugerir/Atualizar/Copiar/Enviar) com o estilo outline usado no
+         * resto da IDE.
+         */
+        private static void styleSecondaryButton(JButton button) {
+            button.putClientProperty("JButton.buttonType", "roundRect");
+            button.putClientProperty(FlatClientProperties.STYLE, "arc: 8; borderWidth: 1");
+            button.setMargin(new Insets(4, 10, 4, 10));
         }
 
         private static void stopEditing(JTable table) {

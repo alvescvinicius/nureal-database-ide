@@ -94,7 +94,7 @@ final class ObjectTreeCellRenderer extends DefaultTreeCellRenderer {
         // A linha do schema precisa da largura esticada SEMPRE (nao so quando
         // selecionada) — sem isto nao ha como saber, em paintComponent, onde
         // fica a "ponta direita" da linha pra desenhar a setinha.
-        applyRowBackground(tree, selected, isSchema);
+        applyRowBackground(tree, selected, isSchema, row);
         return this;
     }
 
@@ -119,8 +119,8 @@ final class ObjectTreeCellRenderer extends DefaultTreeCellRenderer {
      * largura em {@link #paintComponent} pra desenhar a setinha na ponta
      * direita (ver {@link #SCHEMA_SWITCH_ICON_SIZE}).
      */
-    private void applyRowBackground(JTree tree, boolean selected, boolean stretchWidth) {
-        Color bg = backgroundFor(selected);
+    private void applyRowBackground(JTree tree, boolean selected, boolean stretchWidth, int row) {
+        Color bg = backgroundFor(selected, tree, row);
         if (bg == null) {
             setOpaque(false);
         } else {
@@ -142,12 +142,22 @@ final class ObjectTreeCellRenderer extends DefaultTreeCellRenderer {
     /**
      * Cor de fundo da linha SELECIONADA: cinza clarinho (ver
      * {@link #selectionBackground}) para QUALQUER linha, inclusive o schema
-     * (raiz) — mesma barra para todo mundo. NAO selecionada: sempre
-     * {@code null} — nenhuma categoria pinta fundo, so o texto (ver
-     * {@link #style}/{@link #applyPathStyle}).
+     * (raiz) — mesma barra para todo mundo. NAO selecionada MAS sob o mouse:
+     * {@link GridTheme#HOVER_BACKGROUND} (mesmo destaque suave de hover da
+     * grade de resultados — ver {@link TreeHoverTracker}), estado que faltava
+     * aqui antes (so existiam normal/selecionado). Selecao sempre tem
+     * prioridade visual sobre hover. Fora isso, sempre {@code null} —
+     * nenhuma categoria pinta fundo, so o texto (ver {@link #style}/
+     * {@link #applyPathStyle}).
      */
-    private static Color backgroundFor(boolean selected) {
-        return selected ? selectionBackground() : null;
+    private static Color backgroundFor(boolean selected, JTree tree, int row) {
+        if (selected) {
+            return selectionBackground();
+        }
+        if (row >= 0 && row == TreeHoverTracker.hoverRow(tree)) {
+            return GridTheme.HOVER_BACKGROUND;
+        }
+        return null;
     }
 
     private void style(MainWindow.ObjNode obj, boolean emptyCategory, boolean expanded) {

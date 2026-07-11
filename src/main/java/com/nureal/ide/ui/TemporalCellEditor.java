@@ -1,6 +1,5 @@
 package com.nureal.ide.ui;
 
-import java.awt.Color;
 import java.awt.Component;
 import java.sql.Timestamp;
 import java.time.LocalDate;
@@ -14,7 +13,6 @@ import javax.swing.BorderFactory;
 import javax.swing.JTable;
 import javax.swing.JTextField;
 import javax.swing.SwingConstants;
-import javax.swing.border.LineBorder;
 import javax.swing.table.TableCellEditor;
 
 /**
@@ -100,6 +98,20 @@ final class TemporalCellEditor extends AbstractCellEditor implements TableCellEd
     public Component getTableCellEditorComponent(JTable table, Object value, boolean isSelected, int row, int column) {
         field.setBorder(BorderFactory.createEmptyBorder(0, 6, 0, 6));
         field.setToolTipText(null);
+        // Limpa o contorno de erro de uma edicao anterior invalida — sem
+        // isto o campo ficava "vermelho" pra sempre na proxima vez que
+        // qualquer celula desta coluna fosse editada (mesma instancia
+        // reaproveitada, ver o campo `field`).
+        field.putClientProperty("JComponent.outline", null);
+        // Le as cores da TABELA (nao os defaults estaticos do L&F do proprio
+        // JTextField) toda vez que a edicao comeca, igual o DefaultCellEditor
+        // padrao do Swing ja faz para os outros tipos de coluna — sem isto,
+        // este campo (uma UNICA instancia reaproveitada por toda coluna
+        // temporal, ver o campo `field`) podia ficar preso na aparencia clara
+        // do L&F mesmo com o app inteiro no tema escuro (bug relatado: "caixa
+        // branca" ao editar uma celula).
+        field.setBackground(isSelected ? table.getSelectionBackground() : table.getBackground());
+        field.setForeground(isSelected ? table.getSelectionForeground() : table.getForeground());
         int modelColumn = table.convertColumnIndexToModel(column);
         targetClass = table.getModel().getColumnClass(modelColumn);
         field.setText(value == null ? "" : formatForEdit(value));
@@ -120,7 +132,12 @@ final class TemporalCellEditor extends AbstractCellEditor implements TableCellEd
         }
         Object value = tryParse(text, targetClass);
         if (value == null) {
-            field.setBorder(new LineBorder(Color.RED));
+            // Contorno de erro NATIVO do FlatLaf ("JComponent.outline" =
+            // "error"), nao mais uma LineBorder vermelha desenhada na mao —
+            // mesmo mecanismo agora usado em ConnectionEditDialog para o
+            // campo de nome duplicado, e reativo ao tema sozinho (o antigo
+            // Color.RED fixo nao acompanhava claro/escuro).
+            field.putClientProperty("JComponent.outline", "error");
             field.setToolTipText("Data invalida — use " + expectedFormatHint(targetClass) + " (ou Esc para cancelar)");
             return false;
         }

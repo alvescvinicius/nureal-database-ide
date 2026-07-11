@@ -65,6 +65,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 /**
@@ -147,6 +148,17 @@ public class SqlEditorPane extends JPanel {
     private final Supplier<SchemaInfo> schemaSupplier;
 
     /**
+     * Nome de exibicao da CONEXAO ativa desta aba (ex.: o nome dado pelo
+     * usuario em {@code ConnectionEditDialog}), consultado sob demanda a
+     * cada atualizacao do breadcrumb — mesma ideia de {@link #schemaSupplier}
+     * (nunca cacheado, reflete sempre a conexao atual mesmo que o usuario
+     * troque com a aba ja aberta). {@code null}-safe: quando nao informado
+     * (construtor de 8 argumentos), o breadcrumb simplesmente comeca no
+     * schema, sem prefixo de conexao.
+     */
+    private final Supplier<String> connectionNameSupplier;
+
+    /**
      * Chamado quando o usuario da CTRL+Clique sobre um objeto de banco
      * reconhecido no editor (secao 8.3 do pedido "Navegacao Inteligente e
      * Interativa") — {@code kind} e "TABLE"/"VIEW"/"PROCEDURE"/"FUNCTION"/
@@ -165,12 +177,33 @@ public class SqlEditorPane extends JPanel {
     public SqlEditorPane(String tabId, SqlCompletionProvider provider, Runnable onRun,
             Supplier<SqlFormatter> formatterSupplier, String fontFamily, Supplier<SchemaInfo> schemaSupplier,
             ObjectOpenHandler onOpenObject, Runnable onNavigateBack) {
+        this(tabId, provider, onRun, formatterSupplier, fontFamily, schemaSupplier, onOpenObject, onNavigateBack,
+                null, null, null, null);
+    }
+
+    /**
+     * Igual ao construtor de 8 argumentos, com mais 3 callbacks NULL-SAFE
+     * para a fileira de acoes rapidas do canto direito da barra de contexto
+     * (ver {@link #buildQuickActionRow}): {@code onHistory} (icone de
+     * historico de execucoes), {@code onToggleExpand} (icone de expandir/
+     * recolher o editor) e {@code onMoreOptions} (icone de "mais opcoes",
+     * recebe o proprio botao como ancora para o popup). Qualquer um pode ser
+     * {@code null} — o botao correspondente simplesmente nao e criado. Mais
+     * {@code connectionNameSupplier} (tambem null-safe) para o prefixo de
+     * conexao do breadcrumb — ver {@link #connectionNameSupplier}.
+     */
+    public SqlEditorPane(String tabId, SqlCompletionProvider provider, Runnable onRun,
+            Supplier<SqlFormatter> formatterSupplier, String fontFamily, Supplier<SchemaInfo> schemaSupplier,
+            ObjectOpenHandler onOpenObject, Runnable onNavigateBack,
+            Runnable onHistory, Runnable onToggleExpand, Consumer<JComponent> onMoreOptions,
+            Supplier<String> connectionNameSupplier) {
         super(new BorderLayout());
 
         this.tabId = tabId;
         this.formatterSupplier = formatterSupplier;
         this.fontFamily = fontFamily;
         this.schemaSupplier = schemaSupplier;
+        this.connectionNameSupplier = connectionNameSupplier;
         this.onOpenObject = onOpenObject;
         textArea = new RSyntaxTextArea(20, 80) {
             private static final long serialVersionUID = 1L;
@@ -452,7 +485,7 @@ public class SqlEditorPane extends JPanel {
                 }
             }
         });
-        add(buildBreadcrumbBar(), BorderLayout.NORTH);
+        add(buildBreadcrumbBar(onRun, onHistory, onToggleExpand, onMoreOptions), BorderLayout.NORTH);
         add(scroll, BorderLayout.CENTER);
         add(buildFindBar(), BorderLayout.SOUTH);
         installBreadcrumbSync(textArea);
@@ -476,6 +509,9 @@ public class SqlEditorPane extends JPanel {
      */
     private void applyEditorPalette() {
         boolean dark = FlatLaf.isLafDark();
+        // Tema CLARO: default.xml do proprio RSyntaxTextArea, sem nenhuma
+        // sobrescrita — confirmado pelo usuario como correto ("no tema light
+        // fica como esta, correto"), nao mexer.
         String resource = dark ? "/org/fife/ui/rsyntaxtextarea/themes/dark.xml"
                 : "/org/fife/ui/rsyntaxtextarea/themes/default.xml";
         try (InputStream in = getClass().getResourceAsStream(resource)) {
@@ -493,61 +529,48 @@ public class SqlEditorPane extends JPanel {
         SyntaxScheme scheme = textArea.getSyntaxScheme();
         scheme.setStyle(TokenTypes.DATA_TYPE, new Style(null, null, textArea.getFont().deriveFont(Font.BOLD)));
         if (dark) {
-            softenDarkSyntaxColors(scheme);
+            // Tema ESCURO: paleta propria estilo VS Code Dark+ (pedido
+            // explicito do usuario, com screenshots comparando os dois temas:
+            // "precisa ficar legivel com cores boas que contrastem... estilo
+            // vscode"). Duas tentativas anteriores nao serviram — uma paleta
+            // desaturada demais (baixo contraste, "sumia") e depois um
+            // experimento so preto-vira-branco (sem NENHUMA cor de destaque,
+            // FROM/WHERE/numeros todos iguais) — esta usa os tons EXATOS do
+            // VS Code Dark+ (azul para palavra-chave, laranja para string,
+            // verde para numero/comentario, amarelo para funcao), um dos
+            // esquemas de mais alto contraste/legibilidade ja testados em
+            // produção por uma IDE.
+            applyVsCodeDarkSyntaxColors(scheme);
+            textArea.setBackground(new Color(0x1E, 0x1E, 0x1E));
+            textArea.setForeground(new Color(0xD4, 0xD4, 0xD4));
+        } else {
+            // Sem isto, voltar do escuro para o claro (Theme.load(default.xml)
+            // sozinho NAO reseta de forma confiavel o fundo/texto PROPRIOS do
+            // componente, so o SyntaxScheme) deixava o fundo/texto presos nos
+            // tons escuros de antes — usuario relatou o editor "quebrado,
+            // branco" ao voltar pro tema claro (na verdade era o INVERSO: o
+            // texto continuava no cinza quase-branco do tema escuro, ilegivel
+            // sobre o fundo branco que o tema claro tentava aplicar).
+            // Explicito aqui, sempre, em vez de confiar que o tema recem-
+            // carregado ja resolveu sozinho.
+            textArea.setBackground(Color.WHITE);
+            textArea.setForeground(Color.BLACK);
         }
-        // Realces de fundo do editor. NO TEMA ESCURO a primeira tentativa
-        // reusou o MESMO verde da marca so que numa variante mais clara/
-        // saturada (0x22C55E) supondo que precisaria de mais "peso" pra
-        // aparecer sobre fundo escuro — resultado foi o oposto do esperado:
-        // cor saturada sobre fundo quase preto "salta" muito mais do que a
-        // mesma cor sobre fundo claro, e a linha atual (que fica acesa o
-        // tempo todo, a cada movimento do cursor) ficava com uma barra verde
-        // vibrante demais, cansando a vista (relatado pelo usuario). Ajustes:
-        // - linha atual: neutro (branco bem translucido) em vez de colorido,
-        //   igual a maioria dos editores escuros (destaque discreto, nao um
-        //   letreiro); e o unico realce que fica ligado o tempo todo, entao
-        //   e o que mais precisa ser discreto.
-        // - selecao/"marcar tudo": mesmo verde da marca do tema CLARO
-        //   (0x059669), so com alpha um pouco maior — mantem a identidade
-        //   visual sem trocar para um tom mais saturado.
+        // Realces de fundo do editor. O verde da marca usado como SELECAO
+        // (bloco solido cobrindo o texto selecionado inteiro) foi trocado —
+        // pedido explicito do usuario ("esse verde como background... e
+        // enjoativo e nao combina, tanto no tema dark quanto no light"): o
+        // verde fica reservado para acoes/destaques pontuais (botao
+        // primario, dot de status), nunca mais como bloco de fundo. Selecao
+        // agora e um azul neutro discreto, mesma familia do editor estilo
+        // VS Code (Dark+ usa #264F78 pra selecao; a variante clara usa o
+        // mesmo tom de azul, so mais suave). Linha atual continua neutra
+        // (branco/preto bem translucido) — e o UNICO realce que fica ligado
+        // o tempo todo, precisa ser o mais discreto de todos.
         textArea.setCurrentLineHighlightColor(
-                dark ? new Color(0xFF, 0xFF, 0xFF, 12) : new Color(0x05, 0x96, 0x69, 22));
-        textArea.setSelectionColor(dark ? new Color(0x05, 0x96, 0x69, 90) : new Color(0x05, 0x96, 0x69, 60));
-        textArea.setMarkAllHighlightColor(dark ? new Color(0x05, 0x96, 0x69, 130) : new Color(0x22, 0xC5, 0x5E, 90));
-    }
-
-    /**
-     * O {@code dark.xml} pronto do RSyntaxTextArea (carregado em
-     * {@link #applyEditorPalette}) resolve fundo/gutter/selecao padrao, mas
-     * colore palavras-chave (SELECT, FROM, WHERE...) num verde bem saturado
-     * — pensado pra linguagens de programacao em geral, nao afinado pra SQL
-     * nem pro uso prolongado que este editor tem. Usuario relatou "contraste
-     * muito agressivo". Sobrescreve so as cores (fonte/negrito continuam
-     * como o tema definiu) por uma paleta mais suave e desaturada — mesma
-     * ideia de "menos neon, mais legivel" ja aplicada aos realces de fundo
-     * acima. So roda no tema ESCURO: o tema claro nunca foi alvo da queixa.
-     */
-    private void softenDarkSyntaxColors(SyntaxScheme scheme) {
-        setStyleColor(scheme, TokenTypes.RESERVED_WORD, new Color(0x7F, 0xB0, 0x99)); // SELECT/FROM/WHERE...
-        setStyleColor(scheme, TokenTypes.RESERVED_WORD_2, new Color(0x7F, 0xB0, 0x99));
-        setStyleColor(scheme, TokenTypes.FUNCTION, new Color(0xC9, 0xA9, 0x7B)); // COUNT()/NOW()...
-        setStyleColor(scheme, TokenTypes.IDENTIFIER, new Color(0xD4, 0xD8, 0xDC)); // texto comum/colunas
-        setStyleColor(scheme, TokenTypes.LITERAL_STRING_DOUBLE_QUOTE, new Color(0xC3, 0x8F, 0x6B)); // 'valor'
-        setStyleColor(scheme, TokenTypes.LITERAL_CHAR, new Color(0xC3, 0x8F, 0x6B));
-        setStyleColor(scheme, TokenTypes.LITERAL_NUMBER_DECIMAL_INT, new Color(0x8C, 0xA9, 0xD1));
-        setStyleColor(scheme, TokenTypes.LITERAL_NUMBER_FLOAT, new Color(0x8C, 0xA9, 0xD1));
-        setStyleColor(scheme, TokenTypes.LITERAL_NUMBER_HEXADECIMAL, new Color(0x8C, 0xA9, 0xD1));
-        setStyleColor(scheme, TokenTypes.LITERAL_BOOLEAN, new Color(0x8C, 0xA9, 0xD1));
-        setStyleColor(scheme, TokenTypes.COMMENT_EOL, new Color(0x6B, 0x76, 0x7D));
-        setStyleColor(scheme, TokenTypes.COMMENT_MULTILINE, new Color(0x6B, 0x76, 0x7D));
-        setStyleColor(scheme, TokenTypes.COMMENT_DOCUMENTATION, new Color(0x6B, 0x76, 0x7D));
-        setStyleColor(scheme, TokenTypes.OPERATOR, new Color(0x9A, 0xA3, 0xAF));
-        setStyleColor(scheme, TokenTypes.SEPARATOR, new Color(0x8A, 0x93, 0x9E));
-        setStyleColor(scheme, TokenTypes.VARIABLE, new Color(0xB0, 0x9C, 0xD1));
-        // DATA_TYPE (nomes de tabela/view/procedure) fica de fora de proposito:
-        // continua so em NEGRITO, cor null (herda a de IDENTIFIER acima) —
-        // exatamente o comportamento pedido originalmente (ver o comentario
-        // no construtor).
+                dark ? new Color(0xFF, 0xFF, 0xFF, 12) : new Color(0x00, 0x00, 0x00, 10));
+        textArea.setSelectionColor(dark ? new Color(0x26, 0x4F, 0x78) : new Color(0xAD, 0xD6, 0xFF));
+        textArea.setMarkAllHighlightColor(dark ? new Color(0x62, 0x3E, 0x00, 160) : new Color(0xFF, 0xE1, 0x64, 160));
     }
 
     /** Troca so a cor de um tipo de token, preservando fonte/negrito/italico que o tema ja definiu. */
@@ -556,6 +579,46 @@ public class SqlEditorPane extends JPanel {
         Style updated = (existing != null) ? (Style) existing.clone() : new Style();
         updated.foreground = color;
         scheme.setStyle(tokenType, updated);
+    }
+
+    /**
+     * Paleta de sintaxe do tema ESCURO — mesmos tons do VS Code Dark+ (um dos
+     * esquemas de realce mais usados/testados que existe, alto contraste
+     * contra fundo escuro): azul para palavra-chave, laranja para string,
+     * verde-claro para numero, verde-escuro para comentario, amarelo para
+     * funcao, cinza bem claro (nao branco puro) para identificador/operador
+     * comuns.
+     */
+    private static void applyVsCodeDarkSyntaxColors(SyntaxScheme scheme) {
+        Color keyword = new Color(0x56, 0x9C, 0xD6);
+        Color string = new Color(0xCE, 0x91, 0x78);
+        Color number = new Color(0xB5, 0xCE, 0xA8);
+        Color comment = new Color(0x6A, 0x99, 0x55);
+        Color function = new Color(0xDC, 0xDC, 0xAA);
+        Color identifier = new Color(0xD4, 0xD4, 0xD4);
+        Color operator = new Color(0xD4, 0xD4, 0xD4);
+        Color variable = new Color(0x9C, 0xDC, 0xFE);
+
+        setStyleColor(scheme, TokenTypes.RESERVED_WORD, keyword); // SELECT/FROM/WHERE...
+        setStyleColor(scheme, TokenTypes.RESERVED_WORD_2, keyword);
+        setStyleColor(scheme, TokenTypes.FUNCTION, function); // COUNT()/NOW()...
+        setStyleColor(scheme, TokenTypes.IDENTIFIER, identifier); // texto comum/colunas
+        setStyleColor(scheme, TokenTypes.LITERAL_STRING_DOUBLE_QUOTE, string); // 'valor'
+        setStyleColor(scheme, TokenTypes.LITERAL_CHAR, string);
+        setStyleColor(scheme, TokenTypes.LITERAL_NUMBER_DECIMAL_INT, number);
+        setStyleColor(scheme, TokenTypes.LITERAL_NUMBER_FLOAT, number);
+        setStyleColor(scheme, TokenTypes.LITERAL_NUMBER_HEXADECIMAL, number);
+        setStyleColor(scheme, TokenTypes.LITERAL_BOOLEAN, number);
+        setStyleColor(scheme, TokenTypes.COMMENT_EOL, comment);
+        setStyleColor(scheme, TokenTypes.COMMENT_MULTILINE, comment);
+        setStyleColor(scheme, TokenTypes.COMMENT_DOCUMENTATION, comment);
+        setStyleColor(scheme, TokenTypes.OPERATOR, operator);
+        setStyleColor(scheme, TokenTypes.SEPARATOR, operator);
+        setStyleColor(scheme, TokenTypes.VARIABLE, variable);
+        // DATA_TYPE (nomes de tabela/view/procedure) fica de fora de proposito:
+        // continua so em NEGRITO, cor null (herda a de IDENTIFIER acima) —
+        // mesmo comportamento pedido originalmente (ver o comentario no
+        // construtor).
     }
 
     /** Gutter (numeros de linha) — mesma logica de {@link #applyEditorPalette}. */
@@ -832,7 +895,8 @@ public class SqlEditorPane extends JPanel {
      * {@link #computeBreadcrumb}. Vazio quando nao ha nada reconhecivel sob o
      * cursor (texto comum, palavra-chave, numero, etc.).
      */
-    private JComponent buildBreadcrumbBar() {
+    private JComponent buildBreadcrumbBar(Runnable onRun, Runnable onHistory, Runnable onToggleExpand,
+            Consumer<JComponent> onMoreOptions) {
         breadcrumbLabel = new JLabel(" ");
         breadcrumbLabel.setForeground(breadcrumbForeground());
         breadcrumbLabel.setFont(breadcrumbLabel.getFont().deriveFont(Font.PLAIN, 11f));
@@ -840,8 +904,61 @@ public class SqlEditorPane extends JPanel {
         bar.setBorder(BorderFactory.createEmptyBorder(3, 8, 3, 8));
         bar.setBackground(FlatLaf.isLafDark() ? new Color(0x1A, 0x1B, 0x1E) : new Color(0xEC, 0xEE, 0xF1));
         bar.add(breadcrumbLabel, BorderLayout.WEST);
+        bar.add(buildQuickActionRow(onRun, onHistory, onToggleExpand, onMoreOptions), BorderLayout.EAST);
         this.breadcrumbBar = bar;
         return bar;
+    }
+
+    /**
+     * Fileira de icones de acao rapida no canto direito da barra de contexto
+     * do editor (pedido explicito do usuario, visto nos prints de
+     * referencia): Executar, Historico, Expandir e Mais opcoes — as MESMAS
+     * acoes ja acessiveis por atalho de teclado/barra de ferramentas/menu de
+     * contexto da aba, so mais a mao sem precisar sair do editor. Callbacks
+     * {@code null}-safe: nenhum botao e criado para o callback que vier
+     * {@code null} (o construtor de 8 argumentos passa todos {@code null},
+     * entao quem nao precisar da fileira completa nao ganha nenhum botao
+     * extra alem do Executar, que sempre existe).
+     */
+    private JComponent buildQuickActionRow(Runnable onRun, Runnable onHistory, Runnable onToggleExpand,
+            Consumer<JComponent> onMoreOptions) {
+        JPanel row = new JPanel(new FlowLayout(FlowLayout.RIGHT, 2, 0));
+        row.setOpaque(false);
+
+        JButton runButton = new JButton(Icons.get(IconType.RUN, 13, IconTheme.GREEN));
+        runButton.setToolTipText("Executar (Ctrl+Enter ou F5)");
+        runButton.addActionListener(e -> onRun.run());
+        row.add(runButton);
+
+        if (onHistory != null) {
+            JButton historyButton = new JButton(Icons.get(IconType.HISTORY, 13, GridTheme.MUTED_TEXT));
+            historyButton.setToolTipText("Ver historico de execucoes desta conexao");
+            historyButton.addActionListener(e -> onHistory.run());
+            row.add(historyButton);
+        }
+
+        if (onToggleExpand != null) {
+            JButton expandButton = new JButton(Icons.get(IconType.EXPAND, 13, GridTheme.MUTED_TEXT));
+            expandButton.setToolTipText("Expandir/recolher editor (oculta paineis laterais)");
+            expandButton.addActionListener(e -> onToggleExpand.run());
+            row.add(expandButton);
+        }
+
+        if (onMoreOptions != null) {
+            JButton moreButton = new JButton(Icons.get(IconType.MORE, 13, GridTheme.MUTED_TEXT));
+            moreButton.setToolTipText("Mais opcoes desta aba");
+            moreButton.addActionListener(e -> onMoreOptions.accept(moreButton));
+            row.add(moreButton);
+        }
+
+        for (java.awt.Component c : row.getComponents()) {
+            if (c instanceof JButton btn) {
+                btn.putClientProperty("JButton.buttonType", "toolBarButton");
+                btn.putClientProperty(com.formdev.flatlaf.FlatClientProperties.STYLE, "arc: 8");
+                btn.setMargin(new java.awt.Insets(3, 3, 3, 3));
+            }
+        }
+        return row;
     }
 
     /** Atualiza o breadcrumb a cada movimento do cursor — so troca o texto do JLabel quando ele de fato muda. */
@@ -867,10 +984,17 @@ public class SqlEditorPane extends JPanel {
     private String computeBreadcrumb(int offset) {
         SchemaInfo schema = (schemaSupplier != null) ? schemaSupplier.get() : null;
         String schemaName = (schema != null) ? schema.name() : null;
+        // Pedido explicito do usuario ("nao esta mostrando o breadcrumb
+        // inteiro, conexao, schema, tabela, alias, colunas etc"): o prefixo
+        // "Conexao > Schema" agora aparece SEMPRE que disponivel, em
+        // qualquer um dos retornos deste metodo — antes so o schema entrava,
+        // e so em alguns dos casos (cursor sobre tabela/coluna reconhecida),
+        // nunca sobre uma palavra-chave/espaco em branco.
+        String prefix = connectionAndSchemaPrefix(schemaName);
         String full = textArea.getText();
         int[] span = wordSpanAt(full, offset);
         if (span == null) {
-            return schemaName;
+            return prefix.isEmpty() ? null : prefix.substring(0, prefix.length() - 3); // tira o " > " final solto
         }
         String rawWord = full.substring(span[0], span[1]);
         String upperWord = rawWord.toUpperCase(Locale.ROOT);
@@ -898,22 +1022,25 @@ public class SqlEditorPane extends JPanel {
             if (schema != null) {
                 for (String p : schema.procedures()) {
                     if (p.equalsIgnoreCase(rawWord)) {
-                        return "Procedure > " + p;
+                        return prefix + "Procedure > " + p;
                     }
                 }
                 for (String f : schema.functions()) {
                     if (f.equalsIgnoreCase(rawWord)) {
-                        return "Function > " + f;
+                        return prefix + "Function > " + f;
                     }
                 }
                 for (String tg : schema.triggers()) {
                     if (tg.equalsIgnoreCase(rawWord)) {
-                        return "Trigger > " + tg;
+                        return prefix + "Trigger > " + tg;
                     }
                 }
             }
             if (SqlHighlightTokenMaker.KEYWORDS.contains(upperWord) || SqlHighlightTokenMaker.FUNCTIONS.contains(upperWord)) {
-                return schemaName; // palavra-chave/funcao SQL: sem contexto de objeto
+                // palavra-chave/funcao SQL: sem contexto de objeto, mas o
+                // prefixo conexao/schema continua util (o usuario sempre sabe
+                // ONDE esta trabalhando, mesmo parado num SELECT/FROM).
+                return prefix.isEmpty() ? null : prefix.substring(0, prefix.length() - 3);
             }
             qualifier = rawWord;
         }
@@ -936,13 +1063,31 @@ public class SqlEditorPane extends JPanel {
                 }
             }
         }
-        StringBuilder sb = new StringBuilder();
-        if (schemaName != null) {
-            sb.append(schemaName).append(" > ");
-        }
+        StringBuilder sb = new StringBuilder(prefix);
         sb.append((tableName != null) ? tableName : qualifier);
+        // Alias diferente do nome real da tabela ("o" para "operation_order",
+        // por exemplo) — mostra os DOIS, pedido explicito do usuario
+        // ("...tabela, alias..."); antes o alias era descartado assim que
+        // resolvia pra tabela real, sem nenhum jeito de saber qual alias
+        // estava em uso so olhando o breadcrumb.
+        if (tableName != null && qualifier != null && !qualifier.equalsIgnoreCase(tableName)) {
+            sb.append(" (").append(qualifier).append(")");
+        }
         if (column != null) {
             sb.append(" > ").append(column);
+        }
+        return sb.toString();
+    }
+
+    /** {@code "Conexao > Schema > "} (qualquer um dos dois ausente e omitido) — prefixo comum a qualquer retorno de {@link #computeBreadcrumb}. */
+    private String connectionAndSchemaPrefix(String schemaName) {
+        String connectionName = (connectionNameSupplier != null) ? connectionNameSupplier.get() : null;
+        StringBuilder sb = new StringBuilder();
+        if (connectionName != null && !connectionName.isBlank()) {
+            sb.append(connectionName).append(" > ");
+        }
+        if (schemaName != null && !schemaName.isBlank()) {
+            sb.append(schemaName).append(" > ");
         }
         return sb.toString();
     }
@@ -1184,14 +1329,14 @@ public class SqlEditorPane extends JPanel {
         findField = new JTextField(22);
         replaceField = new JTextField(22);
         findStatus = new JLabel();
-        findStatus.setForeground(new Color(0x6B7280));
+        findStatus.setForeground(GridTheme.MUTED_TEXT);
 
         matchCaseBtn = new JToggleButton("Aa");
         matchCaseBtn.setToolTipText("Diferenciar maiusculas/minusculas");
         wholeWordBtn = new JToggleButton("W");
         wholeWordBtn.setToolTipText("Palavra inteira");
 
-        Color iconColor = new Color(0x6B7280);
+        Color iconColor = GridTheme.MUTED_TEXT;
         JButton prev = new JButton(Icons.get(IconType.CHEVRON_LEFT, 12, iconColor));
         prev.setToolTipText("Anterior (Shift+Enter)");
         prev.addActionListener(e -> findPrevious());
@@ -1211,6 +1356,21 @@ public class SqlEditorPane extends JPanel {
         bindKey(findField, "shift ENTER", this::findPrevious);
         bindKey(findField, "ESCAPE", this::hideFindBar);
         bindKey(replaceField, "ESCAPE", this::hideFindBar);
+
+        // Mesmo padrao do resto do app (ver Buttons/toolBarButton) — antes
+        // eram botoes PADRAO do Swing, unica barra da janela sem nenhum
+        // estilo aplicado. Icone-so (prev/next/close) fica "toolBarButton"
+        // (mesma linguagem da barra de ferramentas); os dois com texto
+        // (Substituir/Substituir tudo) ficam "roundRect" (acao secundaria,
+        // igual qualquer outro botao de texto do app).
+        for (JButton btn : new JButton[] { prev, next, close }) {
+            btn.putClientProperty("JButton.buttonType", "toolBarButton");
+            btn.putClientProperty(com.formdev.flatlaf.FlatClientProperties.STYLE, "arc: 8");
+            btn.setMargin(new java.awt.Insets(3, 3, 3, 3));
+        }
+        for (JButton btn : new JButton[] { replaceOne, replaceAll }) {
+            Buttons.styleSecondary(btn);
+        }
 
         JPanel row1 = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 2));
         row1.add(new JLabel("Localizar:"));
@@ -1394,6 +1554,28 @@ public class SqlEditorPane extends JPanel {
     private static Set<String> installedFamilies() {
         return new HashSet<>(Arrays.asList(GraphicsEnvironment
                 .getLocalGraphicsEnvironment().getAvailableFontFamilyNames()));
+    }
+
+    /**
+     * Fonte monoespacada PADRAO da IDE, no tamanho dado — mesma deteccao
+     * (JetBrains Mono/Fira Code/Consolas/etc., com peso semibold sintetico)
+     * usada pelo editor SQL principal. Ponto de acesso publico para qualquer
+     * OUTRA area de texto monoespacado do app (visualizador de conteudo de
+     * celula, preview de DDL, etc.) usar exatamente a MESMA fonte do editor
+     * em vez de {@code Font.MONOSPACED} generico — antes cada area escolhia
+     * a sua conta, e o resultado eram 3-4 fontes monoespacadas diferentes
+     * convivendo na mesma janela (inconsistencia de tipografia apontada na
+     * revisao visual). {@code preferredFamily} nulo/vazio cai na deteccao
+     * automatica (melhor fonte instalada); use {@link #monospaceFont(int)}
+     * quando nao houver uma preferencia salva do usuario a passar.
+     */
+    static Font monospaceFont(String preferredFamily, int size) {
+        return pickEditorFont(preferredFamily, size);
+    }
+
+    /** Atalho de {@link #monospaceFont(String, int)} sem preferencia salva — deteccao automatica. */
+    static Font monospaceFont(int size) {
+        return pickEditorFont(null, size);
     }
 
     /**

@@ -35,6 +35,9 @@ enum IconType {
     FORMAT(IconRole.NEUTRAL),
     SEARCH(IconRole.NEUTRAL),
     FILTER(IconRole.NEUTRAL),
+    HISTORY(IconRole.NEUTRAL),
+    EXPAND(IconRole.NEUTRAL),
+    MORE(IconRole.NEUTRAL),
 
     // Objetos de banco de dados (arvore de objetos)
     DATABASE(IconRole.NEUTRAL),

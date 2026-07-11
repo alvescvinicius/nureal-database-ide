@@ -27,6 +27,7 @@ import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -60,6 +61,7 @@ import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
 import javax.swing.JRadioButtonMenuItem;
 import javax.swing.JPanel;
+import javax.swing.JRootPane;
 import javax.swing.JPopupMenu;
 import javax.swing.JProgressBar;
 import javax.swing.JScrollPane;
@@ -107,6 +109,7 @@ import com.nureal.ide.core.metadata.model.SchemaInfo;
 import com.nureal.ide.core.metadata.model.TableDetails;
 import com.nureal.ide.core.metadata.model.TableInfo;
 import com.nureal.ide.core.queries.SavedQueryStore;
+import com.nureal.ide.core.history.ExecutionHistoryStore;
 import com.nureal.ide.core.safety.SqlRiskAnalyzer;
 import com.nureal.ide.core.session.SessionStore;
 import com.nureal.ide.core.sql.SqlStatementSplitter;
@@ -126,7 +129,6 @@ public class MainWindow extends JFrame {
 	// icone do botao "Exportar" — evita duplicar o mesmo valor de cor em duas
 	// classes do mesmo pacote.
 	static final Color ACCENT = new Color(0x059669);
-	private static final Color MUTED = new Color(0x6B7280);
 
 	private static final int PAGE_SIZE = 200;
 	private static final int MAX_TABS = 15;
@@ -156,6 +158,7 @@ public class MainWindow extends JFrame {
 	private final ConnectionStore connectionStore = new ConnectionStore();
 	private final SessionStore sessionStore = new SessionStore();
 	private final SavedQueryStore savedQueryStore = new SavedQueryStore();
+	private final ExecutionHistoryStore historyStore = new ExecutionHistoryStore();
 	private Timer autosaveTimer;
 
 	private JTabbedPane editorTabs;
@@ -172,11 +175,25 @@ public class MainWindow extends JFrame {
 	private JButton resultsOrientationButton;
 	private int sidebarLoc = 248;
 	private int resultsLoc = -1;
+
+	// ---------- Modo foco (botoes "Expandir" do editor/resultados) ----------
+	// Ver toggleEditorFocusMode/toggleResultsFocusMode: guardam SO o que ELES
+	// proprios esconderam/moveram, pra restaurar exatamente aquilo (nunca o
+	// estado de visibilidade que o usuario ja tinha escolhido por conta
+	// propria antes de entrar no modo foco).
+	private boolean editorFocusMode;
+	private boolean editorFocusHadSidebar;
+	private boolean editorFocusHadResults;
+	private boolean resultsFocusMode;
+	private boolean resultsFocusHadSidebar;
+	private int resultsFocusPrevDividerLoc = -1;
 	private JTabbedPane resultTabs;
 	private JPanel resultsCards;
 	private JTree objectTree;
 	private ConnectionsPanel connectionsPanel;
 	private SavedQueriesPanel savedQueriesPanel;
+	private HistoryPanel historyPanel;
+	private JTabbedPane leftTopTabs;
 	private JTextField objectSearch;
 	/** Esquema selecionado na conexao ativa — so escrever via {@link #setCurrentSchema}. */
 	private SchemaInfo currentSchema;
@@ -193,7 +210,9 @@ public class MainWindow extends JFrame {
 	private SwingWorker<List<QueryResult>, Void> runWorker;
 	private volatile Statement runningStatement;
 
-	private boolean dark = false;
+	// Tema ESCURO agora e o padrao de arranque do app (ver App#main) — este
+	// campo so espelha o L&F ja ativo quando a janela e construida.
+	private boolean dark = true;
 	private List<QueryResult> lastResults = new ArrayList<>();
 	private final List<ResultCursor> openCursors = new ArrayList<>();
 	/**
@@ -575,7 +594,7 @@ public class MainWindow extends JFrame {
 		// antes o clique era aceito mas nao fazia nada alem de um aviso na barra
 		// de status, o que parecia um bug de "salvar nao funciona".
 		saveQueryButton = new JButton("Salvar");
-		saveQueryButton.setIcon(Icons.get(IconType.SAVE, 13, MUTED));
+		saveQueryButton.setIcon(Icons.get(IconType.SAVE, 13, GridTheme.MUTED_TEXT));
 		saveQueryButton.setToolTipText("Salvar como query (Ctrl+S)");
 		saveQueryButton.addActionListener(e -> onSaveQuery());
 		saveQueryButton.setIconTextGap(6);
@@ -589,9 +608,28 @@ public class MainWindow extends JFrame {
 		gbc.insets = new Insets(0, 10, 0, 0);
 		mainBar.add(saveQueryButton, gbc);
 
+		// Historico de execucoes (ver ExecutionHistoryStore/HistoryPanel): abre a
+		// aba "Historico" do painel lateral, ja filtrada pela conexao ativa —
+		// mesmo grupo visual/posicao do Salvar, por ser tambem uma acao sobre a
+		// query da aba atual (rever/re-rodar o que ja foi executado).
+		JButton historyButton = new JButton("Historico");
+		historyButton.setIcon(Icons.get(IconType.HISTORY, 13, GridTheme.MUTED_TEXT));
+		historyButton.setToolTipText("Ver historico de execucoes desta conexao");
+		historyButton.addActionListener(e -> showHistoryPanel());
+		historyButton.setIconTextGap(6);
+		historyButton.setMargin(new Insets(6, 12, 6, 12));
+		historyButton.putClientProperty("JButton.buttonType", "roundRect");
+		historyButton.putClientProperty(FlatClientProperties.STYLE, "arc: 8; borderWidth: 1");
+		Dimension historyDim = historyButton.getPreferredSize();
+		historyButton.setPreferredSize(new Dimension(historyDim.width, rowHeight));
+
+		gbc.gridx = 4;
+		gbc.insets = new Insets(0, 6, 0, 0);
+		mainBar.add(historyButton, gbc);
+
 		// --- O ESPAÇADOR INVISÍVEL ---
 		// Ele joga tudo o que vier a partir daqui totalmente para a direita
-		gbc.gridx = 4;
+		gbc.gridx = 5;
 		gbc.weightx = 1.0;
 		gbc.insets = new Insets(0, 0, 0, 0);
 		mainBar.add(Box.createHorizontalGlue(), gbc);
@@ -603,25 +641,28 @@ public class MainWindow extends JFrame {
 		// "aceso" numa barra de ferramentas escura. UIManager.getColor segue
 		// o FlatLaf ativo (claro/escuro) automaticamente.
 		divider.setForeground(UIManager.getColor("Separator.foreground"));
-		gbc.gridx = 5;
+		gbc.gridx = 6;
 		gbc.weightx = 0.0;
 		gbc.insets = new Insets(0, 6, 0, 10);
 		mainBar.add(divider, gbc);
 
 		// --- Botões da Direita (icones discretos, mesma linguagem visual) ---
-		JButton toggleSidebar = new JButton(Icons.get(IconType.PANEL_LEFT, 16, MUTED));
+		JButton toggleSidebar = new JButton(Icons.get(IconType.PANEL_LEFT, 16, GridTheme.MUTED_TEXT));
 		toggleSidebar.setToolTipText("Mostrar/ocultar painel lateral (Ctrl+B)");
 		toggleSidebar.addActionListener(e -> toggleSidebar());
 
-		JButton toggleResults = new JButton(Icons.get(IconType.PANEL_BOTTOM, 16, MUTED));
+		JButton toggleResults = new JButton(Icons.get(IconType.PANEL_BOTTOM, 16, GridTheme.MUTED_TEXT));
 		toggleResults.setToolTipText("Mostrar/ocultar resultados (Ctrl+J)");
 		toggleResults.addActionListener(e -> toggleResults());
 
-		JButton layoutButton = new JButton(Icons.get(IconType.SETTINGS, 16, MUTED));
+		JButton layoutButton = new JButton(Icons.get(IconType.SETTINGS, 16, GridTheme.MUTED_TEXT));
 		layoutButton.setToolTipText("Layout, zoom e modo compacto");
 		layoutButton.addActionListener(e -> buildLayoutMenu().show(layoutButton, 0, layoutButton.getHeight()));
 
-		themeButton = new JButton(Icons.get(IconType.THEME_DARK, 16, MUTED));
+		// Icone inicial mostra a ACAO do botao (pra ONDE ele muda o tema), nao
+		// o tema atual — app arranca no tema escuro (ver App#main), entao o
+		// botao comeca oferecendo "mudar para claro" (icone de sol).
+		themeButton = new JButton(Icons.get(IconType.THEME_LIGHT, 16, GridTheme.MUTED_TEXT));
 		themeButton.setToolTipText("Alternar tema claro/escuro");
 		themeButton.addActionListener(e -> toggleTheme());
 
@@ -636,13 +677,13 @@ public class MainWindow extends JFrame {
 		// Adiciona os botões da direita sequencialmente
 		gbc.insets = new Insets(0, 3, 0, 3); // Pequeno espaço entre os ícones
 
-		gbc.gridx = 6;
-		mainBar.add(toggleSidebar, gbc);
 		gbc.gridx = 7;
-		mainBar.add(toggleResults, gbc);
+		mainBar.add(toggleSidebar, gbc);
 		gbc.gridx = 8;
-		mainBar.add(layoutButton, gbc);
+		mainBar.add(toggleResults, gbc);
 		gbc.gridx = 9;
+		mainBar.add(layoutButton, gbc);
+		gbc.gridx = 10;
 		mainBar.add(themeButton, gbc);
 
 		toolbarBar = mainBar;
@@ -878,6 +919,75 @@ public class MainWindow extends JFrame {
 				centerSplit.setResizeWeight(0.62);
 				centerSplit.setDividerLocation(0.62);
 			}
+		}
+		centerSplit.revalidate();
+		focusEditor();
+	}
+
+	/**
+	 * Alterna "modo foco" do EDITOR: esconde o painel lateral E os resultados
+	 * (reaproveitando {@link #toggleSidebar()}/{@link #toggleResults()}, as
+	 * mesmas acoes ja usadas por Ctrl+B/Ctrl+J) para a aba de SQL ocupar a
+	 * janela inteira — chamado pelo botao "Expandir" da barra de acoes
+	 * rapidas do editor (ver {@code SqlEditorPane#buildBreadcrumbBar}).
+	 * Alternar de novo (em QUALQUER aba, o estado e da janela, nao da aba)
+	 * desfaz, restaurando so o que este modo escondeu — se o usuario ja
+	 * tinha os resultados fechados por conta propria ANTES de expandir, eles
+	 * continuam fechados depois de recolher.
+	 */
+	private void toggleEditorFocusMode() {
+		if (!editorFocusMode) {
+			editorFocusHadSidebar = leftSide.isVisible();
+			editorFocusHadResults = resultsArea != null && resultsArea.isVisible();
+			if (editorFocusHadSidebar) {
+				toggleSidebar();
+			}
+			if (editorFocusHadResults) {
+				toggleResults();
+			}
+			editorFocusMode = true;
+		} else {
+			if (editorFocusHadSidebar && !leftSide.isVisible()) {
+				toggleSidebar();
+			}
+			if (editorFocusHadResults && resultsArea != null && !resultsArea.isVisible()) {
+				toggleResults();
+			}
+			editorFocusMode = false;
+		}
+	}
+
+	/**
+	 * Alterna "modo foco" dos RESULTADOS: esconde o painel lateral e empurra
+	 * o divisor central quase todo para o lado dos resultados (sem esconder
+	 * o editor de vez — so sobra uma faixa minima dele) — chamado pelo
+	 * botao "Expandir" do cabecalho de RESULTADOS (ver
+	 * {@code #buildResultsArea}). Mesma logica de restaurar SO o que este
+	 * modo mexeu, ver {@link #toggleEditorFocusMode}.
+	 */
+	private void toggleResultsFocusMode() {
+		if (!resultsFocusMode) {
+			resultsFocusHadSidebar = leftSide.isVisible();
+			resultsFocusPrevDividerLoc = centerSplit.getDividerLocation();
+			if (resultsFocusHadSidebar) {
+				toggleSidebar();
+			}
+			if (resultsArea != null && !resultsArea.isVisible()) {
+				toggleResults();
+			}
+			centerSplit.setDividerLocation(40);
+			resultsFocusMode = true;
+		} else {
+			if (resultsFocusHadSidebar && !leftSide.isVisible()) {
+				toggleSidebar();
+			}
+			if (resultsFocusPrevDividerLoc > 0) {
+				centerSplit.setDividerLocation(resultsFocusPrevDividerLoc);
+			} else {
+				centerSplit.setResizeWeight(0.62);
+				centerSplit.setDividerLocation(0.62);
+			}
+			resultsFocusMode = false;
 		}
 		centerSplit.revalidate();
 		focusEditor();
@@ -1123,7 +1233,7 @@ public class MainWindow extends JFrame {
 		connStatusLabel.setFont(connStatusLabel.getFont().deriveFont(Font.BOLD));
 
 		statusBar = new JLabel(" Pronto");
-		statusBar.setForeground(MUTED);
+		statusBar.setForeground(GridTheme.MUTED_TEXT);
 
 		connProgress = new JProgressBar();
 		connProgress.setIndeterminate(true);
@@ -1158,7 +1268,11 @@ public class MainWindow extends JFrame {
 	private void setDisconnectedState() {
 		connStatusLabel.setIcon(Icons.get(IconType.STATUS_DOT, 10, new Color(0xDC2626)));
 		connStatusLabel.setText("Desconectado");
-		connStatusLabel.setForeground(new Color(0xB91C1C));
+		// GridTheme.COLOR_LOGIC_FALSE (mesmo vermelho ja usado pro booleano
+		// "falso" na grade — ver BooleanCellRenderer): reativo ao tema, nao um
+		// literal proprio (0xB91C1C era vermelho ESCURO demais pra ler sobre
+		// fundo escuro, baixo contraste no modo escuro do rodape).
+		connStatusLabel.setForeground(GridTheme.COLOR_LOGIC_FALSE);
 		connProgress.setVisible(false);
 		connectingWorkspaceName = null;
 		updateWorkspaceContextBar();
@@ -1167,7 +1281,11 @@ public class MainWindow extends JFrame {
 	private void setConnectingState(String name) {
 		connStatusLabel.setIcon(Icons.get(IconType.STATUS_DOT, 10, new Color(0xF59E0B)));
 		connStatusLabel.setText("Conectando a " + name + "...");
-		connStatusLabel.setForeground(new Color(0xB45309));
+		// GridTheme.HEADER_HIGHLIGHT_BORDER: mesmo ambar usado no destaque de
+		// coluna da grade, ja calibrado pra funcionar em claro E escuro (valor
+		// unico nos dois temas) — em vez do literal 0xB45309, marrom-escuro
+		// que sumia sobre fundo escuro.
+		connStatusLabel.setForeground(GridTheme.HEADER_HIGHLIGHT_BORDER);
 		connProgress.setVisible(true);
 		connectingWorkspaceName = name;
 		updateWorkspaceContextBar();
@@ -1176,7 +1294,10 @@ public class MainWindow extends JFrame {
 	private void setConnectedState(String label) {
 		connStatusLabel.setIcon(Icons.get(IconType.STATUS_DOT, 10, ACCENT));
 		connStatusLabel.setText("Conectado: " + label);
-		connStatusLabel.setForeground(new Color(0x047857));
+		// GridTheme.COLOR_LOGIC_TRUE (mesmo verde do booleano "verdadeiro" na
+		// grade): reativo ao tema — 0x047857 (verde bem escuro) tambem sumia
+		// sobre fundo escuro no modo escuro do rodape.
+		connStatusLabel.setForeground(GridTheme.COLOR_LOGIC_TRUE);
 		connProgress.setVisible(false);
 		connectingWorkspaceName = null;
 		updateWorkspaceContextBar();
@@ -1277,16 +1398,18 @@ public class MainWindow extends JFrame {
 		connectionsPanel = new ConnectionsPanel(connectionStore, this::connectTo, this::disconnectFrom);
 		connectionsPanel.setRowHeight(scaledPx(ConnectionsPanel.DEFAULT_ROW_HEIGHT));
 		savedQueriesPanel = new SavedQueriesPanel(savedQueryStore, this::openSavedQuery);
+		historyPanel = new HistoryPanel(historyStore, this::openHistoryEntry);
 
-		// "Conexoes" e "Queries salvas" dividem o mesmo espaco de cima via abas
-		// (nao um segundo split — ja tem split demais nesse canto da tela). O
-		// navegador de objetos continua sempre visivel embaixo, nao importa
-		// qual das duas abas esta selecionada.
-		JTabbedPane topTabs = new JTabbedPane();
-		topTabs.addTab("Conexoes", connectionsPanel);
-		topTabs.addTab("Queries salvas", savedQueriesPanel);
+		// "Conexoes", "Queries salvas" e "Historico" dividem o mesmo espaco de
+		// cima via abas (nao um segundo split — ja tem split demais nesse canto
+		// da tela). O navegador de objetos continua sempre visivel embaixo, nao
+		// importa qual das tres abas esta selecionada.
+		leftTopTabs = new JTabbedPane();
+		leftTopTabs.addTab("Conexoes", connectionsPanel);
+		leftTopTabs.addTab("Queries salvas", savedQueriesPanel);
+		leftTopTabs.addTab("Historico", historyPanel);
 
-		JSplitPane split = new JSplitPane(JSplitPane.VERTICAL_SPLIT, topTabs, buildObjectBrowser());
+		JSplitPane split = new JSplitPane(JSplitPane.VERTICAL_SPLIT, leftTopTabs, buildObjectBrowser());
 		split.setResizeWeight(0.5);
 		split.setBorder(BorderFactory.createEmptyBorder());
 		split.setPreferredSize(new Dimension(248, 100));
@@ -1313,6 +1436,10 @@ public class MainWindow extends JFrame {
 		objectTree.setRowHeight(scaledPx(22));
 		objectTree.setBorder(BorderFactory.createEmptyBorder(4, 8, 4, 4));
 		objectTree.setCellRenderer(new ObjectTreeCellRenderer());
+		// Estado de hover (destaque suave sob o mouse, sem mexer na selecao) —
+		// faltava aqui, unico dos 5 estados pedidos na revisao visual que a
+		// arvore ainda nao tinha (ver TreeHoverTracker).
+		TreeHoverTracker.installOnTree(objectTree);
 		// Duplo-clique num objeto abrivel (tabela/view/procedure/.../trigger)
 		// agora cola o nome no editor SQL em vez de expandir/recolher —
 		// pedido explicito do usuario, igual ao comportamento de outras IDEs
@@ -1387,23 +1514,29 @@ public class MainWindow extends JFrame {
 			}
 		});
 
-		JButton switchSchemaButton = new JButton(Icons.get(IconType.DATABASE, 13, MUTED));
-		switchSchemaButton.setBorderPainted(false);
-		switchSchemaButton.setContentAreaFilled(false);
+		JButton switchSchemaButton = new JButton(Icons.get(IconType.DATABASE, 13, GridTheme.MUTED_TEXT));
 		switchSchemaButton.setToolTipText("Trocar esquema / ver todos os esquemas");
 		switchSchemaButton.addActionListener(e -> switchSchema());
 
-		JButton refreshObjectsButton = new JButton(Icons.get(IconType.REFRESH, 13, MUTED));
-		refreshObjectsButton.setBorderPainted(false);
-		refreshObjectsButton.setContentAreaFilled(false);
+		JButton refreshObjectsButton = new JButton(Icons.get(IconType.REFRESH, 13, GridTheme.MUTED_TEXT));
 		refreshObjectsButton.setToolTipText("Atualizar objetos (Ctrl+R)");
 		refreshObjectsButton.addActionListener(e -> refreshObjectTree(true));
 
-		JButton createSchemaButton = new JButton(Icons.get(IconType.NEW, 13, MUTED));
-		createSchemaButton.setBorderPainted(false);
-		createSchemaButton.setContentAreaFilled(false);
+		JButton createSchemaButton = new JButton(Icons.get(IconType.NEW, 13, GridTheme.MUTED_TEXT));
 		createSchemaButton.setToolTipText("Criar esquema...");
 		createSchemaButton.addActionListener(e -> createSchema());
+
+		// Mesmo "toolBarButton" plano dos icones da barra de ferramentas
+		// principal (ver toggleSidebar/toggleResults/layoutButton/themeButton
+		// acima) — antes estes 3 usavam setBorderPainted(false) +
+		// setContentAreaFilled(false), que tira o botao do sistema de estilo
+		// do FlatLaf inteiramente: sem hover, sem arco, sem margem
+		// consistente com o resto dos icones do app.
+		for (JButton btn : new JButton[] { switchSchemaButton, refreshObjectsButton, createSchemaButton }) {
+			btn.putClientProperty("JButton.buttonType", "toolBarButton");
+			btn.putClientProperty(FlatClientProperties.STYLE, "arc: 8");
+			btn.setMargin(new Insets(4, 4, 4, 4));
+		}
 
 		JPanel headerButtons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
 		headerButtons.setOpaque(false);
@@ -1439,6 +1572,11 @@ public class MainWindow extends JFrame {
 		// botao "Executar" da barra logo acima, mesmo os dois partindo de
 		// x=0 no layout. Zerar o inset alinha a aba com a barra de ferramentas.
 		editorTabs.putClientProperty("JTabbedPane.tabAreaInsets", new Insets(0, 0, 0, 0));
+		// Mesma largura minima das abas de Resultados (ver resultTabs abaixo)
+		// — sem isto, abrir varias queries deixava as abas do editor
+		// afinarem muito mais que as de Resultados, uma inconsistencia de
+		// tamanho entre as duas areas de abas mais usadas do app.
+		editorTabs.putClientProperty("JTabbedPane.minimumTabWidth", 96);
 		editorTabs.putClientProperty("JTabbedPane.tabClosable", true);
 		editorTabs.putClientProperty("JTabbedPane.tabCloseCallback",
 				(BiConsumer<JTabbedPane, Integer>) (k, index) -> closeQueryTab(index));
@@ -1558,8 +1696,18 @@ public class MainWindow extends JFrame {
 			}
 			return false;
 		}
+		// Referencia circular inevitavel: o callback "Mais opcoes" precisa
+		// saber QUAL SqlEditorPane o chamou (pra abrir o menu de contexto da
+		// aba certa), mas so existe DEPOIS que o construtor terminar. Um
+		// array de 1 posicao guarda a instancia assim que ela fica pronta —
+		// o lambda so LE holder[0] quando o usuario de fato clicar no botao
+		// (bem depois), nunca durante a propria construcao.
+		final SqlEditorPane[] holder = new SqlEditorPane[1];
 		SqlEditorPane pane = new SqlEditorPane(tabId, completionProvider, this::onRun, this::currentSqlFormatter,
-				formatState.editorFontFamily(), () -> currentSchema, this::openEditorObject, this::navigateBack);
+				formatState.editorFontFamily(), () -> currentSchema, this::openEditorObject, this::navigateBack,
+				this::showHistoryPanel, this::toggleEditorFocusMode,
+				anchor -> showTabOptionsMenu(holder[0], anchor), this::currentConnectionLabel);
+		holder[0] = pane;
 		pane.setSchema(schema);
 		pane.textArea().setText(sql);
 		pane.textArea().setCaretPosition(0);
@@ -1635,6 +1783,17 @@ public class MainWindow extends JFrame {
 		if (target == plusTab) {
 			return;
 		}
+		buildTabContextMenu(target).show(editorTabs, e.getX(), e.getY());
+	}
+
+	/**
+	 * Monta o menu de contexto de uma aba (Renomear/Salvar como query/Fechar/
+	 * Fechar as outras) — extraido de {@link #maybeTabMenu} para tambem ser
+	 * usado pelo botao "Mais opcoes" da barra de acoes rapidas do editor (ver
+	 * {@link #showTabOptionsMenu}), sem duplicar a lista de itens em dois
+	 * lugares.
+	 */
+	private JPopupMenu buildTabContextMenu(Component target) {
 		JPopupMenu menu = new JPopupMenu();
 		JMenuItem rename = new JMenuItem("Renomear...");
 		rename.addActionListener(a -> renameTab(target));
@@ -1652,7 +1811,22 @@ public class MainWindow extends JFrame {
 		menu.addSeparator();
 		menu.add(close);
 		menu.add(closeOthers);
-		menu.show(editorTabs, e.getX(), e.getY());
+		return menu;
+	}
+
+	/**
+	 * Abre o MESMO menu de contexto da aba (ver {@link #buildTabContextMenu}),
+	 * ancorado no botao "Mais opcoes" (icone {@code ...}) da barra de acoes
+	 * rapidas do PROPRIO editor — chamado pelo {@code onMoreOptions} passado a
+	 * cada {@link SqlEditorPane} (ver {@code addQueryTab}), com {@code pane}
+	 * sendo a instancia que disparou o clique e {@code anchor} o botao em si
+	 * (usado so para posicionar o popup logo abaixo dele).
+	 */
+	private void showTabOptionsMenu(SqlEditorPane pane, JComponent anchor) {
+		if (pane == null) {
+			return;
+		}
+		buildTabContextMenu(pane).show(anchor, 0, anchor.getHeight());
 	}
 
 	private void renameTab(Component target) {
@@ -1759,6 +1933,9 @@ public class MainWindow extends JFrame {
 		activeWorkspace = scratch;
 		if (savedQueriesPanel != null) {
 			savedQueriesPanel.setActiveConnection(null);
+		}
+		if (historyPanel != null) {
+			historyPanel.setActiveConnection(null);
 		}
 		rebuildEditorTabs(scratch.tabs, scratch.selectedTab, scratch.tabResults);
 	}
@@ -1886,6 +2063,9 @@ public class MainWindow extends JFrame {
 		// ja devolve activeWorkspace.mgr ao vivo (ver o metodo, logo abaixo).
 		if (savedQueriesPanel != null) {
 			savedQueriesPanel.setActiveConnection(w.profile == null ? null : w.profile.name());
+		}
+		if (historyPanel != null) {
+			historyPanel.setActiveConnection(w.profile == null ? null : w.profile.name());
 		}
 		rebuildEditorTabs(w.tabs, w.selectedTab, w.tabResults);
 		if (w.schema != null) {
@@ -2045,11 +2225,20 @@ public class MainWindow extends JFrame {
 		// abrir o menu do botao la embaixo. Estilo identico ao restante dos
 		// icones da barra de ferramentas (ver #buildToolbar), pra esta linha
 		// nao parecer "de outro app" dentro da mesma janela.
-		JButton exportAllButton = new JButton(Icons.get(IconType.EXPORT, 14, MUTED));
+		JButton exportAllButton = new JButton(Icons.get(IconType.EXPORT, 14, GridTheme.MUTED_TEXT));
 		exportAllButton.setToolTipText("Exportar todos os resultados abertos (uma aba por resultado)");
 		exportAllButton.addActionListener(e -> exportAll());
 
-		for (JButton btn : new JButton[] { exportAllButton, orientationToggle }) {
+		// "Expandir": empurra o divisor central quase todo pro lado dos
+		// resultados e esconde o painel lateral (ver #toggleResultsFocusMode)
+		// — o editor nao some de vez (so fica com uma faixa minima), pra nao
+		// perder o contexto de qual instrucao gerou o resultado. Clicar de
+		// novo (aqui ou no botao espelho do editor) desfaz.
+		JButton expandResultsButton = new JButton(Icons.get(IconType.EXPAND, 14, GridTheme.MUTED_TEXT));
+		expandResultsButton.setToolTipText("Expandir/recolher resultados (oculta paineis laterais)");
+		expandResultsButton.addActionListener(e -> toggleResultsFocusMode());
+
+		for (JButton btn : new JButton[] { exportAllButton, orientationToggle, expandResultsButton }) {
 			btn.putClientProperty("JButton.buttonType", "toolBarButton");
 			btn.putClientProperty(FlatClientProperties.STYLE, "arc: 8");
 			btn.setMargin(new Insets(5, 5, 5, 5));
@@ -2059,6 +2248,7 @@ public class MainWindow extends JFrame {
 		headerIcons.setOpaque(false);
 		headerIcons.add(exportAllButton);
 		headerIcons.add(orientationToggle);
+		headerIcons.add(expandResultsButton);
 
 		JPanel header = new JPanel(new BorderLayout());
 		header.setOpaque(false);
@@ -2077,8 +2267,8 @@ public class MainWindow extends JFrame {
 	 * estado atual.
 	 */
 	private void updateOrientationToggleIcon(JButton button) {
-		button.setIcon(resultsVertical ? Icons.get(IconType.PANEL_LEFT, 14, MUTED)
-				: Icons.get(IconType.PANEL_BOTTOM, 14, MUTED));
+		button.setIcon(resultsVertical ? Icons.get(IconType.PANEL_LEFT, 14, GridTheme.MUTED_TEXT)
+				: Icons.get(IconType.PANEL_BOTTOM, 14, GridTheme.MUTED_TEXT));
 		button.setToolTipText(resultsVertical ? "Mudar para resultados embaixo do editor (horizontal)"
 				: "Mudar para resultados ao lado do editor (vertical)");
 	}
@@ -2117,6 +2307,10 @@ public class MainWindow extends JFrame {
 		JButton cancel = new JButton("Cancelar");
 		cancel.setAlignmentX(Component.CENTER_ALIGNMENT);
 		cancel.addActionListener(e -> cancelExecution());
+		// Mesmo padrao secundario (contorno) de qualquer outro botao do app —
+		// antes era um JButton cru, unico botao "fora do padrao" da janela
+		// principal (ver Buttons).
+		Buttons.styleSecondary(cancel);
 
 		JPanel card = new JPanel();
 		card.setLayout(new BoxLayout(card, BoxLayout.Y_AXIS));
@@ -2215,7 +2409,7 @@ public class MainWindow extends JFrame {
 		title.setAlignmentX(Component.CENTER_ALIGNMENT);
 
 		JLabel sub = new JLabel("Os resultados da consulta aparecerao aqui");
-		sub.setForeground(MUTED);
+		sub.setForeground(GridTheme.MUTED_TEXT);
 		sub.setAlignmentX(Component.CENTER_ALIGNMENT);
 
 		JPanel box = new JPanel();
@@ -2243,7 +2437,7 @@ public class MainWindow extends JFrame {
 	private JLabel sectionHeader(String text) {
 		JLabel label = new JLabel(text);
 		label.setFont(label.getFont().deriveFont(Font.BOLD, 11f));
-		label.setForeground(MUTED);
+		label.setForeground(GridTheme.MUTED_TEXT);
 		return label;
 	}
 
@@ -2256,17 +2450,32 @@ public class MainWindow extends JFrame {
 		} else {
 			FlatLightLaf.setup();
 		}
+		// CRITICAL: GridTheme.applyPalette PRECISA rodar ANTES de
+		// FlatLaf.updateUI() (nao depois, como era antes). FlatLaf.updateUI()
+		// e quem percorre TODAS as janelas abertas (Window.getWindows() +
+		// updateComponentTreeUI) e dispara, em cascata, o updateUI() de cada
+		// componente — inclusive o override em ResultGrid$JTable (reaplica
+		// styleTable) e em qualquer outra janela flutuante com chrome proprio
+		// (ex.: FkInspectorWindow). Se a paleta so for trocada DEPOIS desse
+		// passo, toda janela SECUNDARIA (inspetor de FK, propriedades de
+		// objeto etc. — qualquer uma alem desta MainWindow) redesenha a
+		// tempo, mas ainda com as cores ANTIGAS de GridTheme, porque elas so
+		// mudam no passo seguinte — o resultado so aparece certo depois de
+		// fechar e abrir a janela de novo (bug relatado pelo usuario: "eu
+		// preciso fechar e abrir de novo"). A MainWindow escapava do bug
+		// porque reconstroi sua PROPRIA grade explicitamente mais abaixo
+		// (showResultsForActiveEditor), depois da paleta trocada — mas
+		// nenhuma outra janela tinha esse retoque manual.
+		GridTheme.applyPalette(dark);
 		FlatLaf.updateUI();
 		themeButton
-				.setIcon(dark ? Icons.get(IconType.THEME_LIGHT, 16, MUTED) : Icons.get(IconType.THEME_DARK, 16, MUTED));
+				.setIcon(dark ? Icons.get(IconType.THEME_LIGHT, 16, GridTheme.MUTED_TEXT) : Icons.get(IconType.THEME_DARK, 16, GridTheme.MUTED_TEXT));
 		styleRunButton();
 		// FlatLaf.updateUI() so atualiza componentes Swing PADRAO (botoes,
 		// paineis, arvore etc.) — a grade de resultados e o editor SQL pintam
 		// sozinhos, lendo paletas proprias (ver GridTheme e
-		// SqlEditorPane#applyEditorPalette) que NAO faziam parte do L&F e por
-		// isso ficavam escuras ou claras demais, "fora do tema", ate a
-		// conexao ser trocada. Atualiza os tres pontos manualmente:
-		GridTheme.applyPalette(dark);
+		// SqlEditorPane#applyEditorPalette) que NAO faziam parte do L&F.
+		// Atualiza os pontos que ainda precisam de retoque manual NESTA janela:
 		if (editorTabs != null) {
 			for (int i = 0; i < editorTabs.getTabCount(); i++) {
 				Component c = editorTabs.getComponentAt(i);
@@ -2788,6 +2997,7 @@ public class MainWindow extends JFrame {
 					if (ranStructuralDdl(statements, results)) {
 						refreshObjectTree(false);
 					}
+					logExecutionHistory(editor, results);
 				} catch (CancellationException ce) {
 					statusBar.setText(" Execucao cancelada.");
 				} catch (Exception ex) {
@@ -2879,6 +3089,70 @@ public class MainWindow extends JFrame {
 	/** Nome da conexao ativa, ou {@code null} no workspace "sem conexao" (SCRATCH). */
 	private String currentConnectionLabel() {
 		return (activeWorkspace != null && activeWorkspace.profile != null) ? activeWorkspace.profile.name() : null;
+	}
+
+	// ---------- Historico de execucoes (log automatico — ver ExecutionHistoryStore) ----------
+
+	/**
+	 * Abre a aba "Historico" do painel lateral (botao "Historico" da barra de
+	 * ferramentas) — garante que o painel lateral esteja visivel (reabre se
+	 * o usuario tinha escondido com Ctrl+B) e seleciona a aba certa dentro
+	 * dele.
+	 */
+	private void showHistoryPanel() {
+		if (leftSide != null && !leftSide.isVisible()) {
+			toggleSidebar();
+		}
+		if (leftTopTabs != null && historyPanel != null) {
+			leftTopTabs.setSelectedComponent(historyPanel);
+		}
+	}
+
+	/**
+	 * Reabre uma execucao do historico (duplo-clique/"Abrir em nova aba" no
+	 * painel Historico) numa aba NOVA, ja marcada com o esquema em que rodou
+	 * (se algum) — assim, ao clicar Executar de novo, cai direto no mesmo
+	 * esquema sem precisar escolher de novo.
+	 */
+	private void openHistoryEntry(ExecutionHistoryStore.Entry entry) {
+		if (!addQueryTab("Historico", entry.sql())) {
+			return;
+		}
+		SqlEditorPane editor = currentEditor();
+		if (editor != null && entry.schema() != null) {
+			editor.setSchema(entry.schema());
+			scheduleSave();
+		}
+		statusBar.setText(" Execucao reaberta do historico.");
+	}
+
+	/**
+	 * Registra no historico cada instrucao ja executada (sucesso ou erro) —
+	 * chamado no fim de {@link #runStatements}, uma entrada por resultado
+	 * (a lista de resultados pode ser menor que a de instrucoes se a
+	 * execucao parou num erro ou foi cancelada no meio). Falha silenciosa
+	 * (so loga um aviso) — nunca deve interromper a execucao de verdade por
+	 * causa do log de historico.
+	 */
+	private void logExecutionHistory(SqlEditorPane editor, List<QueryResult> results) {
+		if (results == null || results.isEmpty()) {
+			return;
+		}
+		String connectionName = currentConnectionLabel();
+		String schema = editor != null ? editor.getSchema() : null;
+		boolean changed = false;
+		for (QueryResult r : results) {
+			try {
+				historyStore.append(r.sql(), connectionName, schema, r.execMs(), !r.error(), r.message());
+				changed = true;
+			} catch (IOException ex) {
+				AppLogger.warning("Falha ao gravar historico de execucao", ex);
+				break;
+			}
+		}
+		if (changed && historyPanel != null) {
+			historyPanel.reload();
+		}
 	}
 
 	/**
@@ -4232,11 +4506,6 @@ public class MainWindow extends JFrame {
 	 * todos os objetos carrega a definicao (DDL) sob demanda.
 	 */
 	private void showObjectProperties(ObjNode obj) {
-		JDialog dialog = new JDialog(this, prettyKind(obj.kind()) + " - " + obj.name(), false);
-		dialog.setSize(560, 460);
-		dialog.setLocationRelativeTo(this);
-		dialog.setLayout(new BorderLayout());
-
 		// SelectableLabel (nao JLabel comum): o nome do objeto e o "kind ·
 		// schema" ficam selecionaveis/copiaveis com Ctrl+C — pedido
 		// explicito do usuario ("qualquer texto aqui dentro pode ser
@@ -4244,7 +4513,38 @@ public class MainWindow extends JFrame {
 		JComponent title = SelectableLabel.of(obj.name());
 		title.setFont(title.getFont().deriveFont(Font.BOLD, 14f));
 		JComponent sub = SelectableLabel.of(prettyKind(obj.kind()) + "  ·  " + currentSchema.name());
-		sub.setForeground(MUTED);
+		// setForeground com um Color explicito CONGELA o valor (nao acompanha
+		// GridTheme.applyPalette num toggle de tema ao vivo, com a janela ja
+		// aberta — mesma familia de bug corrigida em FkInspectorWindow: "eu
+		// preciso fechar e abrir de novo"). O updateUI() do dialogo abaixo
+		// reaplica isto sempre que o L&F mudar, sem precisar fechar/reabrir.
+		Runnable applySubColor = () -> sub.setForeground(GridTheme.MUTED_TEXT);
+		applySubColor.run();
+
+		// JDialog nao e um JComponent (nao tem updateUI() proprio) — so o
+		// JRootPane dele tem. createRootPane() e o ponto de extensao padrao
+		// do Swing pra receber o updateUI() em cascata do
+		// FlatLaf.updateUI() chamado em toggleTheme().
+		JDialog dialog = new JDialog(this, prettyKind(obj.kind()) + " - " + obj.name(), false) {
+			private static final long serialVersionUID = 1L;
+
+			@Override
+			protected JRootPane createRootPane() {
+				return new JRootPane() {
+					private static final long serialVersionUID = 1L;
+
+					@Override
+					public void updateUI() {
+						super.updateUI();
+						applySubColor.run();
+					}
+				};
+			}
+		};
+		dialog.setSize(560, 460);
+		dialog.setLocationRelativeTo(this);
+		dialog.setLayout(new BorderLayout());
+
 		JPanel head = new JPanel(new BorderLayout());
 		head.setBorder(BorderFactory.createEmptyBorder(10, 12, 8, 12));
 		head.add(title, BorderLayout.NORTH);
@@ -4252,25 +4552,29 @@ public class MainWindow extends JFrame {
 
 		JTabbedPane tabs = new JTabbedPane();
 		boolean isTableLike = obj.table() != null;
-		DefaultTableModel colModel = null;
-		DefaultTableModel idxModel = null;
-		DefaultTableModel fkModel = null;
+		ResultTableModel colModel = null;
+		ResultTableModel idxModel = null;
+		ResultTableModel fkModel = null;
 		if (isTableLike) {
-			colModel = readOnlyModel("#", "Coluna", "Tipo", "Nulo", "Chave", "Default", "Extra", "Comentario");
-			tabs.addTab("Colunas", tableInScroll(colModel));
+			colModel = metadataModel("Colunas", "#", "Coluna", "Tipo", "Nulo", "Chave", "Default", "Extra",
+					"Comentario");
+			tabs.addTab("Colunas", metadataGrid("Colunas", colModel));
 			// Indices e FKs sao especificos de tabelas (views nao tem).
 			if ("TABLE".equals(obj.kind())) {
-				idxModel = readOnlyModel("Indice", "Unico", "Tipo", "Colunas");
-				tabs.addTab("Indices", tableInScroll(idxModel));
-				fkModel = readOnlyModel("Constraint", "Coluna(s)", "Referencia", "Coluna(s) ref.", "On Update",
-						"On Delete");
-				tabs.addTab("Chaves estrangeiras", tableInScroll(fkModel));
+				idxModel = metadataModel("Indices", "Indice", "Unico", "Tipo", "Colunas");
+				tabs.addTab("Indices", metadataGrid("Indices", idxModel));
+				fkModel = metadataModel("Chaves estrangeiras", "Constraint", "Coluna(s)", "Referencia",
+						"Coluna(s) ref.", "On Update", "On Delete");
+				tabs.addTab("Chaves estrangeiras", metadataGrid("Chaves estrangeiras", fkModel));
 			}
 		}
 
 		JTextArea ddlArea = new JTextArea("Carregando definicao...");
 		ddlArea.setEditable(false);
-		ddlArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
+		// Mesma fonte monoespacada do editor SQL principal — consistencia
+		// tipografica entre toda area de texto de codigo do app (ver
+		// SqlEditorPane#monospaceFont).
+		ddlArea.setFont(SqlEditorPane.monospaceFont(12));
 		tabs.addTab("DDL", new JScrollPane(ddlArea));
 
 		dialog.add(head, BorderLayout.NORTH);
@@ -4283,29 +4587,53 @@ public class MainWindow extends JFrame {
 		loadDefinition(obj, ddlArea);
 	}
 
-	private static DefaultTableModel readOnlyModel(Object... columns) {
-		return new DefaultTableModel(columns, 0) {
-			@Override
-			public boolean isCellEditable(int r, int c) {
-				return false;
-			}
-		};
+	/**
+	 * Cria um {@link ResultTableModel} "manual" (sem ResultSet por tras) para
+	 * as tabelas de metadados somente-leitura do dialogo de propriedades de
+	 * objeto (Colunas/Indices/Chaves estrangeiras — ver
+	 * {@code showObjectProperties}). Pedido explicito do usuario: essas
+	 * tabelas devem reusar o MESMO componente de grade das consultas
+	 * ({@link ResultGrid}), nao apenas imitar seu visual — assim qualquer
+	 * mudanca futura na grade (cores, filtro, exportacao, atalhos) se propaga
+	 * automaticamente para todo lugar que apresenta uma tabela, sem
+	 * duplicacao de estilo. {@code sourceTables}/{@code realColumnNames}/
+	 * {@code sqlTypeNames} ficam todos nulos de proposito: sem tabela de
+	 * origem, o {@code ColumnMetadataResolver} da grade nunca tenta resolver
+	 * PK/FK/indice via banco para estas colunas puramente descritivas — zero
+	 * round-trip extra ao JDBC.
+	 */
+	private ResultTableModel metadataModel(String title, String... columns) {
+		Vector<String> names = new Vector<>(Arrays.asList(columns));
+		Class<?>[] types = new Class<?>[columns.length];
+		for (int i = 0; i < columns.length; i++) {
+			types[i] = "#".equals(columns[i]) ? Integer.class : String.class;
+		}
+		String[] nulls = new String[columns.length];
+		return new ResultTableModel(names, types, nulls, nulls, nulls);
 	}
 
-	private static JComponent tableInScroll(DefaultTableModel model) {
-		JTable t = new JTable(model);
-		t.setAutoResizeMode(JTable.AUTO_RESIZE_OFF);
-		t.setFillsViewportHeight(true);
-		if ("#".equals(model.getColumnName(0))) {
-			t.getColumnModel().getColumn(0).setMaxWidth(40);
+	/** Envolve um {@link #metadataModel} num {@link ResultGrid} de verdade, com exportacao Excel. */
+	private JComponent metadataGrid(String title, ResultTableModel model) {
+		String schemaName = (currentSchema != null) ? currentSchema.name() : null;
+		ResultGrid grid = new ResultGrid(model, connectionManager(), schemaName, tableMetadataCache,
+				() -> exportMetadataTable(title, model), this::scaledPx);
+		if (model.getColumnCount() > 0 && "#".equals(model.getColumnName(0))) {
+			grid.table().getColumnModel().getColumn(0).setMaxWidth(40);
 		}
-		t.getTableHeader().setReorderingAllowed(false);
-		return new JScrollPane(t);
+		return grid;
+	}
+
+	/** Exporta uma unica tabela de metadados (Colunas/Indices/FKs) para Excel — mesmo fluxo de {@link #exportResult}. */
+	private void exportMetadataTable(String title, ResultTableModel model) {
+		File file = chooseSaveFile(title);
+		if (file != null) {
+			doExport(List.of(new ExcelExporter.TableSheet(title, model)), file);
+		}
 	}
 
 	/** Preenche as grades de colunas, indices e FKs em segundo plano. */
-	private void loadTableDetailsInto(ObjNode obj, DefaultTableModel colModel, DefaultTableModel idxModel,
-			DefaultTableModel fkModel) {
+	private void loadTableDetailsInto(ObjNode obj, ResultTableModel colModel, ResultTableModel idxModel,
+			ResultTableModel fkModel) {
 		new SwingWorker<TableDetails, Void>() {
 			@Override
 			protected TableDetails doInBackground() throws Exception {

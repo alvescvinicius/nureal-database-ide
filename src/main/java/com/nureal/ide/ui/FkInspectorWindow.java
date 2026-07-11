@@ -13,15 +13,20 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.IntUnaryOperator;
 
+import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JDialog;
 import javax.swing.JFileChooser;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.JRootPane;
 import javax.swing.JTextField;
 import javax.swing.SwingWorker;
 import javax.swing.filechooser.FileNameExtensionFilter;
+
+import com.formdev.flatlaf.FlatClientProperties;
+import com.formdev.flatlaf.FlatLaf;
 
 import com.nureal.ide.core.connection.ConnectionManager;
 import com.nureal.ide.core.dialect.DatabaseDialect;
@@ -88,32 +93,92 @@ final class FkInspectorWindow {
         String table = fk.referencedTable();
         List<String> refCols = fk.referencedColumns();
 
-        JDialog dialog = new JDialog(owner, "Inspetor: " + table, Dialog.ModalityType.MODELESS);
-        dialog.setLayout(new BorderLayout());
-
         List<JTextField> valueFields = new ArrayList<>();
         JPanel filterBar = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 6));
+        filterBar.setOpaque(true);
         JLabel filterLabel = new JLabel("Filtro:");
-        filterLabel.setForeground(new Color(0x6B7280));
         filterBar.add(filterLabel);
         for (int i = 0; i < refCols.size(); i++) {
             Object val = (i < localValues.size()) ? localValues.get(i) : null;
             JLabel colLabel = new JLabel(refCols.get(i) + " =");
             filterBar.add(colLabel);
             JTextField field = new JTextField(val == null ? "" : val.toString(), 12);
+            // Mesmo botao "limpar" (x) dos campos de busca do resto do app
+            // (ver ConnectionsPanel/HistoryPanel/SavedQueriesPanel) — antes
+            // este era o unico campo de filtro sem essa affordance.
+            field.putClientProperty("JTextField.showClearButton", true);
             valueFields.add(field);
             filterBar.add(field);
         }
         JButton search = new JButton("Buscar");
         JButton clear = new JButton("Limpar (ver todos)");
+        for (JButton btn : new JButton[] { search, clear }) {
+            btn.putClientProperty("JButton.buttonType", "roundRect");
+            btn.putClientProperty(FlatClientProperties.STYLE, "arc: 8; borderWidth: 1");
+            btn.setMargin(new java.awt.Insets(4, 10, 4, 10));
+        }
         filterBar.add(search);
         filterBar.add(clear);
 
         JPanel center = new JPanel(new BorderLayout());
         JLabel status = new JLabel(" ");
-        status.setForeground(new Color(0x6B7280));
         JPanel south = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 3));
+        south.setOpaque(true);
         south.add(status);
+
+        // Cores/bordas de filterBar/south/labels dependem do tema (GridTheme
+        // e FlatLaf.isLafDark()) mas sao setadas com setBackground/setForeground/
+        // setBorder — uma vez CHAMADAS, esses valores ficam CONGELADOS no
+        // componente (Swing nunca reaplica sozinho um valor explicito, so o
+        // que ainda e UIResource/nao-setado — mesma familia de bug ja vista e
+        // corrigida em ResultGrid/SqlEditorPane/GridTheme). Centraliza a
+        // logica aqui pra poder chamar de novo sempre que o L&F mudar (ver o
+        // updateUI() do dialogo abaixo) — sem isto, o inspetor so refletia o
+        // tema atualizado depois de FECHADO E REABERTO (bug relatado pelo
+        // usuario: "eu preciso fechar e abrir de novo... queria que fosse
+        // automatico").
+        Runnable applyChrome = () -> {
+            // Mesmo fundo "barra de contexto" do breadcrumb do editor SQL (ver
+            // SqlEditorPane#buildBreadcrumbBar).
+            filterBar.setBackground(FlatLaf.isLafDark() ? new Color(0x1A, 0x1B, 0x1E) : new Color(0xEC, 0xEE, 0xF1));
+            filterBar.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, GridTheme.HEADER_BORDER));
+            filterLabel.setForeground(GridTheme.MUTED_TEXT);
+            south.setBackground(GridTheme.HEADER_BACKGROUND);
+            south.setBorder(BorderFactory.createCompoundBorder(
+                    BorderFactory.createMatteBorder(1, 0, 0, 0, GridTheme.HEADER_BORDER),
+                    BorderFactory.createEmptyBorder(0, 4, 0, 4)));
+            status.setForeground(GridTheme.MUTED_TEXT);
+        };
+        applyChrome.run();
+
+        // JDialog NAO e um JComponent (nao tem updateUI() proprio pra
+        // sobrescrever — so o JRootPane dele tem). createRootPane() e o
+        // ponto de extensao padrao do Swing pra isto: chamado UMA vez, na
+        // construcao do proprio JDialog, e o JRootPane devolvido AQUI e quem
+        // recebe o updateUI() em cascata do FlatLaf.updateUI() (que percorre
+        // a arvore de componentes de toda janela aberta).
+        JDialog dialog = new JDialog(owner, "Inspetor: " + table, Dialog.ModalityType.MODELESS) {
+            private static final long serialVersionUID = 1L;
+
+            @Override
+            protected JRootPane createRootPane() {
+                return new JRootPane() {
+                    private static final long serialVersionUID = 1L;
+
+                    @Override
+                    public void updateUI() {
+                        super.updateUI();
+                        // "applyChrome" ja existe (variavel local efetivamente
+                        // final, definida e chamada ACIMA antes deste dialogo
+                        // ser construido) — reaplica sempre que o L&F mudar em
+                        // qualquer janela aberta (ver FlatLaf.updateUI() em
+                        // MainWindow#toggleTheme).
+                        applyChrome.run();
+                    }
+                };
+            }
+        };
+        dialog.setLayout(new BorderLayout());
 
         Runnable runQuery = () -> runQuery(dialog, connectionManager, dialect, schema, metadataCache, scale, table,
                 refCols, valueFields, center, status);

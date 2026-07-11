@@ -120,6 +120,9 @@ final class Icons {
         m.put(IconType.FORMAT, "format.svg");
         m.put(IconType.SEARCH, "search.svg");
         m.put(IconType.FILTER, "filter.svg");
+        m.put(IconType.HISTORY, "history.svg");
+        m.put(IconType.EXPAND, "expand.svg");
+        m.put(IconType.MORE, "more.svg");
         m.put(IconType.DATABASE, "database.svg");
         m.put(IconType.SCHEMA, "schema.svg");
         m.put(IconType.TABLE, "table.svg");

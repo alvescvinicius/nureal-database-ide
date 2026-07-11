@@ -4,7 +4,6 @@ import java.awt.BorderLayout;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
-import java.awt.Font;
 import java.awt.Toolkit;
 import java.awt.datatransfer.StringSelection;
 import java.sql.Blob;
@@ -21,6 +20,8 @@ import javax.swing.JTextArea;
 import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 import javax.swing.WindowConstants;
+
+import com.formdev.flatlaf.FlatClientProperties;
 
 /**
  * Visualizador de conteudo completo de uma celula — item "Ver conteudo
@@ -50,12 +51,23 @@ final class CellContentViewer {
         area.setEditable(false);
         area.setLineWrap(true);
         area.setWrapStyleWord(true);
-        area.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
+        // Mesma fonte monoespacada do editor SQL principal (ver
+        // SqlEditorPane#monospaceFont) — antes era Font.MONOSPACED generico,
+        // uma fonte DIFERENTE da usada no resto do app pra qualquer texto em
+        // largura fixa (inconsistencia de tipografia).
+        area.setFont(SqlEditorPane.monospaceFont(12));
         area.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
 
-        JButton copy = new JButton("Copiar");
+        JButton copy = new JButton("Copiar", Icons.get(IconType.COPY, 13, GridTheme.MUTED_TEXT));
         copy.addActionListener(e -> copyToClipboard(area.getText()));
-        JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        copy.setIconTextGap(6);
+        // Mesmo estilo "outline" dos botoes secundarios do resto do app (ver
+        // MainWindow#buildToolbar, botao "Formatar") — antes era um JButton
+        // cru, unico dialogo com esse visual "fora do padrao".
+        copy.putClientProperty("JButton.buttonType", "roundRect");
+        copy.putClientProperty(FlatClientProperties.STYLE, "arc: 8; borderWidth: 1");
+        copy.setMargin(new java.awt.Insets(4, 12, 4, 12));
+        JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 8));
         buttons.add(copy);
 
         dialog.setLayout(new BorderLayout());

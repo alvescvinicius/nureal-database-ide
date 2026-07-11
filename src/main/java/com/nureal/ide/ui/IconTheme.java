@@ -16,7 +16,8 @@ import java.awt.Color;
  *  - Vermelho -> SOMENTE erro/exclusao/desconexao.
  *  - Tudo o mais (a grande maioria: estrutura, navegacao, metadados) usa o
  *    "preto" da marca (INK) ou, em contextos de baixo peso visual (barra de
- *    ferramentas, paineis), o cinza neutro (MUTED).
+ *    ferramentas, paineis), o cinza neutro de {@link GridTheme#MUTED_TEXT}
+ *    (reativo ao tema claro/escuro — nao existe um "MUTED" proprio aqui).
  */
 final class IconTheme {
 
@@ -32,7 +33,12 @@ final class IconTheme {
     static final Color YELLOW = new Color(0xF3C300);
     static final Color RED = new Color(0xC62828);
     static final Color INK = new Color(0x1A1A1A);
-    static final Color MUTED = new Color(0x6B7280);
+    // "MUTED" (cinza neutro para icones de baixo peso visual) foi removido
+    // daqui: era um literal PROPRIO (0x6B7280) que nunca acompanhava o tema
+    // escuro/claro. Todo chamador agora usa GridTheme.MUTED_TEXT diretamente
+    // (unico "cinza neutro" da aplicacao, ja reativo ao tema — ver
+    // GridTheme#applyPalette), em vez de duas fontes de verdade para a MESMA
+    // cor conceitual.
     static final Color DISABLED = new Color(0xC1C7CD);
 
     static final int DEFAULT_SIZE = 16;

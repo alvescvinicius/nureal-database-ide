@@ -12,22 +12,25 @@ import java.util.HashSet;
 import java.util.Set;
 
 import javax.swing.AbstractButton;
+import javax.swing.JDialog;
+import javax.swing.JFrame;
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
 
 import org.fife.ui.rsyntaxtextarea.SyntaxConstants;
 import org.fife.ui.rsyntaxtextarea.folding.FoldParserManager;
 
+import com.formdev.flatlaf.FlatDarkLaf;
 import com.formdev.flatlaf.FlatLaf;
-import com.formdev.flatlaf.FlatLightLaf;
 import com.nureal.ide.core.log.AppLogger;
 import com.nureal.ide.ui.MainWindow;
 import com.nureal.ide.ui.SqlFoldParser;
 
 /**
  * Ponto de entrada da Nureal Database IDE.
- * Aplica o tema FlatLaf (claro por padrao) com as customizacoes da marca e
- * uma fonte de interface moderna.
+ * Aplica o tema FlatLaf (ESCURO por padrao — pedido explicito do usuario;
+ * era claro por padrao antes) com as customizacoes da marca e uma fonte de
+ * interface moderna.
  */
 public class App {
 
@@ -39,7 +42,18 @@ public class App {
 
         // Fonte de interface moderna (definida ANTES do setup para ser aplicada)
         UIManager.put("defaultFont", pickUiFont(12));
-        FlatLightLaf.setup();
+        FlatDarkLaf.setup();
+
+        // Barra de titulo customizada (icone da marca + min/max/fechar no
+        // mesmo estilo do resto da UI, claro/escuro seguindo o tema) em vez
+        // da barra padrao do Windows — pedido explicito do usuario, visto
+        // num mockup. TEM que ser chamado ANTES de qualquer JFrame/JDialog
+        // ser construido (Swing so aplica a decoracao customizada em janelas
+        // criadas DEPOIS desta flag ser ligada). O FlatLaf cuida sozinho de
+        // arrastar/redimensionar/maximizar em duplo-clique/encaixe (Aero
+        // Snap no Windows) — nao precisamos implementar nada disso na mao.
+        JFrame.setDefaultLookAndFeelDecorated(true);
+        JDialog.setDefaultLookAndFeelDecorated(true);
 
         // Folding (expandir/recolher) para o editor SQL
         FoldParserManager.get().addFoldParserMapping(

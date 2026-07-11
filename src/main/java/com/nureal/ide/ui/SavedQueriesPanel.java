@@ -77,7 +77,7 @@ public class SavedQueriesPanel extends JPanel {
         JLabel title = new JLabel("QUERIES SALVAS");
         title.putClientProperty("FlatLaf.styleClass", "small");
         title.setFont(title.getFont().deriveFont(Font.BOLD, 11f));
-        title.setForeground(new Color(0x6B7280));
+        title.setForeground(GridTheme.MUTED_TEXT);
 
         search.putClientProperty("JTextField.placeholderText", "Buscar por titulo ou SQL...");
         search.putClientProperty("JTextField.showClearButton", true);
@@ -108,7 +108,13 @@ public class SavedQueriesPanel extends JPanel {
     private JComponent buildList() {
         list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         list.setFixedCellHeight(48);
+        // Mesmo cinza neutro de selecao da grade/arvore de Objetos, nao o
+        // verde solido default do FlatLaf.properties (List.selectionBackground)
+        // — ver o mesmo ajuste em ConnectionsPanel#buildList.
+        list.setSelectionBackground(GridTheme.SELECTION_BACKGROUND);
+        list.setSelectionForeground(GridTheme.SELECTION_FOREGROUND);
         list.setCellRenderer(new QueryRenderer());
+        TreeHoverTracker.installOnList(list);
         list.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseClicked(MouseEvent e) {
@@ -299,7 +305,10 @@ public class SavedQueriesPanel extends JPanel {
             setHorizontalAlignment(SwingConstants.LEFT);
             setBorder(BorderFactory.createEmptyBorder(6, 12, 6, 12));
             if (value instanceof Query q) {
-                String subColor = isSelected ? "#E5F5EC" : "#6B7280";
+                // Cor de selecao ja e o cinza neutro (ver #buildList), nao mais
+                // o verde solido do L&F — sub-texto acompanha a MESMA cor de
+                // selecao/mudo reativa ao tema, nao dois literais proprios.
+                String subColor = hex(isSelected ? GridTheme.SELECTION_FOREGROUND : GridTheme.MUTED_TEXT);
                 String family = getFont().getFamily();
                 String star = q.favorite() ? "★ " : "";
                 setText("<html><div style='font-family:" + family + ";line-height:1.5'>"
@@ -313,6 +322,11 @@ public class SavedQueriesPanel extends JPanel {
 
         private static String escape(String s) {
             return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+        }
+
+        /** Mesma conversao Color->hex de {@code ObjectTreeCellRenderer#columnHtml} — HTML embutido so aceita string. */
+        private static String hex(Color c) {
+            return String.format("#%06X", c.getRGB() & 0xFFFFFF);
         }
     }
 }

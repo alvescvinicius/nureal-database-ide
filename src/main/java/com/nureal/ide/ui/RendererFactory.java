@@ -16,9 +16,27 @@ import javax.swing.table.TableColumn;
  * 1) IDENTIFICADORES (id, *_id, uuid/guid) -&gt; {@link IdentifierCellRenderer}
  * 2) NUMERICOS (INT/DECIMAL/FLOAT/...)     -&gt; {@link NumberCellRenderer}
  * 3) TEMPORAIS (DATE/TIME/TIMESTAMP/...)   -&gt; {@link TemporalCellRenderer}
- * 4) LOGICOS/STATUS (BOOLEAN/BIT/"status") -&gt; {@link BooleanCellRenderer}
+ * 4) LOGICOS (BOOLEAN/BIT/classe Boolean)  -&gt; {@link BooleanCellRenderer}
  * 5) BINARIOS/COMPLEXOS (BLOB/JSON/XML/...) -&gt; {@link BinaryCellRenderer}
  * 6) TEXTUAIS (VARCHAR/TEXT/...) — tambem o DEFAULT -&gt; {@link TextCellRenderer}
+ *
+ * IMPORTANTE: o grupo e decidido SEMPRE pelo TIPO DE DADO real da coluna
+ * (tipo SQL ou, na falta dele, a classe Java) — NUNCA pelo NOME da coluna
+ * sozinho (ex.: uma coluna chamada "status" armazenada como INT aparece com a
+ * MESMA cor de qualquer outra coluna INT/NUMERICA, nao ganha um tratamento
+ * especial so por causa do nome). Pedido explicito do usuario, que reportou
+ * uma coluna "status" (na verdade um INT com codigos 1/2/3 de dominio, sem
+ * relacao com verdadeiro/falso) ganhando cores desencontradas de um pill de
+ * "enum" — o esperado era a MESMA cor de qualquer outra coluna numerica. A
+ * UNICA excecao onde o NOME de uma coluna entra na conta e a heuristica de
+ * identificador ("id"/"*_id"/uuid, ver {@link #isGenericIdName}/{@link #isUuidName}),
+ * que e um refinamento DENTRO dos grupos NUMERIC/IDENTIFIER, nao um grupo
+ * proprio como o antigo "status" era.
+ *
+ * Dentro do grupo 6 ha ainda um refinamento so de CONTEUDO (nao de tipo SQL):
+ * uma textual com poucos valores curtos que se repetem (ex.: RECEITA/DESPESA)
+ * ganha {@link BadgeCellRenderer} (pill colorido) em vez do texto plano do
+ * {@link TextCellRenderer} — ver {@link EnumColumnDetector}.
  *
  * A classificacao acontece UMA VEZ POR COLUNA, quando a grade e montada
  * ({@link #installOn}) — nao a cada celula pintada — e os renderers em si
@@ -44,6 +62,7 @@ final class RendererFactory {
     private static final BooleanCellRenderer LOGICAL = new BooleanCellRenderer();
     private static final BinaryCellRenderer BINARY = new BinaryCellRenderer();
     private static final TextCellRenderer TEXTUAL = new TextCellRenderer();
+    private static final BadgeCellRenderer BADGE = new BadgeCellRenderer();
 
     private static final String[] TEMPORAL_PREFIXES =
             {"TIMESTAMPTZ", "TIMESTAMP", "DATETIME", "DATE", "TIME", "YEAR"};
@@ -67,7 +86,16 @@ final class RendererFactory {
             int modelColumn = column.getModelIndex();
             Group group = classify(model.sqlType(modelColumn), model.getColumnClass(modelColumn),
                     model.getColumnName(modelColumn));
-            column.setCellRenderer(rendererFor(group));
+            if (group == Group.TEXTUAL && EnumColumnDetector.isEnumLike(model, modelColumn)) {
+                // Coluna textual "de categoria" (poucos valores curtos que se
+                // repetem, ex.: RECEITA/DESPESA) — pill colorido em vez de
+                // texto plano. So um refinamento visual DENTRO do grupo
+                // TEXTUAL (ver classify()); nao muda alinhamento nem nenhuma
+                // outra regra dos 6 grupos.
+                column.setCellRenderer(BADGE);
+            } else {
+                column.setCellRenderer(rendererFor(group));
+            }
             if (group == Group.TEMPORAL) {
                 // Precisa de um editor PROPRIO (ver TemporalCellEditor): o
                 // editor generico padrao do JTable mostra/espera um formato
@@ -116,9 +144,6 @@ final class RendererFactory {
             if (startsWithAny(type, LOGICAL_PREFIXES)) {
                 return Group.LOGICAL;
             }
-        }
-        if (name.contains("status")) {
-            return Group.LOGICAL;
         }
 
         boolean numericType = !type.isEmpty() && startsWithAny(type, NUMERIC_PREFIXES);

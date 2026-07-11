@@ -1,6 +1,9 @@
 package com.nureal.ide.ui;
 
 import java.awt.Color;
+import java.util.HashMap;
+import java.util.Locale;
+import java.util.Map;
 
 /**
  * Paleta de cores da grade de resultados — ponto UNICO de verdade para todas
@@ -88,8 +91,21 @@ final class GridTheme {
     // ---------- Texto auxiliar (labels de metadados, filtro, etc.) ----------
     static Color MUTED_TEXT;
 
+    // ---------- "Pills" coloridos para colunas textuais tipo enum ----------
+    // (ver BadgeCellRenderer/EnumColumnDetector) — 10 tons categoricos fixos,
+    // cada um com um par [fundo, texto] pensado pra contraste OK no tema
+    // ativo (fundo suave/dessaturado no claro, fundo escurecido/translucido
+    // no escuro). A cor de cada VALOR especifico (ex.: "RECEITA") vem de um
+    // hash do texto sobre este array — ver badgeColorsFor(String) — nao do
+    // indice da coluna, para o mesmo texto sempre ganhar a mesma cor em
+    // qualquer grade do app.
+    private static Color[][] BADGE_PALETTE;
+
+    // Tema ESCURO agora e o padrao do app (ver App#main) — a paleta inicial
+    // da grade precisa combinar, senao a primeira janela pintaria com cores
+    // claras por baixo do FlatDarkLaf ja ativo ate o primeiro toggleTheme().
     static {
-        applyPalette(false);
+        applyPalette(true);
     }
 
     /**
@@ -139,6 +155,27 @@ final class GridTheme {
             GUTTER_FOREGROUND = new Color(0x8B, 0x95, 0xA1);
 
             MUTED_TEXT = new Color(0x9A, 0xA3, 0xAF);
+
+            // ANTES o fundo era translucido (alpha ~33%) por cima da zebra JA
+            // escura — o resultado praticamente desaparecia no fundo da
+            // linha, quase ilegivel (bug relatado: "badges feios, quase
+            // ilegiveis no tema escuro"). Agora e um "chip" SOLIDO (sem
+            // alpha, opaco de verdade), mesmo criterio do badge escuro do
+            // Tailwind/GitHub (fundo bem escuro E saturado da cor + texto
+            // BEM claro da mesma familia) — contraste forte contra qualquer
+            // fundo de linha, sem depender do que esta por tras.
+            BADGE_PALETTE = new Color[][] {
+                    { new Color(0x7F, 0x1D, 0x1D), new Color(0xFE, 0xCA, 0xCA) }, // vermelho
+                    { new Color(0x7C, 0x2D, 0x12), new Color(0xFE, 0xD7, 0xAA) }, // laranja
+                    { new Color(0x78, 0x35, 0x0F), new Color(0xFD, 0xE6, 0x8A) }, // ambar
+                    { new Color(0x14, 0x53, 0x2D), new Color(0xBB, 0xF7, 0xD0) }, // verde
+                    { new Color(0x13, 0x4E, 0x4A), new Color(0x99, 0xF6, 0xE4) }, // teal
+                    { new Color(0x1E, 0x3A, 0x8A), new Color(0xBF, 0xDB, 0xFE) }, // azul
+                    { new Color(0x31, 0x2E, 0x81), new Color(0xC7, 0xD2, 0xFE) }, // indigo
+                    { new Color(0x58, 0x1C, 0x87), new Color(0xE9, 0xD5, 0xFF) }, // roxo
+                    { new Color(0x83, 0x18, 0x43), new Color(0xFB, 0xCF, 0xE8) }, // rosa
+                    { new Color(0x33, 0x41, 0x55), new Color(0xE2, 0xE8, 0xF0) }, // slate
+            };
         } else {
             COLOR_IDENTIFIER = new Color(0xE6, 0x51, 0x00);
             COLOR_NUMERIC = new Color(0x00, 0x83, 0x8F);
@@ -181,6 +218,74 @@ final class GridTheme {
             GUTTER_FOREGROUND = new Color(0x9A, 0xA3, 0xAF);
 
             MUTED_TEXT = new Color(0x6B, 0x72, 0x80);
+
+            // Fundo pastel (tinta ~10%) + texto solido no mesmo tom, saturado
+            // o bastante pra ler bem sobre o pastel — paleta categorica
+            // "estilo Notion/Linear", nao ligada a cor da marca de proposito
+            // (sinal neutro de categoria, nao de acao/positivo-negativo).
+            BADGE_PALETTE = new Color[][] {
+                    { new Color(0xFE, 0xE2, 0xE2), new Color(0xB9, 0x1C, 0x1C) }, // vermelho
+                    { new Color(0xFF, 0xED, 0xD5), new Color(0xC2, 0x41, 0x0C) }, // laranja
+                    { new Color(0xFE, 0xF3, 0xC7), new Color(0xB4, 0x53, 0x09) }, // ambar
+                    { new Color(0xDC, 0xFC, 0xE7), new Color(0x15, 0x80, 0x3D) }, // verde
+                    { new Color(0xCC, 0xFB, 0xF1), new Color(0x0F, 0x76, 0x6E) }, // teal
+                    { new Color(0xDB, 0xEA, 0xFE), new Color(0x1D, 0x4E, 0xD8) }, // azul
+                    { new Color(0xE0, 0xE7, 0xFF), new Color(0x43, 0x38, 0xCA) }, // indigo
+                    { new Color(0xF3, 0xE8, 0xFF), new Color(0x7E, 0x22, 0xCE) }, // roxo
+                    { new Color(0xFC, 0xE7, 0xF3), new Color(0xBE, 0x18, 0x5D) }, // rosa
+                    { new Color(0xE2, 0xE8, 0xF0), new Color(0x47, 0x55, 0x69) }, // slate
+            };
         }
+    }
+
+    /**
+     * Palavras-chave comuns (PT/EN, ja em maiusculas) com cor FORCADA em vez
+     * de vir do hash — indice dentro de {@link #BADGE_PALETTE} (0=vermelho,
+     * 1=laranja, 2=ambar, 3=verde, ..., ver o array). Existe porque o hash
+     * puro nao tem nocao de SIGNIFICADO: nada garante que "RECEITA" e
+     * "DESPESA" caiam em tons visualmente opostos so por acaso — no relato
+     * do usuario os dois calharam de cair num vermelho/marrom parecido,
+     * dando a impressao (incorreta) de que os badges nao diferenciam as
+     * categorias. Para os pares mais comuns (financeiro, status
+     * ativo/inativo, aprovacao) a cor agora e a INTUITIVA (verde=positivo,
+     * vermelho=negativo, ambar=pendente), igual o resto do app ja faz para
+     * booleanos (ver BooleanCellRenderer) — o hash continua sendo o
+     * fallback para qualquer outra palavra fora desta lista.
+     */
+    private static final Map<String, Integer> BADGE_KEYWORDS = buildBadgeKeywords();
+
+    private static Map<String, Integer> buildBadgeKeywords() {
+        Map<String, Integer> m = new HashMap<>();
+        putAll(m, 3, "RECEITA", "ENTRADA", "CREDITO", "CRÉDITO", "PAGO", "PAGA", "APROVADO", "APROVADA",
+                "CONCLUIDO", "CONCLUÍDO", "CONCLUIDA", "CONCLUÍDA", "ATIVO", "ATIVA", "SUCESSO",
+                "APPROVED", "PAID", "ACTIVE", "COMPLETED", "SUCCESS", "OK");
+        putAll(m, 0, "DESPESA", "SAIDA", "SAÍDA", "DEBITO", "DÉBITO", "CANCELADO", "CANCELADA", "REJEITADO",
+                "REJEITADA", "INATIVO", "INATIVA", "ERRO", "FALHA", "REJECTED", "CANCELLED", "CANCELED",
+                "FAILED", "INACTIVE", "ERROR");
+        putAll(m, 2, "PENDENTE", "AGUARDANDO", "PROCESSANDO", "EM ANDAMENTO", "PENDING", "WAITING", "PROCESSING");
+        return m;
+    }
+
+    private static void putAll(Map<String, Integer> m, int paletteIndex, String... keywords) {
+        for (String k : keywords) {
+            m.put(k, paletteIndex);
+        }
+    }
+
+    /**
+     * Par [fundo, texto] do "pill" para um valor de texto especifico — mesmo
+     * texto (comparado sem diferenciar maiusculas/acentuacao de caixa) sempre
+     * cai no mesmo par, em qualquer coluna/grade do app. Palavras conhecidas
+     * (ver {@link #BADGE_KEYWORDS}) usam a cor INTUITIVA; qualquer outra usa
+     * um hash estavel (String#hashCode e especificado pela JLS, entao e
+     * deterministico entre execucoes) sobre a paleta. Usado por
+     * {@link BadgeCellRenderer} para colunas classificadas como "enum-like"
+     * (ver {@link EnumColumnDetector}).
+     */
+    static Color[] badgeColorsFor(String text) {
+        String key = text == null ? "" : text.trim().toUpperCase(Locale.ROOT);
+        Integer forced = BADGE_KEYWORDS.get(key);
+        int idx = (forced != null) ? forced : Math.floorMod(key.hashCode(), BADGE_PALETTE.length);
+        return BADGE_PALETTE[idx];
     }
 }
