@@ -2,6 +2,7 @@ package com.nureal.ide.ui;
 
 import com.nureal.ide.core.metadata.model.ForeignKeyInfo;
 import com.nureal.ide.core.metadata.model.IndexInfo;
+import com.nureal.ide.core.sql.SqlTypeKind;
 
 import javax.swing.AbstractAction;
 import javax.swing.BorderFactory;
@@ -16,7 +17,7 @@ import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 import javax.swing.table.JTableHeader;
-import java.awt.Font;
+import java.awt.Color;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
@@ -215,13 +216,24 @@ final class ColumnMetadataPopup {
         gc.insets = new Insets(1, 0, 1, 12);
 
         JComponent title = textPart(meta.label(), selectable);
-        title.setFont(title.getFont().deriveFont(Font.BOLD, 13f));
+        title.setFont(title.getFont().deriveFont(13f));
+        // Nivel PRIMARIO da escala tipografica (ver Typography) — antes
+        // so definia o peso (Bold) sem nenhuma cor explicita, entao o titulo
+        // deste popup caia na cor padrao do L&F em vez do alto contraste que
+        // todo outro titulo/cabecalho do app usa.
+        Typography.primary(title);
         gc.gridwidth = 2;
         content.add(title, gc);
         gc.gridwidth = 1;
         gc.gridy++;
 
-        addRow(content, gc, "Tipo SQL", displaySqlType(meta), selectable);
+        // "Tipo SQL" usa a cor da categoria semantica do tipo (ver
+        // GridTheme#colorFor) — MESMA cor que a grade de resultados usa para
+        // qualquer coluna deste tipo (pedido do "Sistema Semantico de Cores
+        // por Tipo de Dado": tipo aparece com a mesma identidade visual em
+        // qualquer lugar do app, inclusive aqui no popup/quick info).
+        Color typeColor = GridTheme.colorFor(SqlTypeKind.classify(meta.sqlType()));
+        addRow(content, gc, "Tipo SQL", displaySqlType(meta), selectable, typeColor);
         addRow(content, gc, "Tipo Java", meta.javaType() == null ? "—" : meta.javaType().getSimpleName(), selectable);
         addRow(content, gc, "Nullable", meta.jdbcMeta().nullable() ? "Sim" : "Nao", selectable);
         addRow(content, gc, "Precisao", String.valueOf(meta.jdbcMeta().precision()), selectable);
@@ -265,14 +277,28 @@ final class ColumnMetadataPopup {
     }
 
     private static void addRow(JPanel panel, GridBagConstraints gc, String label, String value, boolean selectable) {
+        addRow(panel, gc, label, value, selectable, null);
+    }
+
+    /** @param valueColor cor explicita para o valor (ex.: cor semantica do tipo); {@code null} = Typography.secondary padrao. */
+    private static void addRow(JPanel panel, GridBagConstraints gc, String label, String value, boolean selectable,
+            Color valueColor) {
         JLabel labelComp = new JLabel(label + ":");
-        labelComp.setForeground(GridTheme.MUTED_TEXT);
         labelComp.setFont(labelComp.getFont().deriveFont(11f));
+        // Nivel TERCIARIO (rotulo auxiliar) — ver Typography.
+        Typography.tertiary(labelComp);
         gc.gridx = 0;
         panel.add(labelComp, gc);
 
         JComponent valueComp = textPart(value, selectable);
         valueComp.setFont(valueComp.getFont().deriveFont(11f));
+        if (valueColor != null) {
+            valueComp.setForeground(valueColor);
+        } else {
+            // Nivel SECUNDARIO (conteudo normal) — antes sem nenhuma cor
+            // explicita, caindo no padrao do L&F por acaso.
+            Typography.secondary(valueComp);
+        }
         gc.gridx = 1;
         panel.add(valueComp, gc);
 

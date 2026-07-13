@@ -20,8 +20,10 @@ import java.awt.event.MouseEvent;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.io.File;
+import java.nio.file.Path;
 import java.io.IOException;
 import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
@@ -80,7 +82,9 @@ import javax.swing.UIManager;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import javax.swing.filechooser.FileNameExtensionFilter;
+import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
+import javax.swing.table.TableColumn;
 import javax.swing.tree.DefaultMutableTreeNode;
 import javax.swing.tree.DefaultTreeModel;
 import javax.swing.tree.TreePath;
@@ -93,6 +97,8 @@ import com.nureal.ide.core.autocomplete.SqlCompletionProvider;
 import com.nureal.ide.core.connection.ConnectionManager;
 import com.nureal.ide.core.connection.ConnectionProfile;
 import com.nureal.ide.core.connection.ConnectionStore;
+import com.nureal.ide.core.csv.CsvUtil;
+import com.nureal.ide.core.backup.MySqlDumpRunner;
 import com.nureal.ide.core.dialect.DatabaseDialect;
 import com.nureal.ide.core.dialect.MySqlDialect;
 import com.nureal.ide.core.export.ExcelExporter;
@@ -103,8 +109,10 @@ import com.nureal.ide.core.metadata.MetadataCache;
 import com.nureal.ide.core.metadata.MetadataService;
 import com.nureal.ide.core.metadata.model.ColumnDetail;
 import com.nureal.ide.core.metadata.model.ColumnInfo;
+import com.nureal.ide.core.metadata.model.DbUserInfo;
 import com.nureal.ide.core.metadata.model.ForeignKeyInfo;
 import com.nureal.ide.core.metadata.model.IndexInfo;
+import com.nureal.ide.core.metadata.model.SchemaForeignKey;
 import com.nureal.ide.core.metadata.model.SchemaInfo;
 import com.nureal.ide.core.metadata.model.TableDetails;
 import com.nureal.ide.core.metadata.model.TableInfo;
@@ -113,8 +121,14 @@ import com.nureal.ide.core.history.ExecutionHistoryStore;
 import com.nureal.ide.core.safety.SqlRiskAnalyzer;
 import com.nureal.ide.core.session.SessionStore;
 import com.nureal.ide.core.sql.SqlStatementSplitter;
+import com.nureal.ide.core.sql.SqlTypeKind;
+import com.nureal.ide.core.sql.TableAliasGenerator;
 import com.nureal.ide.core.sql.UnquotedDateGuard;
 import com.nureal.ide.core.ui.UiPreferences;
+import com.nureal.ide.core.update.AppVersion;
+import com.nureal.ide.core.update.GithubRelease;
+import com.nureal.ide.core.update.UpdateChecker;
+import com.nureal.ide.core.update.UpdatePreferences;
 
 /**
  * Janela principal no estilo de uma IDE moderna (FlatLaf): top bar com acao de
@@ -128,7 +142,13 @@ public class MainWindow extends JFrame {
 	// Pacote-visivel (nao private): reaproveitada por ResultStatusBar para o
 	// icone do botao "Exportar" — evita duplicar o mesmo valor de cor em duas
 	// classes do mesmo pacote.
-	static final Color ACCENT = new Color(0x059669);
+	// Verde institucional da marca Nureal (ver logo) — era 0x059669 (um verde-
+	// esmeralda generico, sem relacao com a marca); atualizado apos revisao de
+	// identidade visual (ver DESIGN_SYSTEM.md, secao 2). Unico ponto de
+	// verdade: qualquer lugar que precisar do verde da marca reusa ACCENT, nunca
+	// um literal proprio (ja auditado — ver Buttons/ConnectionsPanel/
+	// ObjectTreeCellRenderer/ResultStatusBar).
+	static final Color ACCENT = new Color(0x1E9147);
 
 	private static final int PAGE_SIZE = 200;
 	private static final int MAX_TABS = 15;
@@ -207,6 +227,16 @@ public class MainWindow extends JFrame {
 	private JPanel executingCard;
 	/** Nome da conexao em processo de conectar agora (ver {@link #setConnectingState}), ou null. */
 	private String connectingWorkspaceName;
+	/**
+	 * Cor do dot/texto de {@link #connStatusLabel} no estado atual (des/
+	 * conectado/conectando) — guardada para poder ser REAVALIADA em
+	 * {@link #toggleTheme()} (ver {@link #applyConnStatusColor}). Sem isto, o
+	 * mesmo bug sistemico dos botoes-so-de-icone (ver
+	 * {@code Buttons#bindThemedIcon}) tambem valia aqui: alternar o tema SEM
+	 * mudar de conexao deixava o dot com a cor GridTheme do tema anterior ate
+	 * o proximo evento de conexao.
+	 */
+	private java.util.function.Supplier<Color> connStatusColorSupplier = () -> GridTheme.COLOR_LOGIC_FALSE;
 	private SwingWorker<List<QueryResult>, Void> runWorker;
 	private volatile Statement runningStatement;
 
@@ -229,12 +259,28 @@ public class MainWindow extends JFrame {
 
 	private static final double[] ZOOM_LEVELS = { 0.75, 0.90, 1.00, 1.10, 1.25, 1.50 };
 
+	/**
+	 * Altura de linha (em px, ANTES do zoom/modo compacto — ver
+	 * {@link #resultRowHeightBasePx()}) das grades de resultado — pedido
+	 * explicito do usuario: "as vezes fica muito apertado... uma opcao
+	 * permitindo alguns tamanhos". Independente do zoom da interface (que
+	 * escala tudo) e do modo compacto (que reduz tudo): este controle mexe
+	 * SO no espaco entre as linhas da grade de resultados, pensado para quem
+	 * quer letras no tamanho normal mas linhas mais respiradas (ou o
+	 * contrario, mais linhas visiveis de uma vez). {@code 22} (indice 1,
+	 * "Padrao") e o valor que a grade sempre usou antes deste controle
+	 * existir.
+	 */
+	private static final int[] ROW_SPACING_LEVELS = { 18, 22, 28, 34 };
+	private static final String[] ROW_SPACING_LABELS = { "Compacta", "Padrao", "Confortavel", "Espacosa" };
+
 	private final UiPreferences uiPrefsStore = new UiPreferences();
 	private Font baseDefaultFont;
 	private boolean sidebarOnRight = false;
 	private boolean resultsVertical = false;
 	private boolean compactMode = false;
 	private int zoomIndex = UiPreferences.DEFAULT_ZOOM_INDEX;
+	private int rowSpacingIndex = UiPreferences.DEFAULT_ROW_SPACING_INDEX;
 
 	// ---------- Keep-alive de conexao ----------
 
@@ -254,6 +300,18 @@ public class MainWindow extends JFrame {
 	private int keepAliveIntervalMs = UiPreferences.DEFAULT_KEEP_ALIVE_SECONDS * 1000;
 	private javax.swing.Timer keepAliveTimer;
 
+	// ---------- Atualizacao automatica (ver com.nureal.ide.core.update) ----------
+
+	/**
+	 * Faixa discreta no topo da janela (ver {@link UpdateBanner}) — construida
+	 * sempre (mesmo sem nenhuma atualizacao pendente), mas comeca invisivel;
+	 * so aparece quando {@link #checkForUpdates} encontra uma versao mais nova.
+	 */
+	private UpdateBanner updateBanner;
+	private final UpdatePreferences updatePreferencesStore = new UpdatePreferences();
+	/** Ultimo release encontrado por {@link #checkForUpdates} — usado pelos botoes da faixa (instalar/ver notas/ignorar). */
+	private GithubRelease latestReleaseFound;
+
 	// ---------- Formatacao de SQL (presets) e fonte do editor ----------
 
 	private final FormatPreferences formatPrefsStore = new FormatPreferences();
@@ -267,9 +325,14 @@ public class MainWindow extends JFrame {
 		setLocationRelativeTo(null);
 		loadUiPrefs();
 		loadFormatPrefs();
+		// Liga o autocomplete ao cache de FKs (ver #lookupForeignKeysForCompletion)
+		// — "auxiliar de montagem de queries": ao completar o alvo de um JOIN,
+		// o provider passa a sugerir primeiro as tabelas relacionadas por FK.
+		completionProvider.setForeignKeyLookup(this::lookupForeignKeysForCompletion);
 		buildUi();
 		registerWindowShortcuts();
 		startKeepAliveTimer();
+		scheduleStartupUpdateCheck();
 		// Salva a sessao e fecha as conexoes JDBC ao fechar (alem do autosave
 		// continuo durante a digitacao) — sem isso, as conexoes de todos os
 		// workspaces ficavam abertas ate o processo encerrar de vez.
@@ -376,6 +439,147 @@ public class MainWindow extends JFrame {
 		}
 	}
 
+	// ---------- Atualizacao automatica ----------
+
+	/**
+	 * Dispara a checagem AUTOMATICA de atualizacao pouco depois do startup —
+	 * atraso de proposito (a janela ja aparece e pinta primeiro; checar
+	 * atualizacao nunca deve atrasar a abertura do app) via um {@link Timer}
+	 * de disparo unico. Pulada inteiramente quando:
+	 * <ul>
+	 *   <li>{@link AppVersion#isDevBuild()} — rodando fora de um jar
+	 *       empacotado (ex.: {@code mvn exec:java}), nao ha versao real para
+	 *       comparar (ver javadoc de {@code AppVersion}).</li>
+	 *   <li>{@code autoCheckEnabled=false} nas preferencias — usuario
+	 *       desligou a checagem automatica.</li>
+	 * </ul>
+	 * A checagem MANUAL (menu "Verificar atualizacoes...") ignora as duas
+	 * condicoes acima, sempre roda.
+	 */
+	private void scheduleStartupUpdateCheck() {
+		if (AppVersion.isDevBuild()) {
+			return;
+		}
+		Timer delay = new Timer(2000, e -> {
+			try {
+				UpdatePreferences.State prefs = updatePreferencesStore.load();
+				if (prefs.autoCheckEnabled()) {
+					checkForUpdates(false);
+				}
+			} catch (IOException ex) {
+				AppLogger.fine("Nao foi possivel ler preferencias de atualizacao: " + ex.getMessage(), ex);
+			}
+		});
+		delay.setRepeats(false);
+		delay.start();
+	}
+
+	/**
+	 * Consulta o GitHub em segundo plano (ver {@link UpdateChecker}, chamada
+	 * de rede sincrona — por isso SEMPRE numa {@link SwingWorker}, nunca
+	 * direto na EDT) e mostra a {@link UpdateBanner} se houver versao mais
+	 * nova.
+	 *
+	 * @param manual {@code true} quando disparada pelo menu "Verificar
+	 *               atualizacoes..." — nesse caso SEMPRE mostra algum
+	 *               feedback ao usuario (banner OU um dialogo "voce ja esta
+	 *               atualizado"/erro), e ignora tanto {@code autoCheckEnabled}
+	 *               quanto uma versao previamente "ignorada"
+	 *               ({@code skippedVersion}). A checagem automatica do
+	 *               startup ({@code manual=false}) e silenciosa em qualquer
+	 *               falha (rede indisponivel e o caso mais comum — nao deve
+	 *               incomodar ninguem com um erro no startup) e respeita
+	 *               {@code skippedVersion}.
+	 */
+	private void checkForUpdates(boolean manual) {
+		new SwingWorker<GithubRelease, Void>() {
+			@Override
+			protected GithubRelease doInBackground() throws Exception {
+				return UpdateChecker.fetchLatestRelease();
+			}
+
+			@Override
+			protected void done() {
+				GithubRelease release;
+				try {
+					release = get();
+				} catch (Exception ex) {
+					AppLogger.fine("Checagem de atualizacao falhou: " + ex.getMessage(), ex);
+					if (manual) {
+						JOptionPane.showMessageDialog(MainWindow.this,
+								"Nao foi possivel checar atualizacoes: " + rootMessage(ex),
+								"Verificar atualizacoes", JOptionPane.WARNING_MESSAGE);
+					}
+					return;
+				}
+				if (!UpdateChecker.isUpdateAvailable(release)) {
+					if (manual) {
+						JOptionPane.showMessageDialog(MainWindow.this,
+								"Voce ja esta na versao mais recente (" + AppVersion.current() + ").",
+								"Verificar atualizacoes", JOptionPane.INFORMATION_MESSAGE);
+					}
+					return;
+				}
+				if (!manual && isSkipped(release)) {
+					return;
+				}
+				latestReleaseFound = release;
+				updateBanner.showUpdate(release);
+			}
+		}.execute();
+	}
+
+	/** {@code true} quando o usuario ja mandou "ignorar esta versao" para exatamente este release. */
+	private boolean isSkipped(GithubRelease release) {
+		try {
+			String skipped = updatePreferencesStore.load().skippedVersion();
+			return !skipped.isBlank() && skipped.equals(release.tagName());
+		} catch (IOException ex) {
+			return false;
+		}
+	}
+
+	/** Mensagem da causa raiz de {@code ex} (a de mais alto nivel costuma ser so "java.io.IOException" generico). */
+	private static String rootMessage(Throwable ex) {
+		Throwable t = ex;
+		while (t.getCause() != null) {
+			t = t.getCause();
+		}
+		String msg = t.getMessage();
+		return (msg == null || msg.isBlank()) ? t.getClass().getSimpleName() : msg;
+	}
+
+	/** Botao "Baixar e instalar" da faixa — ver {@link UpdateInstallDialog}. */
+	private void onInstallUpdate() {
+		if (latestReleaseFound != null) {
+			UpdateInstallDialog.open(this, latestReleaseFound);
+		}
+	}
+
+	/** Botao "Ver notas" da faixa — ver {@link ReleaseNotesDialog}. */
+	private void onViewUpdateNotes() {
+		if (latestReleaseFound != null) {
+			ReleaseNotesDialog.open(this, latestReleaseFound);
+		}
+	}
+
+	/** Botao "Ignorar esta versao" — grava a tag em {@code skippedVersion} e some com a faixa (nao volta ate um release NOVO sair). */
+	private void onSkipUpdate() {
+		if (latestReleaseFound != null) {
+			try {
+				updatePreferencesStore.save(updatePreferencesStore.load().withSkippedVersion(latestReleaseFound.tagName()));
+			} catch (IOException ex) {
+				AppLogger.fine("Nao foi possivel salvar a versao ignorada: " + ex.getMessage(), ex);
+			}
+		}
+		updateBanner.hideBanner();
+	}
+
+	/** Botao "X" da faixa — so fecha PARA ESTA SESSAO, sem persistir nada (ver javadoc de {@link UpdateBanner}). */
+	private void onDismissUpdateBanner() {
+		updateBanner.hideBanner();
+	}
+
 	/**
 	 * Pede ao usuario o novo intervalo do keep-alive, EM SEGUNDOS (menu Layout
 	 * -> "Intervalo do keep-alive...") — o padrao fixo de 4 minutos podia ser
@@ -435,6 +639,7 @@ public class MainWindow extends JFrame {
 		if (zoomIndex != UiPreferences.DEFAULT_ZOOM_INDEX) {
 			applyZoomFont(zoomIndex); // so a fonte; ainda nao ha janela/componentes
 		}
+		rowSpacingIndex = clampRowSpacingIndex(state.rowSpacingIndex());
 	}
 
 	/** Carrega o preset de formatacao de SQL e a fonte do editor salvos. */
@@ -479,6 +684,15 @@ public class MainWindow extends JFrame {
 	private void buildUi() {
 		setLayout(new BorderLayout());
 
+		// Faixa de atualizacao disponivel (ver "Atualizacao automatica" acima) —
+		// no NORTH da janela inteira (nao so da area do editor), pra ficar
+		// visivel independente de qual painel/aba esta em foco. Comeca
+		// invisivel (ver construtor de UpdateBanner) — nao ocupa espaco ate
+		// checkForUpdates() encontrar uma versao mais nova.
+		updateBanner = new UpdateBanner(
+				this::onInstallUpdate, this::onViewUpdateNotes, this::onSkipUpdate, this::onDismissUpdateBanner);
+		add(updateBanner, BorderLayout.NORTH);
+
 		leftSide = buildLeftSide();
 		resultsArea = buildResultsArea();
 		editorAreaPanel = buildEditorArea();
@@ -507,11 +721,12 @@ public class MainWindow extends JFrame {
 		JPanel mainBar = new JPanel(new GridBagLayout());
 		mainBar.setOpaque(false);
 
-		// 8px acima/abaixo — o MESMO valor do padding do painel CONEXOES (ver
-		// ConnectionsPanel, createEmptyBorder(8,8,8,8)), para as duas linhas
-		// (cabecalho do sidebar e esta barra) ficarem na mesma altura visual,
-		// lado a lado. 0px na esquerda para colar na linha da aba.
-		mainBar.setBorder(BorderFactory.createEmptyBorder(8, 0, 8, 12));
+		// 8px (Spacing.SM) acima/abaixo — o MESMO valor do padding do painel
+		// CONEXOES (ver ConnectionsPanel, createEmptyBorder(8,8,8,8)), para as
+		// duas linhas (cabecalho do sidebar e esta barra) ficarem na mesma
+		// altura visual, lado a lado. 0px na esquerda para colar na linha da
+		// aba; 12px (Spacing.MD) na direita.
+		mainBar.setBorder(BorderFactory.createEmptyBorder(Spacing.SM, 0, Spacing.SM, Spacing.MD));
 
 		GridBagConstraints gbc = new GridBagConstraints();
 		// O segredo do alinhamento: força todos os elementos a compartilharem a mesma
@@ -528,7 +743,12 @@ public class MainWindow extends JFrame {
 		runButton.setEnabled(false);
 		runButton.addActionListener(e -> onRun());
 		runButton.setIconTextGap(6);
-		runButton.setMargin(new Insets(6, 14, 6, 12));
+		// Vertical XS (4, era 6 — barra mais baixa, pedido explicito da
+		// revisao premium) e um pouco mais de respiro horizontal a esquerda
+		// (LG=16) que a direita (MD=12): unico botao PREENCHIDO/em destaque
+		// da barra, a leve assimetria reforca presenca sem parecer maior por
+		// acidente.
+		runButton.setMargin(new Insets(Spacing.XS, Spacing.LG, Spacing.XS, Spacing.MD));
 		runButton.putClientProperty(FlatClientProperties.STYLE,
 				"arc: 8; focusWidth: 0; innerFocusWidth: 0; borderWidth: 0");
 		styleRunButton(); // Mantém o verde da Nureal
@@ -548,7 +768,7 @@ public class MainWindow extends JFrame {
 				editor.formatText();
 			}
 		});
-		formatButton.setMargin(new Insets(6, 12, 6, 12));
+		formatButton.setMargin(new Insets(Spacing.XS, Spacing.MD, Spacing.XS, Spacing.MD));
 		formatButton.putClientProperty("JButton.buttonType", "roundRect");
 		formatButton.putClientProperty(FlatClientProperties.STYLE, "arc: 8; borderWidth: 1");
 
@@ -556,17 +776,29 @@ public class MainWindow extends JFrame {
 		formatMenuButton.setToolTipText("Presets e opcoes de formatacao");
 		formatMenuButton
 				.addActionListener(e -> buildFormatMenu().show(formatMenuButton, 0, formatMenuButton.getHeight()));
-		formatMenuButton.setMargin(new Insets(6, 8, 6, 8));
+		formatMenuButton.setMargin(new Insets(Spacing.XS, Spacing.SM, Spacing.XS, Spacing.SM));
 		formatMenuButton.putClientProperty("JButton.buttonType", "roundRect");
 		formatMenuButton.putClientProperty(FlatClientProperties.STYLE, "arc: 8; borderWidth: 1");
+
+		// "Explicar" (fase 4 do GAP_ANALYSIS_DBA_DEV.md: "EXPLAIN visual") —
+		// mesmo estilo OUTLINE de "Formatar" (acao secundaria, ao lado da
+		// primaria "Executar"), rodando EXPLAIN FORMAT=JSON na instrucao atual
+		// sem executa-la de verdade.
+		JButton explainButton = new JButton("Explicar");
+		explainButton.setToolTipText("Ver o plano de execucao (EXPLAIN) da consulta atual");
+		explainButton.addActionListener(e -> onExplain());
+		explainButton.setMargin(new Insets(Spacing.XS, Spacing.MD, Spacing.XS, Spacing.MD));
+		explainButton.putClientProperty("JButton.buttonType", "roundRect");
+		explainButton.putClientProperty(FlatClientProperties.STYLE, "arc: 8; borderWidth: 1");
 
 		// O icone minusculo da seta rende um "preferred height" menor que o do
 		// texto "Executar"/"Formatar" — sem isto os tres ficam com alturas
 		// ligeiramente diferentes mesmo com a mesma margem vertical. Forca os
 		// tres a MESMA altura (a maior das tres), so a largura continua livre.
 		int rowHeight = Math.max(runButton.getPreferredSize().height,
-				Math.max(formatButton.getPreferredSize().height, formatMenuButton.getPreferredSize().height));
-		for (JButton b : new JButton[] { runButton, formatButton, formatMenuButton }) {
+				Math.max(formatButton.getPreferredSize().height,
+						Math.max(formatMenuButton.getPreferredSize().height, explainButton.getPreferredSize().height)));
+		for (JButton b : new JButton[] { runButton, formatButton, formatMenuButton, explainButton }) {
 			Dimension d = b.getPreferredSize();
 			b.setPreferredSize(new Dimension(d.width, rowHeight));
 		}
@@ -575,7 +807,7 @@ public class MainWindow extends JFrame {
 		// (insets)
 		gbc.gridx = 0;
 		gbc.weightx = 0.0;
-		gbc.insets = new Insets(0, 0, 0, 10); // Colado na esquerda, espaço apos o Executar
+		gbc.insets = new Insets(0, 0, 0, Spacing.MD); // Colado na esquerda, espaço apos o Executar
 		mainBar.add(runButton, gbc);
 
 		gbc.gridx = 1;
@@ -583,10 +815,14 @@ public class MainWindow extends JFrame {
 		mainBar.add(formatButton, gbc);
 
 		gbc.gridx = 2;
-		// So uma pequena margem cinza entre "Formatar" e a seta de opcoes — nao
+		// So uma pequena margem entre "Formatar" e a seta de opcoes — nao
 		// colados de vez (como um segmented button ficaria), so proximos.
-		gbc.insets = new Insets(0, 4, 0, 0);
+		gbc.insets = new Insets(0, Spacing.XS, 0, 0);
 		mainBar.add(formatMenuButton, gbc);
+
+		gbc.gridx = 3;
+		gbc.insets = new Insets(0, Spacing.MD, 0, 0);
+		mainBar.add(explainButton, gbc);
 
 		// Salvar a aba atual como query (biblioteca gerenciada pelo app — ver
 		// SavedQueryStore): mesmo estilo outline do Formatar, acao secundaria.
@@ -594,18 +830,22 @@ public class MainWindow extends JFrame {
 		// antes o clique era aceito mas nao fazia nada alem de um aviso na barra
 		// de status, o que parecia um bug de "salvar nao funciona".
 		saveQueryButton = new JButton("Salvar");
-		saveQueryButton.setIcon(Icons.get(IconType.SAVE, 13, GridTheme.MUTED_TEXT));
+		// Buttons.bindThemedIcon (nao setIcon(Icons.get(...)) solto): sem
+		// isto o icone ficava congelado na paleta do tema em que a janela
+		// abriu, ilegivel apos o primeiro toggleTheme() (ver javadoc do
+		// metodo — mesmo bug sistemico corrigido nos botoes so-de-icone).
+		Buttons.bindThemedIcon(saveQueryButton, IconType.SAVE, 13, () -> GridTheme.MUTED_TEXT);
 		saveQueryButton.setToolTipText("Salvar como query (Ctrl+S)");
 		saveQueryButton.addActionListener(e -> onSaveQuery());
 		saveQueryButton.setIconTextGap(6);
-		saveQueryButton.setMargin(new Insets(6, 12, 6, 12));
+		saveQueryButton.setMargin(new Insets(Spacing.XS, Spacing.MD, Spacing.XS, Spacing.MD));
 		saveQueryButton.putClientProperty("JButton.buttonType", "roundRect");
 		saveQueryButton.putClientProperty(FlatClientProperties.STYLE, "arc: 8; borderWidth: 1");
 		Dimension saveDim = saveQueryButton.getPreferredSize();
 		saveQueryButton.setPreferredSize(new Dimension(saveDim.width, rowHeight));
 
-		gbc.gridx = 3;
-		gbc.insets = new Insets(0, 10, 0, 0);
+		gbc.gridx = 4;
+		gbc.insets = new Insets(0, Spacing.MD, 0, 0);
 		mainBar.add(saveQueryButton, gbc);
 
 		// Historico de execucoes (ver ExecutionHistoryStore/HistoryPanel): abre a
@@ -613,23 +853,23 @@ public class MainWindow extends JFrame {
 		// mesmo grupo visual/posicao do Salvar, por ser tambem uma acao sobre a
 		// query da aba atual (rever/re-rodar o que ja foi executado).
 		JButton historyButton = new JButton("Historico");
-		historyButton.setIcon(Icons.get(IconType.HISTORY, 13, GridTheme.MUTED_TEXT));
+		Buttons.bindThemedIcon(historyButton, IconType.HISTORY, 13, () -> GridTheme.MUTED_TEXT);
 		historyButton.setToolTipText("Ver historico de execucoes desta conexao");
 		historyButton.addActionListener(e -> showHistoryPanel());
 		historyButton.setIconTextGap(6);
-		historyButton.setMargin(new Insets(6, 12, 6, 12));
+		historyButton.setMargin(new Insets(Spacing.XS, Spacing.MD, Spacing.XS, Spacing.MD));
 		historyButton.putClientProperty("JButton.buttonType", "roundRect");
 		historyButton.putClientProperty(FlatClientProperties.STYLE, "arc: 8; borderWidth: 1");
 		Dimension historyDim = historyButton.getPreferredSize();
 		historyButton.setPreferredSize(new Dimension(historyDim.width, rowHeight));
 
-		gbc.gridx = 4;
-		gbc.insets = new Insets(0, 6, 0, 0);
+		gbc.gridx = 5;
+		gbc.insets = new Insets(0, Spacing.SM, 0, 0);
 		mainBar.add(historyButton, gbc);
 
 		// --- O ESPAÇADOR INVISÍVEL ---
 		// Ele joga tudo o que vier a partir daqui totalmente para a direita
-		gbc.gridx = 5;
+		gbc.gridx = 6;
 		gbc.weightx = 1.0;
 		gbc.insets = new Insets(0, 0, 0, 0);
 		mainBar.add(Box.createHorizontalGlue(), gbc);
@@ -641,49 +881,49 @@ public class MainWindow extends JFrame {
 		// "aceso" numa barra de ferramentas escura. UIManager.getColor segue
 		// o FlatLaf ativo (claro/escuro) automaticamente.
 		divider.setForeground(UIManager.getColor("Separator.foreground"));
-		gbc.gridx = 6;
+		gbc.gridx = 7;
 		gbc.weightx = 0.0;
-		gbc.insets = new Insets(0, 6, 0, 10);
+		gbc.insets = new Insets(0, Spacing.SM, 0, Spacing.MD);
 		mainBar.add(divider, gbc);
 
 		// --- Botões da Direita (icones discretos, mesma linguagem visual) ---
-		JButton toggleSidebar = new JButton(Icons.get(IconType.PANEL_LEFT, 16, GridTheme.MUTED_TEXT));
+		// Buttons.iconButton ja aplica styleIconButton E prende o icone a
+		// GridTheme.MUTED_TEXT (ver seu javadoc) — antes estes 4 botoes eram
+		// "new JButton(Icons.get(..., GridTheme.MUTED_TEXT))" com a cor
+		// CONGELADA no tema em que a janela abriu, so corrigindo sozinha se o
+		// usuario fechasse e reabrisse a janela.
+		JButton toggleSidebar = Buttons.iconButton(IconType.PANEL_LEFT, 16, () -> GridTheme.MUTED_TEXT);
 		toggleSidebar.setToolTipText("Mostrar/ocultar painel lateral (Ctrl+B)");
 		toggleSidebar.addActionListener(e -> toggleSidebar());
 
-		JButton toggleResults = new JButton(Icons.get(IconType.PANEL_BOTTOM, 16, GridTheme.MUTED_TEXT));
+		JButton toggleResults = Buttons.iconButton(IconType.PANEL_BOTTOM, 16, () -> GridTheme.MUTED_TEXT);
 		toggleResults.setToolTipText("Mostrar/ocultar resultados (Ctrl+J)");
 		toggleResults.addActionListener(e -> toggleResults());
 
-		JButton layoutButton = new JButton(Icons.get(IconType.SETTINGS, 16, GridTheme.MUTED_TEXT));
+		JButton layoutButton = Buttons.iconButton(IconType.SETTINGS, 16, () -> GridTheme.MUTED_TEXT);
 		layoutButton.setToolTipText("Layout, zoom e modo compacto");
 		layoutButton.addActionListener(e -> buildLayoutMenu().show(layoutButton, 0, layoutButton.getHeight()));
 
 		// Icone inicial mostra a ACAO do botao (pra ONDE ele muda o tema), nao
 		// o tema atual — app arranca no tema escuro (ver App#main), entao o
-		// botao comeca oferecendo "mudar para claro" (icone de sol).
-		themeButton = new JButton(Icons.get(IconType.THEME_LIGHT, 16, GridTheme.MUTED_TEXT));
+		// botao comeca oferecendo "mudar para claro" (icone de sol). O TIPO do
+		// icone muda conforme o tema (sol/lua), entao continua sendo
+		// resetado explicitamente em toggleTheme() — so a COR (MUTED_TEXT)
+		// precisava do fix generico, ja coberta por iconButton aqui tambem.
+		themeButton = Buttons.iconButton(IconType.THEME_LIGHT, 16, () -> GridTheme.MUTED_TEXT);
 		themeButton.setToolTipText("Alternar tema claro/escuro");
 		themeButton.addActionListener(e -> toggleTheme());
 
-		// Icones planos, quadrados e com o mesmo arco do resto da barra — o
-		// realce ao passar o mouse (hover) vem de graca do buttonType do FlatLaf.
-		for (JButton btn : new JButton[] { toggleSidebar, toggleResults, layoutButton, themeButton }) {
-			btn.putClientProperty("JButton.buttonType", "toolBarButton");
-			btn.putClientProperty(FlatClientProperties.STYLE, "arc: 8");
-			btn.setMargin(new Insets(5, 5, 5, 5));
-		}
-
 		// Adiciona os botões da direita sequencialmente
-		gbc.insets = new Insets(0, 3, 0, 3); // Pequeno espaço entre os ícones
+		gbc.insets = new Insets(0, Spacing.XS, 0, Spacing.XS); // Pequeno espaço entre os ícones
 
-		gbc.gridx = 7;
-		mainBar.add(toggleSidebar, gbc);
 		gbc.gridx = 8;
-		mainBar.add(toggleResults, gbc);
+		mainBar.add(toggleSidebar, gbc);
 		gbc.gridx = 9;
-		mainBar.add(layoutButton, gbc);
+		mainBar.add(toggleResults, gbc);
 		gbc.gridx = 10;
+		mainBar.add(layoutButton, gbc);
+		gbc.gridx = 11;
 		mainBar.add(themeButton, gbc);
 
 		toolbarBar = mainBar;
@@ -744,6 +984,24 @@ public class MainWindow extends JFrame {
 		reset.addActionListener(a -> resetZoom());
 		zoomMenu.add(reset);
 		menu.add(zoomMenu);
+
+		// Espacamento de linhas da grade de resultados — pedido explicito do
+		// usuario, independente do Zoom acima (que escala a interface
+		// inteira): so a altura da linha das grades de resultado.
+		JMenu rowSpacingMenu = new JMenu("Espacamento de linhas (grade)");
+		for (int i = 0; i < ROW_SPACING_LEVELS.length; i++) {
+			int idx = i;
+			String mark = (i == rowSpacingIndex) ? "✓ " : "      ";
+			JMenuItem item = new JMenuItem(mark + ROW_SPACING_LABELS[i] + " (" + ROW_SPACING_LEVELS[i] + "px)");
+			item.addActionListener(a -> setRowSpacingIndex(idx));
+			rowSpacingMenu.add(item);
+		}
+		menu.add(rowSpacingMenu);
+
+		menu.addSeparator();
+		JMenuItem checkUpdates = new JMenuItem("Verificar atualizacoes...");
+		checkUpdates.addActionListener(a -> checkForUpdates(true));
+		menu.add(checkUpdates);
 
 		return menu;
 	}
@@ -1119,6 +1377,33 @@ public class MainWindow extends JFrame {
 		return Math.max(1, (int) Math.round(v));
 	}
 
+	// ---------- Espacamento de linhas da grade de resultados ----------
+
+	private static int clampRowSpacingIndex(int index) {
+		return Math.max(0, Math.min(ROW_SPACING_LEVELS.length - 1, index));
+	}
+
+	/**
+	 * Altura de linha BASE (antes de {@link #scaledPx}, que continua
+	 * aplicando zoom/modo compacto por cima) que {@link ResultGrid} usa para
+	 * TODAS as grades de resultado da sessao — trocar o indice reconstroi as
+	 * grades ja abertas (ver {@link #setRowSpacingIndex}) do mesmo jeito que
+	 * mudar o zoom ja fazia.
+	 */
+	private int resultRowHeightBasePx() {
+		return ROW_SPACING_LEVELS[rowSpacingIndex];
+	}
+
+	/** Define o espacamento de linha da grade (0..ROW_SPACING_LEVELS.length-1) e reconstroi as grades abertas. */
+	private void setRowSpacingIndex(int index) {
+		rowSpacingIndex = clampRowSpacingIndex(index);
+		refreshDynamicSizing();
+		saveUiState();
+		if (statusBar != null) {
+			statusBar.setText(" Espacamento de linhas da grade: " + ROW_SPACING_LABELS[rowSpacingIndex] + ".");
+		}
+	}
+
 	/**
 	 * Aplica somente a fonte padrao (UIManager + FlatLaf.updateUI), sem reconstruir
 	 * layout.
@@ -1199,7 +1484,7 @@ public class MainWindow extends JFrame {
 	 */
 	private void refreshDynamicSizing() {
 		if (objectTree != null) {
-			objectTree.setRowHeight(scaledPx(22));
+			objectTree.setRowHeight(scaledPx(ConnectionsPanel.DEFAULT_ROW_HEIGHT));
 		}
 		if (connectionsPanel != null) {
 			connectionsPanel.setRowHeight(scaledPx(ConnectionsPanel.DEFAULT_ROW_HEIGHT));
@@ -1218,7 +1503,7 @@ public class MainWindow extends JFrame {
 	private void saveUiState() {
 		try {
 			uiPrefsStore.save(new UiPreferences.State(sidebarOnRight, resultsVertical, zoomIndex, compactMode,
-					keepAliveEnabled, keepAliveIntervalMs / 1000));
+					keepAliveEnabled, keepAliveIntervalMs / 1000, rowSpacingIndex));
 		} catch (Exception ex) {
 			AppLogger.warning("Falha ao salvar preferencias de UI", ex);
 			if (statusBar != null) {
@@ -1233,7 +1518,7 @@ public class MainWindow extends JFrame {
 		connStatusLabel.setFont(connStatusLabel.getFont().deriveFont(Font.BOLD));
 
 		statusBar = new JLabel(" Pronto");
-		statusBar.setForeground(GridTheme.MUTED_TEXT);
+		Typography.tertiary(statusBar);
 
 		connProgress = new JProgressBar();
 		connProgress.setIndeterminate(true);
@@ -1265,39 +1550,58 @@ public class MainWindow extends JFrame {
 
 	// ---------- Estado da conexao (rodape) ----------
 
+	/**
+	 * Aplica a MESMA cor ao dot e ao texto de {@link #connStatusLabel}, e
+	 * guarda o supplier em {@link #connStatusColorSupplier} para que
+	 * {@link #toggleTheme()} possa reavaliar (o valor concreto do supplier
+	 * pode mudar de tema pra tema, ex.: {@code GridTheme.COLOR_LOGIC_FALSE}).
+	 */
+	private void applyConnStatusColor(java.util.function.Supplier<Color> colorSupplier) {
+		connStatusColorSupplier = colorSupplier;
+		Color color = colorSupplier.get();
+		connStatusLabel.setIcon(Icons.get(IconType.STATUS_DOT, 10, color));
+		connStatusLabel.setForeground(color);
+	}
+
 	private void setDisconnectedState() {
-		connStatusLabel.setIcon(Icons.get(IconType.STATUS_DOT, 10, new Color(0xDC2626)));
+		// Mesmo vermelho do texto logo abaixo (GridTheme.COLOR_LOGIC_FALSE) —
+		// antes o dot usava um literal PROPRIO (0xDC2626), um vermelho
+		// LIGEIRAMENTE diferente do texto ao lado dele, mesma familia de
+		// inconsistencia que a revisao visual pede pra eliminar ("reutilizar
+		// sempre as mesmas cores"). GridTheme.COLOR_LOGIC_FALSE tambem e
+		// reativo ao tema, nao um literal proprio (0xB91C1C era vermelho
+		// ESCURO demais pra ler sobre fundo escuro, baixo contraste no modo
+		// escuro do rodape) — ver applyConnStatusColor.
+		applyConnStatusColor(() -> GridTheme.COLOR_LOGIC_FALSE);
 		connStatusLabel.setText("Desconectado");
-		// GridTheme.COLOR_LOGIC_FALSE (mesmo vermelho ja usado pro booleano
-		// "falso" na grade — ver BooleanCellRenderer): reativo ao tema, nao um
-		// literal proprio (0xB91C1C era vermelho ESCURO demais pra ler sobre
-		// fundo escuro, baixo contraste no modo escuro do rodape).
-		connStatusLabel.setForeground(GridTheme.COLOR_LOGIC_FALSE);
 		connProgress.setVisible(false);
 		connectingWorkspaceName = null;
 		updateWorkspaceContextBar();
 	}
 
 	private void setConnectingState(String name) {
-		connStatusLabel.setIcon(Icons.get(IconType.STATUS_DOT, 10, new Color(0xF59E0B)));
+		// Mesmo ambar do texto logo abaixo (GridTheme.HEADER_HIGHLIGHT_BORDER)
+		// — antes o dot usava um literal PROPRIO (0xF59E0B), diferente do tom
+		// usado pelo texto ao lado. GridTheme.HEADER_HIGHLIGHT_BORDER: mesmo
+		// ambar usado no destaque de coluna da grade, ja calibrado pra
+		// funcionar em claro E escuro (valor unico nos dois temas) — em vez
+		// do literal 0xB45309, marrom-escuro que sumia sobre fundo escuro.
+		applyConnStatusColor(() -> GridTheme.HEADER_HIGHLIGHT_BORDER);
 		connStatusLabel.setText("Conectando a " + name + "...");
-		// GridTheme.HEADER_HIGHLIGHT_BORDER: mesmo ambar usado no destaque de
-		// coluna da grade, ja calibrado pra funcionar em claro E escuro (valor
-		// unico nos dois temas) — em vez do literal 0xB45309, marrom-escuro
-		// que sumia sobre fundo escuro.
-		connStatusLabel.setForeground(GridTheme.HEADER_HIGHLIGHT_BORDER);
 		connProgress.setVisible(true);
 		connectingWorkspaceName = name;
 		updateWorkspaceContextBar();
 	}
 
 	private void setConnectedState(String label) {
-		connStatusLabel.setIcon(Icons.get(IconType.STATUS_DOT, 10, ACCENT));
+		// Inconsistencia encontrada na revisao: o dot usava ACCENT (verde da
+		// MARCA, fixo) enquanto o texto ao lado usava GridTheme.COLOR_LOGIC_TRUE
+		// (verde reativo ao tema) — os dois estados irmaos (desconectado/
+		// conectando, acima) sempre usaram a MESMA cor pro dot e pro texto;
+		// unificado aqui tambem, no verde reativo (mesmo booleano "verdadeiro"
+		// da grade — 0x047857 no claro tambem sumia sobre fundo escuro).
+		applyConnStatusColor(() -> GridTheme.COLOR_LOGIC_TRUE);
 		connStatusLabel.setText("Conectado: " + label);
-		// GridTheme.COLOR_LOGIC_TRUE (mesmo verde do booleano "verdadeiro" na
-		// grade): reativo ao tema — 0x047857 (verde bem escuro) tambem sumia
-		// sobre fundo escuro no modo escuro do rodape.
-		connStatusLabel.setForeground(GridTheme.COLOR_LOGIC_TRUE);
 		connProgress.setVisible(false);
 		connectingWorkspaceName = null;
 		updateWorkspaceContextBar();
@@ -1347,7 +1651,11 @@ public class MainWindow extends JFrame {
 		// abaixo, no loop.
 		boolean perTabSchema = false;
 		if (connectingWorkspaceName != null) {
-			dot = ConnectionsPanel.statusDot(new Color(0xF59E0B));
+			// Mesmo ambar de GridTheme.HEADER_HIGHLIGHT_BORDER usado em
+			// setConnectingState() — era outro literal (0xF59E0B) igual mas
+			// duplicado, cada um podendo divergir se algum dia um dos dois
+			// mudasse sozinho.
+			dot = ConnectionsPanel.statusDot(GridTheme.HEADER_HIGHLIGHT_BORDER);
 			tooltip = "Conectando a " + connectingWorkspaceName + "...";
 		} else {
 			Conexao w = activeWorkspace;
@@ -1433,7 +1741,11 @@ public class MainWindow extends JFrame {
 		// ObjectTreeCellRenderer (ver seu javadoc — ele proprio se estica
 		// para cobrir a linha inteira, sem depender de nada fora dele).
 		objectTree.putClientProperty("JTree.paintSelection", false);
-		objectTree.setRowHeight(scaledPx(22));
+		// Mesma base de altura do cartao de conexao (ver
+		// ConnectionsPanel#DEFAULT_ROW_HEIGHT) — unica fonte de verdade para
+		// as duas listas/arvores da lateral, agora que ambas tem a mesma
+		// composicao visual (icone pequeno + texto) em toda linha.
+		objectTree.setRowHeight(scaledPx(ConnectionsPanel.DEFAULT_ROW_HEIGHT));
 		objectTree.setBorder(BorderFactory.createEmptyBorder(4, 8, 4, 4));
 		objectTree.setCellRenderer(new ObjectTreeCellRenderer());
 		// Estado de hover (destaque suave sob o mouse, sem mexer na selecao) —
@@ -1514,29 +1826,22 @@ public class MainWindow extends JFrame {
 			}
 		});
 
-		JButton switchSchemaButton = new JButton(Icons.get(IconType.DATABASE, 13, GridTheme.MUTED_TEXT));
+		// Buttons.iconButton (nao mais "new JButton(Icons.get(...))" +
+		// styleIconButton solto): o icone agora se refaz sozinho a cada troca
+		// de tema — antes, estes 3 icones ficavam com a cor MUTED_TEXT
+		// CONGELADA no tema em que a janela abriu (bug sistemico encontrado
+		// na revisao de codigo, ver javadoc de Buttons#iconButton).
+		JButton switchSchemaButton = Buttons.iconButton(IconType.DATABASE, 13, () -> GridTheme.MUTED_TEXT);
 		switchSchemaButton.setToolTipText("Trocar esquema / ver todos os esquemas");
 		switchSchemaButton.addActionListener(e -> switchSchema());
 
-		JButton refreshObjectsButton = new JButton(Icons.get(IconType.REFRESH, 13, GridTheme.MUTED_TEXT));
+		JButton refreshObjectsButton = Buttons.iconButton(IconType.REFRESH, 13, () -> GridTheme.MUTED_TEXT);
 		refreshObjectsButton.setToolTipText("Atualizar objetos (Ctrl+R)");
 		refreshObjectsButton.addActionListener(e -> refreshObjectTree(true));
 
-		JButton createSchemaButton = new JButton(Icons.get(IconType.NEW, 13, GridTheme.MUTED_TEXT));
+		JButton createSchemaButton = Buttons.iconButton(IconType.NEW, 13, () -> GridTheme.MUTED_TEXT);
 		createSchemaButton.setToolTipText("Criar esquema...");
 		createSchemaButton.addActionListener(e -> createSchema());
-
-		// Mesmo "toolBarButton" plano dos icones da barra de ferramentas
-		// principal (ver toggleSidebar/toggleResults/layoutButton/themeButton
-		// acima) — antes estes 3 usavam setBorderPainted(false) +
-		// setContentAreaFilled(false), que tira o botao do sistema de estilo
-		// do FlatLaf inteiramente: sem hover, sem arco, sem margem
-		// consistente com o resto dos icones do app.
-		for (JButton btn : new JButton[] { switchSchemaButton, refreshObjectsButton, createSchemaButton }) {
-			btn.putClientProperty("JButton.buttonType", "toolBarButton");
-			btn.putClientProperty(FlatClientProperties.STYLE, "arc: 8");
-			btn.setMargin(new Insets(4, 4, 4, 4));
-		}
 
 		JPanel headerButtons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
 		headerButtons.setOpaque(false);
@@ -1549,7 +1854,13 @@ public class MainWindow extends JFrame {
 		headerRow.add(sectionHeader("OBJETOS"), BorderLayout.WEST);
 		headerRow.add(headerButtons, BorderLayout.EAST);
 
-		JPanel top = new JPanel(new BorderLayout(0, 8));
+		// Gap de 6px (nao 8) entre o titulo e a busca — mesmo valor que
+		// ConnectionsPanel/HistoryPanel/SavedQueriesPanel ja usam no cabecalho
+		// interno deles (ver ConnectionsPanel#buildHeader), pra este painel
+		// nao ser o unico com um espacamento levemente diferente dos outros
+		// tres (spec de padronizacao visual: "todo painel deve respeitar o
+		// mesmo espacamento").
+		JPanel top = new JPanel(new BorderLayout(0, 6));
 		top.setOpaque(false);
 		top.add(headerRow, BorderLayout.NORTH);
 		top.add(objectSearch, BorderLayout.SOUTH);
@@ -2004,6 +2315,27 @@ public class MainWindow extends JFrame {
 		showResultsForActiveEditor();
 	}
 
+	/**
+	 * Primeira aba ABERTA (no {@code editorTabs} ao vivo, nao no {@code
+	 * SessionStore} salvo em disco) marcada com {@code schemaName} (ver
+	 * {@link SqlEditorPane#getSchema()}) — usada por {@link #openSchema} para
+	 * trocar de aba ao trocar de esquema, em vez de so deixar a aba de OUTRO
+	 * esquema selecionada por acaso. {@code null} se nenhuma aba aberta tiver
+	 * sido usada ainda com esse esquema nesta sessao.
+	 */
+	private SqlEditorPane findTabForSchema(String schemaName) {
+		if (schemaName == null) {
+			return null;
+		}
+		for (int i = 0; i < editorTabs.getTabCount(); i++) {
+			Component c = editorTabs.getComponentAt(i);
+			if (c instanceof SqlEditorPane sep && schemaName.equals(sep.getSchema())) {
+				return sep;
+			}
+		}
+		return null;
+	}
+
 	/** Captura o conteudo atual das abas do editor (titulo + SQL). */
 	private List<SessionStore.Tab> collectTabs() {
 		List<SessionStore.Tab> list = new ArrayList<>();
@@ -2216,6 +2548,13 @@ public class MainWindow extends JFrame {
 		JButton orientationToggle = new JButton();
 		orientationToggle.addActionListener(e -> toggleResultsOrientation());
 		updateOrientationToggleIcon(orientationToggle);
+		// Sem isto, o icone (tipo E cor) so era recalculado quando o PROPRIO
+		// botao era clicado — trocar o tema sem mexer na orientacao deixava
+		// este icone especifico com a cor MUTED_TEXT do tema antigo (mesmo
+		// bug sistemico corrigido nos demais botoes-so-de-icone, ver
+		// Buttons#bindThemedIcon; aqui e manual porque o TIPO do icone
+		// tambem depende de estado, nao so a cor).
+		orientationToggle.addPropertyChangeListener("UI", e -> updateOrientationToggleIcon(orientationToggle));
 		this.resultsOrientationButton = orientationToggle;
 
 		// Atalho para exportar TODOS os resultados abertos (mesma acao do
@@ -2225,7 +2564,8 @@ public class MainWindow extends JFrame {
 		// abrir o menu do botao la embaixo. Estilo identico ao restante dos
 		// icones da barra de ferramentas (ver #buildToolbar), pra esta linha
 		// nao parecer "de outro app" dentro da mesma janela.
-		JButton exportAllButton = new JButton(Icons.get(IconType.EXPORT, 14, GridTheme.MUTED_TEXT));
+		JButton exportAllButton = new JButton();
+		Buttons.bindThemedIcon(exportAllButton, IconType.EXPORT, 14, () -> GridTheme.MUTED_TEXT);
 		exportAllButton.setToolTipText("Exportar todos os resultados abertos (uma aba por resultado)");
 		exportAllButton.addActionListener(e -> exportAll());
 
@@ -2234,14 +2574,13 @@ public class MainWindow extends JFrame {
 		// — o editor nao some de vez (so fica com uma faixa minima), pra nao
 		// perder o contexto de qual instrucao gerou o resultado. Clicar de
 		// novo (aqui ou no botao espelho do editor) desfaz.
-		JButton expandResultsButton = new JButton(Icons.get(IconType.EXPAND, 14, GridTheme.MUTED_TEXT));
+		JButton expandResultsButton = new JButton();
+		Buttons.bindThemedIcon(expandResultsButton, IconType.EXPAND, 14, () -> GridTheme.MUTED_TEXT);
 		expandResultsButton.setToolTipText("Expandir/recolher resultados (oculta paineis laterais)");
 		expandResultsButton.addActionListener(e -> toggleResultsFocusMode());
 
 		for (JButton btn : new JButton[] { exportAllButton, orientationToggle, expandResultsButton }) {
-			btn.putClientProperty("JButton.buttonType", "toolBarButton");
-			btn.putClientProperty(FlatClientProperties.STYLE, "arc: 8");
-			btn.setMargin(new Insets(5, 5, 5, 5));
+			Buttons.styleIconButton(btn);
 		}
 
 		JPanel headerIcons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 3, 0));
@@ -2296,7 +2635,10 @@ public class MainWindow extends JFrame {
 	private JComponent buildResultsOverlay() {
 		JLabel label = new JLabel("Executando consulta...");
 		label.setAlignmentX(Component.CENTER_ALIGNMENT);
-		label.setFont(label.getFont().deriveFont(Font.BOLD, 13f));
+		label.setFont(label.getFont().deriveFont(13f));
+		// Nivel PRIMARIO (mensagem de destaque) — mesma correcao do
+		// buildEmptyState logo abaixo: so definia o peso, sem cor explicita.
+		Typography.primary(label);
 
 		JProgressBar spinner = new JProgressBar();
 		spinner.setIndeterminate(true);
@@ -2401,15 +2743,29 @@ public class MainWindow extends JFrame {
 	}
 
 	private JComponent buildEmptyState() {
-		JLabel icon = new JLabel(Icons.get(IconType.TABLE, 46, new Color(0xCBD5E1)));
+		// GridTheme.MUTED_TEXT (reativo ao tema) em vez de um literal PROPRIO
+		// (0xCBD5E1) que so funcionava bem no tema escuro — no tema claro
+		// esse mesmo tom (um cinza-azulado claro) tinha baixo contraste
+		// contra o fundo claro do painel.
+		// buildEmptyState() e chamado UMA vez so, no arranque (ver
+		// resultsCards.add(..., "empty")) — sem Buttons.bindThemedIcon, este
+		// icone ficava congelado no tema de arranque se o usuario trocasse de
+		// tema ANTES de rodar a primeira consulta (mesmo bug sistemico
+		// corrigido no resto do app, ver Buttons#bindThemedIcon).
+		JLabel icon = new JLabel();
+		Buttons.bindThemedIcon(icon, IconType.TABLE, 46, () -> GridTheme.MUTED_TEXT);
 		icon.setAlignmentX(Component.CENTER_ALIGNMENT);
 
 		JLabel title = new JLabel("Execute uma consulta para ver os resultados");
-		title.setFont(title.getFont().deriveFont(Font.BOLD, 14f));
+		title.setFont(title.getFont().deriveFont(14f));
+		// Nivel PRIMARIO (mensagem de destaque) — antes so definia o peso
+		// (Bold) sem nenhuma cor explicita, caindo no padrao do L&F por
+		// acaso em vez do alto contraste que todo outro titulo do app usa.
+		Typography.primary(title);
 		title.setAlignmentX(Component.CENTER_ALIGNMENT);
 
 		JLabel sub = new JLabel("Os resultados da consulta aparecerao aqui");
-		sub.setForeground(GridTheme.MUTED_TEXT);
+		Typography.tertiary(sub);
 		sub.setAlignmentX(Component.CENTER_ALIGNMENT);
 
 		JPanel box = new JPanel();
@@ -2434,11 +2790,9 @@ public class MainWindow extends JFrame {
 		((CardLayout) resultsCards.getLayout()).show(resultsCards, "tabs");
 	}
 
+	/** Delega para {@link Typography#sectionHeader} — ponto UNICO desta receita, compartilhado com os paineis laterais. */
 	private JLabel sectionHeader(String text) {
-		JLabel label = new JLabel(text);
-		label.setFont(label.getFont().deriveFont(Font.BOLD, 11f));
-		label.setForeground(GridTheme.MUTED_TEXT);
-		return label;
+		return Typography.sectionHeader(text);
 	}
 
 	// ---------- Tema ----------
@@ -2470,7 +2824,17 @@ public class MainWindow extends JFrame {
 		FlatLaf.updateUI();
 		themeButton
 				.setIcon(dark ? Icons.get(IconType.THEME_LIGHT, 16, GridTheme.MUTED_TEXT) : Icons.get(IconType.THEME_DARK, 16, GridTheme.MUTED_TEXT));
+		// connStatusLabel (dot + texto do rodape) nao e um componente PADRAO
+		// do FlatLaf, entao FlatLaf.updateUI() nao o alcanca — sem isto, o dot
+		// ficava com a cor GridTheme do tema anterior ate a proxima mudanca
+		// de estado de conexao (ver applyConnStatusColor).
+		applyConnStatusColor(connStatusColorSupplier);
 		styleRunButton();
+		// Mesmo motivo: UpdateBanner tem setBackground/setBorder proprios
+		// (ver seu javadoc), fora do alcance do FlatLaf.updateUI().
+		if (updateBanner != null) {
+			updateBanner.refreshTheme();
+		}
 		// FlatLaf.updateUI() so atualiza componentes Swing PADRAO (botoes,
 		// paineis, arvore etc.) — a grade de resultados e o editor SQL pintam
 		// sozinhos, lendo paletas proprias (ver GridTheme e
@@ -2661,12 +3025,31 @@ public class MainWindow extends JFrame {
 						// mantem schemaList: e o que permite "Trocar esquema..." depois,
 						// sem precisar desconectar e reconectar (ver maybeShowObjectContextMenu).
 					}
-					// A aba selecionada no momento "adota" este esquema: da proxima
-					// vez que o usuario clicar em Executar nela (mesmo apos abrir
-					// outra aba de outro esquema no meio do caminho), onRun sabe
-					// para qual esquema conectar de volta automaticamente, sem
-					// precisar vir aqui escolher de novo na arvore.
+					// Troca de esquema (ver "Trocar esquema..." em switchSchema): se ja
+					// existe uma aba marcada com ESTE esquema (de uma troca anterior
+					// nesta mesma sessao — ver SqlEditorPane#getSchema/setSchema),
+					// troca para ela em vez de deixar selecionada uma aba de OUTRO
+					// esquema. Pedido explicito do usuario: "quando mudo de esquema
+					// ele nao esta trocando as abas para abas que pertencem aquela
+					// esquema, se existirem". Sem aba correspondente (caso comum: 1a
+					// vez que este esquema e aberto nesta sessao), cai no
+					// comportamento de sempre — a aba selecionada no momento "adota"
+					// este esquema: da proxima vez que o usuario clicar em Executar
+					// nela (mesmo apos abrir outra aba de outro esquema no meio do
+					// caminho), onRun sabe para qual esquema conectar de volta
+					// automaticamente, sem precisar vir aqui escolher de novo na
+					// arvore.
 					SqlEditorPane activeEditor = currentEditor();
+					SqlEditorPane matchingTab = findTabForSchema(schemaName);
+					if (matchingTab != null && matchingTab != activeEditor) {
+						for (int i = 0; i < editorTabs.getTabCount(); i++) {
+							if (editorTabs.getComponentAt(i) == matchingTab) {
+								editorTabs.setSelectedIndex(i);
+								break;
+							}
+						}
+						activeEditor = matchingTab;
+					}
 					if (activeEditor != null) {
 						activeEditor.setSchema(schemaName);
 						scheduleSave();
@@ -2797,6 +3180,59 @@ public class MainWindow extends JFrame {
 			}
 		}
 		runStatements(editor);
+	}
+
+	/**
+	 * "Explicar" (fase 4 do GAP_ANALYSIS_DBA_DEV.md: "EXPLAIN visual") — roda
+	 * {@code EXPLAIN FORMAT=JSON} na PRIMEIRA instrucao da selecao/aba atual
+	 * (nunca a executa de verdade) e mostra o plano navegavel em
+	 * {@link ExplainDialog}. Deliberadamente NAO reproduz toda a logica de
+	 * troca de esquema por aba de {@link #onRun} (ver
+	 * {@link #switchToSchemaThenRun}) — exige que a conexao ja esteja
+	 * "apontando" pro esquema certo (normal, ja que se explica uma consulta
+	 * que presumivelmente ja foi rodada nesta aba antes); escopo menor
+	 * assumido conscientemente para nao duplicar ~60 linhas de reconciliacao
+	 * de esquema so para este atalho.
+	 */
+	private void onExplain() {
+		if (!connectionManager().isConnected()) {
+			statusBar.setText(" Conecte-se a um servidor antes de explicar uma consulta.");
+			return;
+		}
+		SqlEditorPane editor = currentEditor();
+		if (editor == null) {
+			return;
+		}
+		List<String> statements = SqlStatementSplitter.split(editor.currentSql());
+		if (statements.isEmpty() || statements.get(0).isBlank()) {
+			statusBar.setText(" Escreva (ou selecione) uma consulta antes de explicar.");
+			return;
+		}
+		if (statements.size() > 1) {
+			statusBar.setText(" Varias instrucoes selecionadas — explicando so a primeira.");
+		}
+		String sql = statements.get(0).trim();
+		if (sql.endsWith(";")) {
+			sql = sql.substring(0, sql.length() - 1).trim();
+		}
+		Conexao ws = activeWorkspace != null ? activeWorkspace : null;
+		if (ws == null) {
+			return;
+		}
+		String explainSql = "EXPLAIN FORMAT=JSON " + sql;
+		String finalSql = sql;
+		statusBar.setText(" Gerando plano de execucao...");
+		runQuery(ws, explainSql, rows -> {
+			statusBar.setText(" Pronto.");
+			if (rows.isEmpty() || rows.get(0).length == 0 || rows.get(0)[0] == null) {
+				showError("EXPLAIN nao retornou plano", new Exception("Resposta vazia do servidor"));
+				return;
+			}
+			ExplainDialog.open(this, finalSql, String.valueOf(rows.get(0)[0]));
+		}, ex -> {
+			statusBar.setText(" Falha ao gerar o plano de execucao.");
+			showError("Falha ao executar EXPLAIN", ex);
+		});
 	}
 
 	/**
@@ -3224,17 +3660,28 @@ public class MainWindow extends JFrame {
 		ResultTableModel model = (ResultTableModel) r.model();
 		String schemaName = (currentSchema != null) ? currentSchema.name() : null;
 		ResultGrid grid = new ResultGrid(model, connectionManager(), schemaName, tableMetadataCache,
-				() -> exportResult(r), this::scaledPx);
+				() -> exportResult(r), this::scaledPx, resultRowHeightBasePx());
 
 		// Nome distinto de propósito do campo MainWindow.statusBar (JLabel do
 		// rodape da JANELA inteira) — esta e a barra de UMA aba de resultado.
 		ResultStatusBar resultStatusBar = new ResultStatusBar(PAGE_SIZE);
+		// Bug relatado pelo usuario: "Excluir linha nao esta funcionando" —
+		// clicar no botao "Excluir linha(s)" movia o foco da tabela para o
+		// PROPRIO botao antes do seu actionPerformed rodar, e o
+		// SelectionManager (ver #installFocusClearing) limpava a selecao
+		// nesse focusLost — o botao entao lia uma selecao ja vazia e nao
+		// fazia nada, sem nenhum erro visivel. Eximir a barra de acoes
+		// INTEIRA (Nova linha/Excluir/Descartar/Salvar) deste "limpar ao
+		// perder foco" resolve, sem perder o comportamento original para
+		// cliques em qualquer OUTRO lugar do app.
+		grid.keepSelectionOnFocusTo(resultStatusBar.asComponent());
 		Runnable refresh = () -> resultStatusBar.refresh(r.model().getRowCount(), r.execMs(), r.fetchMs(),
 				r.cursor() != null && !r.cursor().exhausted);
 		resultStatusBar.onLoadMore(() -> loadPage(r, PAGE_SIZE, refresh));
 		resultStatusBar.onLoadAll(() -> loadAll(r, refresh));
 		resultStatusBar.onExportThis(() -> exportResult(r));
 		resultStatusBar.onExportAll(this::exportAll);
+		resultStatusBar.onExportCsv(() -> exportResultCsv(grid.table(), r.title()));
 		grid.onSelectionSummary(resultStatusBar::updateSelectionSummary);
 		refresh.run();
 
@@ -3293,6 +3740,15 @@ public class MainWindow extends JFrame {
 			int[] rows = grid.selectedModelRows();
 			if (rows.length > 0) {
 				editController.markForDelete(rows);
+				// markForDelete so muda um Set interno do controller — NENHUM
+				// TableModelEvent e disparado (ao contrario de addNewRow/
+				// discardAll, que mexem no TableModel de verdade e por isso o
+				// JTable se repinta sozinho). Sem este repaint(), a linha
+				// continuava com a cor de sempre ate algum repaint incidental
+				// acontecer (rolar, redimensionar...) — clicar em "Excluir
+				// linha(s)" parecia nao fazer nada, mesmo a exclusao ja
+				// estando registrada (valendo no proximo "Salvar alteracoes").
+				grid.table().repaint();
 			}
 		});
 		resultStatusBar.onDiscardChanges(() -> {
@@ -3447,6 +3903,33 @@ public class MainWindow extends JFrame {
 			sheets.add(new ExcelExporter.TableSheet(r.title(), r.model()));
 			sheets.add(instructionsSheet(List.of(r)));
 			doExport(sheets, file);
+		}
+	}
+
+	/**
+	 * Exporta este resultado para CSV (todas as linhas/colunas VISIVEIS na
+	 * grade — respeita filtro/ordenacao atuais, ver {@link GridExporter}).
+	 * Mesma acao ja alcancavel pelo clique-direito na grade
+	 * ("Exportar > CSV..." em {@link ResultContextMenu}); exposta tambem aqui,
+	 * no botao "Exportar" principal, para paridade de descoberta com o Excel
+	 * (ver {@code GAP_ANALYSIS_DBA_DEV.md}, fase 3).
+	 */
+	private void exportResultCsv(JTable table, String title) {
+		JFileChooser fc = new JFileChooser();
+		fc.setDialogTitle("Exportar CSV");
+		fc.setSelectedFile(new File(title + ".csv"));
+		fc.setFileFilter(new FileNameExtensionFilter("CSV (*.csv)", "csv"));
+		if (fc.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) {
+			return;
+		}
+		File file = fc.getSelectedFile();
+		if (!file.getName().toLowerCase(java.util.Locale.ROOT).endsWith(".csv")) {
+			file = new File(file.getParentFile(), file.getName() + ".csv");
+		}
+		try {
+			GridExporter.exportCsv(table, file.toPath());
+		} catch (IOException ex) {
+			showError("Falha ao exportar CSV", ex);
 		}
 	}
 
@@ -3943,6 +4426,16 @@ public class MainWindow extends JFrame {
 		addNameCategory(root, "Functions", schema.functions(), NodeType.ROUTINE, "FUNCTION", f, filtering);
 		addNameCategory(root, "Triggers", schema.triggers(), NodeType.TRIGGER, "TRIGGER", f, filtering);
 
+		// Busca sem nenhum resultado: antes a raiz ficava sozinha, sem
+		// categoria nenhuma embaixo e sem nenhuma pista de que a busca "deu
+		// zero" (parecia igual a um schema vazio de verdade). Uma linha
+		// sintetica (sem icone, sem acao — ver NodeType.EMPTY_MESSAGE) deixa
+		// isso explicito, com o proprio termo buscado no texto.
+		if (filtering && root.getChildCount() == 0) {
+			root.add(new DefaultMutableTreeNode(new ObjNode(NodeType.EMPTY_MESSAGE,
+					"Nenhum objeto encontrado para \"" + filter.trim() + "\"", "", null, null, null)));
+		}
+
 		objectTree.setModel(new DefaultTreeModel(root));
 		// So ate o nivel de CATEGORIA em ambos os modos (nunca as tabelas em
 		// si) — as colunas de cada tabela agora sempre existem como filhas
@@ -4110,6 +4603,18 @@ public class MainWindow extends JFrame {
 			buildTablesCategoryContextMenu().show(objectTree, e.getX(), e.getY());
 			return;
 		}
+		if (obj.type() == NodeType.CATEGORY && "VIEW".equals(obj.kind())) {
+			buildViewsCategoryContextMenu().show(objectTree, e.getX(), e.getY());
+			return;
+		}
+		if (obj.type() == NodeType.CATEGORY && "TRIGGER".equals(obj.kind())) {
+			buildTriggersCategoryContextMenu().show(objectTree, e.getX(), e.getY());
+			return;
+		}
+		if (obj.type() == NodeType.CATEGORY && ("PROCEDURE".equals(obj.kind()) || "FUNCTION".equals(obj.kind()))) {
+			buildRoutinesCategoryContextMenu(obj.kind()).show(objectTree, e.getX(), e.getY());
+			return;
+		}
 		if (!isOpenableObject(obj.type())) {
 			return;
 		}
@@ -4142,6 +4647,49 @@ public class MainWindow extends JFrame {
 		JMenuItem createTable = new JMenuItem("Nova tabela...");
 		createTable.addActionListener(a -> createTable());
 		menu.add(createTable);
+		JMenuItem createView = new JMenuItem("Nova view...");
+		createView.addActionListener(a -> createView());
+		menu.add(createView);
+		JMenuItem createTrigger = new JMenuItem("Novo trigger...");
+		createTrigger.addActionListener(a -> createTrigger());
+		menu.add(createTrigger);
+		JMenuItem createRoutine = new JMenuItem("Nova procedure/function...");
+		createRoutine.addActionListener(a -> createRoutine(null));
+		menu.add(createRoutine);
+		menu.addSeparator();
+		// Administracao do SERVIDOR (nao do schema aberto) — pedido explicito
+		// do usuario ("gerenciamento de usuario, permissoes... para
+		// administradores das bases", ver GAP_ANALYSIS_DBA_DEV.md). Fica na
+		// raiz do schema por ser hoje o unico no de nivel "conexao" da arvore
+		// (nao existe um no separado de servidor) — mesmo lugar de
+		// "Criar esquema...", que ja e conceitualmente de instancia, nao de
+		// schema.
+		JMenuItem manageUsers = new JMenuItem("Gerenciar usuarios e privilegios...");
+		manageUsers.addActionListener(a -> openUserManagement());
+		menu.add(manageUsers);
+		// Fase 2 do GAP_ANALYSIS_DBA_DEV.md: monitoramento/manutencao do
+		// servidor — mesmos motivos de ficar aqui (unico no "de conexao" da
+		// arvore hoje) que "Gerenciar usuarios e privilegios..." acima.
+		JMenuItem processList = new JMenuItem("Sessoes ativas (PROCESSLIST)...");
+		processList.addActionListener(a -> openProcessList());
+		menu.add(processList);
+		JMenuItem serverStatus = new JMenuItem("Variaveis e status do servidor...");
+		serverStatus.addActionListener(a -> openServerStatus());
+		menu.add(serverStatus);
+		menu.addSeparator();
+		// Diferente dos 3 itens acima (administracao do SERVIDOR), o
+		// Diagrama ER e sobre o ESQUEMA aberto — mas fica no mesmo menu por
+		// ser, hoje, o unico no de nivel "esquema" da arvore com clique
+		// direito (mesmo raciocinio de "Nova tabela..." acima).
+		JMenuItem erDiagram = new JMenuItem("Diagrama ER...");
+		erDiagram.addActionListener(a -> openErDiagram());
+		menu.add(erDiagram);
+		JMenuItem eventsReplication = new JMenuItem("Eventos e replicacao...");
+		eventsReplication.addActionListener(a -> openEventsReplication());
+		menu.add(eventsReplication);
+		JMenuItem backupRestore = new JMenuItem("Backup e restauracao...");
+		backupRestore.addActionListener(a -> openBackupRestore());
+		menu.add(backupRestore);
 		return menu;
 	}
 
@@ -4157,6 +4705,34 @@ public class MainWindow extends JFrame {
 		JMenuItem createTable = new JMenuItem("Nova tabela...");
 		createTable.addActionListener(a -> createTable());
 		menu.add(createTable);
+		return menu;
+	}
+
+	/** Igual a {@link #buildTablesCategoryContextMenu}, so que para o no "Visualizacoes" (categoria de views). */
+	private JPopupMenu buildViewsCategoryContextMenu() {
+		JPopupMenu menu = new JPopupMenu();
+		JMenuItem createViewItem = new JMenuItem("Nova view...");
+		createViewItem.addActionListener(a -> createView());
+		menu.add(createViewItem);
+		return menu;
+	}
+
+	/** Igual a {@link #buildTablesCategoryContextMenu}, so que para o no "Triggers" (categoria). */
+	private JPopupMenu buildTriggersCategoryContextMenu() {
+		JPopupMenu menu = new JPopupMenu();
+		JMenuItem createTriggerItem = new JMenuItem("Novo trigger...");
+		createTriggerItem.addActionListener(a -> createTrigger());
+		menu.add(createTriggerItem);
+		return menu;
+	}
+
+	/** Igual a {@link #buildTablesCategoryContextMenu}, so que para os nos "Procedures"/"Functions" (categoria). */
+	private JPopupMenu buildRoutinesCategoryContextMenu(String kind) {
+		JPopupMenu menu = new JPopupMenu();
+		JMenuItem createRoutineItem =
+				new JMenuItem("PROCEDURE".equals(kind) ? "Nova procedure..." : "Nova function...");
+		createRoutineItem.addActionListener(a -> createRoutine(kind));
+		menu.add(createRoutineItem);
 		return menu;
 	}
 
@@ -4335,6 +4911,298 @@ public class MainWindow extends JFrame {
 	}
 
 	/**
+	 * Abre o {@link ViewBuilderDialog} no modo "criar view nova" — acessivel
+	 * pela raiz do schema, pelo no "Visualizacoes" (categoria) e pelo menu de
+	 * contexto de uma view ja existente (ver {@link #buildObjectContextMenu}).
+	 * Mesmo criterio de nomes ja usados que {@link #createTable()} (tabela E
+	 * view compartilham o mesmo namespace no MySQL).
+	 */
+	private void createView() {
+		if (activeWorkspace == null || !activeWorkspace.mgr.isConnected() || currentSchema == null) {
+			statusBar.setText(" Abra um esquema antes de criar uma view.");
+			return;
+		}
+		Set<String> existingNames = new HashSet<>();
+		for (TableInfo t : currentSchema.tables()) {
+			existingNames.add(t.name().toLowerCase(Locale.ROOT));
+		}
+		for (TableInfo v : currentSchema.views()) {
+			existingNames.add(v.name().toLowerCase(Locale.ROOT));
+		}
+		Conexao ws = activeWorkspace;
+		String schemaName = currentSchema.name();
+		ViewBuilderDialog.openCreate(this, dialect,
+				name -> existingNames.contains(name.toLowerCase(Locale.ROOT)),
+				(statements, onOk, onErr) -> runDdlStatements(ws, statements, onOk, onErr),
+				this::sendDdlToEditor,
+				() -> {
+					if (ws == activeWorkspace && schemaName.equals(currentSchema.name())) {
+						refreshObjectTree(false);
+					}
+				});
+	}
+
+	/**
+	 * Abre o {@link ViewBuilderDialog} no modo "editar view existente" —
+	 * carrega o {@code SHOW CREATE VIEW} atual ANTES de abrir o dialogo (mesmo
+	 * padrao "carrega antes de mostrar" de {@link #alterTable}), pra o
+	 * assistente ja aparecer com o SELECT atual preenchido em vez de vazio.
+	 */
+	private void editView(ObjNode obj) {
+		if (activeWorkspace == null || !activeWorkspace.mgr.isConnected() || currentSchema == null) {
+			statusBar.setText(" Abra um esquema antes de editar uma view.");
+			return;
+		}
+		Conexao ws = activeWorkspace;
+		String schemaName = currentSchema.name();
+		String viewName = obj.name();
+		statusBar.setText(" Carregando definicao de \"" + viewName + "\"...");
+		new SwingWorker<String, Void>() {
+			@Override
+			protected String doInBackground() throws Exception {
+				Connection conn = ws.mgr.getConnection();
+				String sql = dialect.definitionQuery("VIEW", viewName);
+				try (Statement st = conn.createStatement(); ResultSet rs = st.executeQuery(sql)) {
+					if (rs.next()) {
+						int idx = pickDefinitionColumn(rs.getMetaData());
+						String def = rs.getString(idx);
+						return def != null ? def : "";
+					}
+					return "";
+				}
+			}
+
+			@Override
+			protected void done() {
+				try {
+					String rawDefinition = get();
+					statusBar.setText(" Pronto.");
+					ViewBuilderDialog.openEdit(MainWindow.this, dialect, viewName, rawDefinition,
+							(statements, onOk, onErr) -> runDdlStatements(ws, statements, onOk, onErr),
+							MainWindow.this::sendDdlToEditor,
+							() -> {
+								if (ws == activeWorkspace && schemaName.equals(currentSchema.name())) {
+									refreshObjectTree(false);
+								}
+							});
+				} catch (Exception ex) {
+					showError("Falha ao carregar a definicao da view", ex);
+					statusBar.setText(" Falha ao carregar a definicao da view.");
+				}
+			}
+		}.execute();
+	}
+
+	/**
+	 * Remove uma view existente ({@code DROP VIEW}), apos confirmacao —
+	 * irreversivel, mesmo criterio de outras acoes destrutivas do app (ver
+	 * confirmacao de remocao em {@code DdlAssistantDialog}).
+	 */
+	private void dropView(ObjNode obj) {
+		if (activeWorkspace == null || !activeWorkspace.mgr.isConnected() || currentSchema == null) {
+			statusBar.setText(" Abra um esquema antes de excluir uma view.");
+			return;
+		}
+		String viewName = obj.name();
+		int choice = JOptionPane.showConfirmDialog(this,
+				"Excluir a view \"" + viewName + "\" permanentemente? Esta operacao nao pode ser desfeita.",
+				"Excluir view", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+		if (choice != JOptionPane.YES_OPTION) {
+			return;
+		}
+		Conexao ws = activeWorkspace;
+		String schemaName = currentSchema.name();
+		runDdlStatements(ws, List.of(dialect.dropViewStatement(viewName)), () -> {
+			statusBar.setText(" View \"" + viewName + "\" excluida.");
+			if (ws == activeWorkspace && schemaName.equals(currentSchema.name())) {
+				refreshObjectTree(false);
+			}
+		}, ex -> {
+			statusBar.setText(" Falha ao excluir a view.");
+			showError("Falha ao excluir a view", ex);
+		});
+	}
+
+	/**
+	 * Abre o {@link TriggerBuilderDialog} no modo "criar trigger novo" —
+	 * acessivel pela raiz do schema, pelo no "Triggers" (categoria) e pelo
+	 * menu de contexto de um trigger ja existente (ver
+	 * {@link #buildObjectContextMenu}).
+	 */
+	private void createTrigger() {
+		if (activeWorkspace == null || !activeWorkspace.mgr.isConnected() || currentSchema == null) {
+			statusBar.setText(" Abra um esquema antes de criar um trigger.");
+			return;
+		}
+		List<String> tableNames = currentSchema.tables().stream().map(TableInfo::name).toList();
+		Set<String> existingNames = new HashSet<>();
+		for (String t : currentSchema.triggers()) {
+			existingNames.add(t.toLowerCase(Locale.ROOT));
+		}
+		Conexao ws = activeWorkspace;
+		String schemaName = currentSchema.name();
+		TriggerBuilderDialog.openCreate(this, dialect, tableNames,
+				name -> existingNames.contains(name.toLowerCase(Locale.ROOT)),
+				(statements, onOk, onErr) -> runDdlStatements(ws, statements, onOk, onErr),
+				this::sendDdlToEditor,
+				() -> {
+					if (ws == activeWorkspace && schemaName.equals(currentSchema.name())) {
+						refreshObjectTree(false);
+					}
+				});
+	}
+
+	/**
+	 * Abre o {@link TriggerBuilderDialog} no modo "editar trigger existente" —
+	 * carrega o {@code SHOW CREATE TRIGGER} atual ANTES de abrir o dialogo
+	 * (mesmo padrao "carrega antes de mostrar" de {@link #alterTable}/
+	 * {@link #editView}).
+	 */
+	private void editTrigger(ObjNode obj) {
+		if (activeWorkspace == null || !activeWorkspace.mgr.isConnected() || currentSchema == null) {
+			statusBar.setText(" Abra um esquema antes de editar um trigger.");
+			return;
+		}
+		Conexao ws = activeWorkspace;
+		String schemaName = currentSchema.name();
+		String triggerName = obj.name();
+		List<String> tableNames = currentSchema.tables().stream().map(TableInfo::name).toList();
+		statusBar.setText(" Carregando definicao de \"" + triggerName + "\"...");
+		new SwingWorker<String, Void>() {
+			@Override
+			protected String doInBackground() throws Exception {
+				Connection conn = ws.mgr.getConnection();
+				String sql = dialect.definitionQuery("TRIGGER", triggerName);
+				try (Statement st = conn.createStatement(); ResultSet rs = st.executeQuery(sql)) {
+					if (rs.next()) {
+						int idx = pickDefinitionColumn(rs.getMetaData());
+						String def = rs.getString(idx);
+						return def != null ? def : "";
+					}
+					return "";
+				}
+			}
+
+			@Override
+			protected void done() {
+				try {
+					String rawDefinition = get();
+					statusBar.setText(" Pronto.");
+					TriggerBuilderDialog.openEdit(MainWindow.this, dialect, tableNames, triggerName, rawDefinition,
+							(statements, onOk, onErr) -> runDdlStatements(ws, statements, onOk, onErr),
+							MainWindow.this::sendDdlToEditor,
+							() -> {
+								if (ws == activeWorkspace && schemaName.equals(currentSchema.name())) {
+									refreshObjectTree(false);
+								}
+							});
+				} catch (Exception ex) {
+					showError("Falha ao carregar a definicao do trigger", ex);
+					statusBar.setText(" Falha ao carregar a definicao do trigger.");
+				}
+			}
+		}.execute();
+	}
+
+	/**
+	 * Remove um trigger existente ({@code DROP TRIGGER}), apos confirmacao —
+	 * irreversivel, mesmo criterio de {@link #dropView}.
+	 */
+	private void dropTrigger(ObjNode obj) {
+		if (activeWorkspace == null || !activeWorkspace.mgr.isConnected() || currentSchema == null) {
+			statusBar.setText(" Abra um esquema antes de excluir um trigger.");
+			return;
+		}
+		String triggerName = obj.name();
+		int choice = JOptionPane.showConfirmDialog(this,
+				"Excluir o trigger \"" + triggerName + "\" permanentemente? Esta operacao nao pode ser desfeita.",
+				"Excluir trigger", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+		if (choice != JOptionPane.YES_OPTION) {
+			return;
+		}
+		Conexao ws = activeWorkspace;
+		String schemaName = currentSchema.name();
+		runDdlStatements(ws, List.of(dialect.dropTriggerStatement(triggerName)), () -> {
+			statusBar.setText(" Trigger \"" + triggerName + "\" excluido.");
+			if (ws == activeWorkspace && schemaName.equals(currentSchema.name())) {
+				refreshObjectTree(false);
+			}
+		}, ex -> {
+			statusBar.setText(" Falha ao excluir o trigger.");
+			showError("Falha ao excluir o trigger", ex);
+		});
+	}
+
+	/**
+	 * Abre o {@link RoutineBuilderDialog} no modo "criar" — {@code initialKind}
+	 * ("PROCEDURE"/"FUNCTION"/{@code null}) preseleciona o tipo, vindo de qual
+	 * atalho o usuario clicou (raiz do schema = sem preferencia; no "Procedures"/
+	 * "Functions" ou menu de contexto de uma rotina existente = ja acerta o
+	 * tipo certo). Nomes de procedure e function moram em namespaces
+	 * SEPARADOS no MySQL — o {@code nameTaken} verifica so a lista certa.
+	 */
+	private void createRoutine(String initialKind) {
+		if (activeWorkspace == null || !activeWorkspace.mgr.isConnected() || currentSchema == null) {
+			statusBar.setText(" Abra um esquema antes de criar uma procedure/function.");
+			return;
+		}
+		Set<String> existingProcedures = new HashSet<>();
+		for (String p : currentSchema.procedures()) {
+			existingProcedures.add(p.toLowerCase(Locale.ROOT));
+		}
+		Set<String> existingFunctions = new HashSet<>();
+		for (String f : currentSchema.functions()) {
+			existingFunctions.add(f.toLowerCase(Locale.ROOT));
+		}
+		Conexao ws = activeWorkspace;
+		String schemaName = currentSchema.name();
+		RoutineBuilderDialog.openCreate(this, dialect, initialKind,
+				(kind, name) -> ("PROCEDURE".equals(kind) ? existingProcedures : existingFunctions)
+						.contains(name.toLowerCase(Locale.ROOT)),
+				(statements, onOk, onErr) -> runDdlStatements(ws, statements, onOk, onErr),
+				this::sendDdlToEditor,
+				() -> {
+					if (ws == activeWorkspace && schemaName.equals(currentSchema.name())) {
+						refreshObjectTree(false);
+					}
+				});
+	}
+
+	/**
+	 * Remove uma procedure ou function existente (conforme {@code obj.kind()}),
+	 * apos confirmacao — irreversivel, mesmo criterio de {@link #dropView}/
+	 * {@link #dropTrigger}.
+	 */
+	private void dropRoutine(ObjNode obj) {
+		if (activeWorkspace == null || !activeWorkspace.mgr.isConnected() || currentSchema == null) {
+			statusBar.setText(" Abra um esquema antes de excluir uma procedure/function.");
+			return;
+		}
+		boolean isProcedure = "PROCEDURE".equals(obj.kind());
+		String routineName = obj.name();
+		String label = isProcedure ? "procedure" : "function";
+		int choice = JOptionPane.showConfirmDialog(this,
+				"Excluir a " + label + " \"" + routineName + "\" permanentemente? Esta operacao nao pode ser desfeita.",
+				"Excluir " + label, JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+		if (choice != JOptionPane.YES_OPTION) {
+			return;
+		}
+		Conexao ws = activeWorkspace;
+		String schemaName = currentSchema.name();
+		String dropSql = isProcedure ? dialect.dropProcedureStatement(routineName)
+				: dialect.dropFunctionStatement(routineName);
+		runDdlStatements(ws, List.of(dropSql), () -> {
+			statusBar.setText(" " + (isProcedure ? "Procedure" : "Function") + " \"" + routineName + "\" excluida.");
+			if (ws == activeWorkspace && schemaName.equals(currentSchema.name())) {
+				refreshObjectTree(false);
+			}
+		}, ex -> {
+			statusBar.setText(" Falha ao excluir a " + label + ".");
+			showError("Falha ao excluir a " + label, ex);
+		});
+	}
+
+	/**
 	 * Executa uma lista de comandos DDL (ja prontos, montados pelo
 	 * {@link DdlAssistantDialog}) em background na conexao do workspace
 	 * informado, chamando {@code onOk}/{@code onErr} de volta na EDT —
@@ -4369,6 +5237,337 @@ public class MainWindow extends JFrame {
 		}.execute();
 	}
 
+	/**
+	 * Executa uma consulta de LEITURA (SELECT/SHOW) em background na conexao
+	 * do workspace informado e devolve as linhas como {@code Object[]} (uma
+	 * entrada por coluna, na ordem do SELECT) — usado pelo
+	 * {@link UserManagementDialog} (listar usuarios, {@code SHOW GRANTS},
+	 * listar roles), que precisa ler resultado em vez de so executar
+	 * comandos (ver {@link #runDdlStatements}, que so faz
+	 * {@code executeUpdate}, sem trazer linhas de volta).
+	 */
+	private void runQuery(Conexao ws, String sql, java.util.function.Consumer<List<Object[]>> onRows,
+			java.util.function.Consumer<Exception> onErr) {
+		new SwingWorker<List<Object[]>, Void>() {
+			@Override
+			protected List<Object[]> doInBackground() throws Exception {
+				Connection conn = ws.mgr.getConnection();
+				List<Object[]> rows = new ArrayList<>();
+				try (Statement st = conn.createStatement(); ResultSet rs = st.executeQuery(sql)) {
+					ResultSetMetaData meta = rs.getMetaData();
+					int cols = meta.getColumnCount();
+					while (rs.next()) {
+						Object[] row = new Object[cols];
+						for (int i = 0; i < cols; i++) {
+							row[i] = rs.getObject(i + 1);
+						}
+						rows.add(row);
+					}
+				}
+				return rows;
+			}
+
+			@Override
+			protected void done() {
+				try {
+					onRows.accept(get());
+				} catch (java.util.concurrent.ExecutionException ex) {
+					Throwable cause = ex.getCause();
+					onErr.accept(cause instanceof Exception e2 ? e2 : ex);
+				} catch (Exception ex) {
+					onErr.accept(ex);
+				}
+			}
+		}.execute();
+	}
+
+	/**
+	 * Igual a {@link #runQuery}, so que tambem devolve os NOMES das colunas —
+	 * usado por {@link ColumnQueryRunner} (ver {@code EventsReplicationDialog}),
+	 * para consultas cujas colunas variam por versao do servidor
+	 * ({@code SHOW SLAVE STATUS}/{@code SHOW MASTER STATUS}), ao contrario das
+	 * demais (SELECT escrito por esta IDE, colunas ja conhecidas — ver
+	 * {@link #runQuery}).
+	 */
+	private void runQueryWithColumns(Conexao ws, String sql,
+			java.util.function.BiConsumer<List<String>, List<Object[]>> onResult,
+			java.util.function.Consumer<Exception> onErr) {
+		new SwingWorker<Object[], Void>() {
+			@Override
+			protected Object[] doInBackground() throws Exception {
+				Connection conn = ws.mgr.getConnection();
+				List<String> columns = new ArrayList<>();
+				List<Object[]> rows = new ArrayList<>();
+				try (Statement st = conn.createStatement(); ResultSet rs = st.executeQuery(sql)) {
+					ResultSetMetaData meta = rs.getMetaData();
+					int cols = meta.getColumnCount();
+					for (int i = 1; i <= cols; i++) {
+						columns.add(meta.getColumnLabel(i));
+					}
+					while (rs.next()) {
+						Object[] row = new Object[cols];
+						for (int i = 0; i < cols; i++) {
+							row[i] = rs.getObject(i + 1);
+						}
+						rows.add(row);
+					}
+				}
+				return new Object[] { columns, rows };
+			}
+
+			@SuppressWarnings("unchecked")
+			@Override
+			protected void done() {
+				try {
+					Object[] result = get();
+					onResult.accept((List<String>) result[0], (List<Object[]>) result[1]);
+				} catch (java.util.concurrent.ExecutionException ex) {
+					Throwable cause = ex.getCause();
+					onErr.accept(cause instanceof Exception e2 ? e2 : ex);
+				} catch (Exception ex) {
+					onErr.accept(ex);
+				}
+			}
+		}.execute();
+	}
+
+	/**
+	 * Abre o dialogo de administracao de usuarios e privilegios (ver
+	 * {@link UserManagementDialog}) — acessivel pelo menu de contexto da raiz
+	 * do esquema ({@link #buildSchemaRootContextMenu}). Carrega a lista de
+	 * usuarios do servidor ({@code mysql.user}) e a lista de schemas ANTES de
+	 * abrir o dialogo (mesmo padrao de {@link #alterTable}: consulta em
+	 * background, dialogo so aparece com os dados prontos) — se a conexao
+	 * ativa nao tiver privilegio para ler {@code mysql.user}, mostra o erro
+	 * em vez de abrir um dialogo vazio/quebrado.
+	 */
+	private void openUserManagement() {
+		if (activeWorkspace == null || !activeWorkspace.mgr.isConnected()) {
+			statusBar.setText(" Conecte-se a um servidor antes de gerenciar usuarios.");
+			return;
+		}
+		Conexao ws = activeWorkspace;
+		String schemaNameNow = currentSchema != null ? currentSchema.name() : null;
+		List<String> currentSchemaTables = currentSchema != null
+				? currentSchema.tables().stream().map(TableInfo::name).toList()
+				: List.of();
+		statusBar.setText(" Carregando usuarios do servidor...");
+		runQuery(ws, dialect.listUsersQuery(), userRows -> {
+			List<DbUserInfo> users = new ArrayList<>();
+			for (Object[] row : userRows) {
+				String user = String.valueOf(row[0]);
+				String host = String.valueOf(row[1]);
+				boolean locked = row.length > 2 && "Y".equalsIgnoreCase(String.valueOf(row[2]));
+				boolean expired = row.length > 3 && "Y".equalsIgnoreCase(String.valueOf(row[3]));
+				users.add(new DbUserInfo(user, host, locked, expired));
+			}
+			statusBar.setText(" Carregando lista de esquemas...");
+			runQuery(ws, dialect.schemasQuery(), schemaRows -> {
+				List<String> schemaNames = new ArrayList<>();
+				for (Object[] row : schemaRows) {
+					schemaNames.add(String.valueOf(row[0]));
+				}
+				statusBar.setText(" Pronto.");
+				UserManagementDialog.open(this, dialect, users, schemaNames, schemaNameNow, currentSchemaTables,
+						(statements, onOk, onErr) -> runDdlStatements(ws, statements, onOk, onErr),
+						(sql, onRows, onErr) -> runQuery(ws, sql, onRows, onErr));
+			}, ex -> {
+				statusBar.setText(" Falha ao listar esquemas.");
+				JOptionPane.showMessageDialog(this, "Falha ao listar esquemas:\n" + ex.getMessage(),
+						"Usuarios e privilegios", JOptionPane.ERROR_MESSAGE);
+			});
+		}, ex -> {
+			statusBar.setText(" Falha ao listar usuarios.");
+			JOptionPane.showMessageDialog(this,
+					"Falha ao listar usuarios do servidor (a conexao pode nao ter privilegio para ler mysql.user):\n"
+							+ ex.getMessage(),
+					"Usuarios e privilegios", JOptionPane.ERROR_MESSAGE);
+		});
+	}
+
+	/**
+	 * Abre o monitor de sessoes ativas ({@link ProcessListDialog}) — o
+	 * dialogo e NAO-MODAL e faz suas proprias consultas (inclusive
+	 * auto-refresh), entao basta abrir com a conexao ja pronta, sem
+	 * pre-carregar nada (diferente de {@link #openUserManagement()}, que
+	 * precisa da lista de usuarios ANTES de mostrar o dialogo).
+	 */
+	private void openProcessList() {
+		if (activeWorkspace == null || !activeWorkspace.mgr.isConnected()) {
+			statusBar.setText(" Conecte-se a um servidor antes de ver as sessoes ativas.");
+			return;
+		}
+		Conexao ws = activeWorkspace;
+		ProcessListDialog.open(this, dialect, (sql, onRows, onErr) -> runQuery(ws, sql, onRows, onErr),
+				(statements, onOk, onErr) -> runDdlStatements(ws, statements, onOk, onErr));
+	}
+
+	/** Abre o visor de variaveis/status do servidor ({@link ServerStatusDialog}) — mesmo motivo de nao pre-carregar nada. */
+	private void openServerStatus() {
+		if (activeWorkspace == null || !activeWorkspace.mgr.isConnected()) {
+			statusBar.setText(" Conecte-se a um servidor antes de ver variaveis/status.");
+			return;
+		}
+		Conexao ws = activeWorkspace;
+		ServerStatusDialog.open(this, dialect, (sql, onRows, onErr) -> runQuery(ws, sql, onRows, onErr));
+	}
+
+	/**
+	 * Abre o Diagrama ER ({@link ErDiagramWindow}) do esquema aberto. As
+	 * TABELAS ja estao em memoria ({@code currentSchema.tables()}, carregadas
+	 * pela arvore de objetos), mas as chaves estrangeiras/primarias do
+	 * schema INTEIRO ainda nao (ver {@link com.nureal.ide.core.metadata.MetadataService#loadSchemaForeignKeys}/
+	 * {@code loadSchemaPrimaryKeys}, novas consultas em lote) — mesmo padrao
+	 * "carrega antes de mostrar" de {@link #alterTable} e
+	 * {@link #openUserManagement()}.
+	 */
+	private void openErDiagram() {
+		if (activeWorkspace == null || !activeWorkspace.mgr.isConnected() || currentSchema == null) {
+			statusBar.setText(" Abra um esquema antes de ver o diagrama ER.");
+			return;
+		}
+		Conexao ws = activeWorkspace;
+		String schemaName = currentSchema.name();
+		List<TableInfo> tables = currentSchema.tables();
+		statusBar.setText(" Carregando relacionamentos de \"" + schemaName + "\"...");
+		new SwingWorker<Object[], Void>() {
+			@Override
+			protected Object[] doInBackground() throws Exception {
+				Connection conn = ws.mgr.getConnection();
+				List<SchemaForeignKey> fks = metadataService.loadSchemaForeignKeys(conn, schemaName);
+				Map<String, Set<String>> pks = metadataService.loadSchemaPrimaryKeys(conn, schemaName);
+				return new Object[] { fks, pks };
+			}
+
+			@SuppressWarnings("unchecked")
+			@Override
+			protected void done() {
+				try {
+					Object[] result = get();
+					statusBar.setText(" Pronto.");
+					ErDiagramWindow.open(MainWindow.this, schemaName, tables,
+							(List<SchemaForeignKey>) result[0], (Map<String, Set<String>>) result[1]);
+				} catch (Exception ex) {
+					showError("Falha ao carregar relacionamentos do esquema", ex);
+					statusBar.setText(" Falha ao carregar o diagrama ER.");
+				}
+			}
+		}.execute();
+	}
+
+	/**
+	 * Abre o visor de eventos agendados/replicacao ({@link EventsReplicationDialog})
+	 * — mesmo motivo de nao pre-carregar nada de {@link #openProcessList()}/
+	 * {@link #openServerStatus()} (o dialogo faz suas proprias consultas).
+	 */
+	private void openEventsReplication() {
+		if (activeWorkspace == null || !activeWorkspace.mgr.isConnected() || currentSchema == null) {
+			statusBar.setText(" Abra um esquema antes de ver eventos/replicacao.");
+			return;
+		}
+		Conexao ws = activeWorkspace;
+		String schemaName = currentSchema.name();
+		EventsReplicationDialog.open(this, schemaName, dialect,
+				(sql, onRows, onErr) -> runQuery(ws, sql, onRows, onErr),
+				(sql, onResult, onErr) -> runQueryWithColumns(ws, sql, onResult, onErr));
+	}
+
+	/**
+	 * Abre o Backup/Restauracao ({@link BackupRestoreDialog}) — fase 4 do
+	 * GAP_ANALYSIS_DBA_DEV.md. Monta o {@code ConnectionTarget} a partir do
+	 * {@code ConnectionProfile} do workspace ativo (host/porta/usuario/senha
+	 * ja em maos, sem consulta nenhuma) — so a lista de tabelas vem de
+	 * {@code currentSchema}, tambem ja em memoria.
+	 */
+	private void openBackupRestore() {
+		if (activeWorkspace == null || !activeWorkspace.mgr.isConnected() || currentSchema == null
+				|| activeWorkspace.profile == null) {
+			statusBar.setText(" Abra um esquema antes de fazer backup/restauracao.");
+			return;
+		}
+		String schemaName = currentSchema.name();
+		var profile = activeWorkspace.profile;
+		MySqlDumpRunner.ConnectionTarget target = new MySqlDumpRunner.ConnectionTarget(
+				profile.host(), profile.port(), profile.user(), profile.password());
+		List<String> tableNames = new ArrayList<>();
+		for (TableInfo t : currentSchema.tables()) {
+			tableNames.add(t.name());
+		}
+		BackupRestoreDialog.open(this, schemaName, target, tableNames,
+				(options, outputFile, onLogLine, onDone, onError) ->
+						runBackup(options, outputFile, onLogLine, onDone, onError),
+				(options, inputFile, onLogLine, onDone, onError) ->
+						runRestore(options, inputFile, onLogLine, onDone, onError));
+	}
+
+	/**
+	 * Roda {@code mysqldump} em segundo plano (ver {@link MySqlDumpRunner#backup}
+	 * — chamada BLOQUEANTE de proposito, por isso so dentro de
+	 * {@code doInBackground}) e repassa cada linha de log (SwingWorker
+	 * publish/process — mesmo idioma de {@link #runCsvImport}) e o resultado
+	 * final de volta na EDT.
+	 */
+	private void runBackup(MySqlDumpRunner.BackupOptions options, Path outputFile,
+			java.util.function.Consumer<String> onLogLine, java.util.function.Consumer<MySqlDumpRunner.RunResult> onDone,
+			java.util.function.Consumer<Exception> onError) {
+		new SwingWorker<MySqlDumpRunner.RunResult, String>() {
+			@Override
+			protected MySqlDumpRunner.RunResult doInBackground() throws Exception {
+				return MySqlDumpRunner.backup(options, outputFile, this::publish);
+			}
+
+			@Override
+			protected void process(List<String> chunks) {
+				for (String line : chunks) {
+					onLogLine.accept(line);
+				}
+			}
+
+			@Override
+			protected void done() {
+				try {
+					onDone.accept(get());
+				} catch (java.util.concurrent.ExecutionException ex) {
+					Throwable cause = ex.getCause();
+					onError.accept(cause instanceof Exception e2 ? e2 : ex);
+				} catch (Exception ex) {
+					onError.accept(ex);
+				}
+			}
+		}.execute();
+	}
+
+	/** Igual a {@link #runBackup}, so que para {@code mysql < arquivo.sql} (ver {@link MySqlDumpRunner#restore}). */
+	private void runRestore(MySqlDumpRunner.RestoreOptions options, Path inputFile,
+			java.util.function.Consumer<String> onLogLine, java.util.function.Consumer<MySqlDumpRunner.RunResult> onDone,
+			java.util.function.Consumer<Exception> onError) {
+		new SwingWorker<MySqlDumpRunner.RunResult, String>() {
+			@Override
+			protected MySqlDumpRunner.RunResult doInBackground() throws Exception {
+				return MySqlDumpRunner.restore(options, inputFile, this::publish);
+			}
+
+			@Override
+			protected void process(List<String> chunks) {
+				for (String line : chunks) {
+					onLogLine.accept(line);
+				}
+			}
+
+			@Override
+			protected void done() {
+				try {
+					onDone.accept(get());
+				} catch (java.util.concurrent.ExecutionException ex) {
+					Throwable cause = ex.getCause();
+					onError.accept(cause instanceof Exception e2 ? e2 : ex);
+				} catch (Exception ex) {
+					onError.accept(ex);
+				}
+			}
+		}.execute();
+	}
+
 	/** Abre uma aba de editor nova com o DDL gerado pelo assistente — botao "Enviar para o editor". */
 	private void sendDdlToEditor(String ddl) {
 		String title = "DDL";
@@ -4396,6 +5595,18 @@ public class MainWindow extends JFrame {
 		JMenuItem copyName = new JMenuItem("Copiar nome (Ctrl+C)");
 		copyName.addActionListener(a -> copySelectedObjectNames());
 		menu.add(copyName);
+		// "Gerar SELECT"/"Gerar JOIN" (pedido explicito do usuario): tabela E
+		// view podem virar um SELECT (ambas tem colunas conhecidas), mas so
+		// tabela pode virar JOIN (views nao tem FK propria no schema).
+		if (obj.type() == NodeType.TABLE || obj.type() == NodeType.VIEW) {
+			menu.addSeparator();
+			JMenuItem generateSelect = new JMenuItem("Gerar SELECT");
+			generateSelect.addActionListener(a -> generateSelect(obj));
+			menu.add(generateSelect);
+			if (obj.type() == NodeType.TABLE) {
+				menu.add(buildGenerateJoinItem(obj));
+			}
+		}
 		if (obj.type() == NodeType.TABLE) {
 			menu.addSeparator();
 			JMenuItem alterTable = new JMenuItem("Alterar tabela... (assistente de DDL)");
@@ -4404,8 +5615,455 @@ public class MainWindow extends JFrame {
 			JMenuItem createTable = new JMenuItem("Nova tabela...");
 			createTable.addActionListener(a -> createTable());
 			menu.add(createTable);
+			JMenuItem importCsvItem = new JMenuItem("Importar CSV...");
+			importCsvItem.addActionListener(a -> importCsv(obj));
+			menu.add(importCsvItem);
+			menu.addSeparator();
+			menu.add(buildTableMaintenanceMenu(obj));
+		}
+		if (obj.type() == NodeType.VIEW) {
+			menu.addSeparator();
+			JMenuItem editView = new JMenuItem("Editar view... (assistente)");
+			editView.addActionListener(a -> editView(obj));
+			menu.add(editView);
+			JMenuItem createViewItem = new JMenuItem("Nova view...");
+			createViewItem.addActionListener(a -> createView());
+			menu.add(createViewItem);
+			JMenuItem dropView = new JMenuItem("Excluir view...");
+			dropView.addActionListener(a -> dropView(obj));
+			menu.add(dropView);
+		}
+		if (obj.type() == NodeType.TRIGGER) {
+			menu.addSeparator();
+			JMenuItem editTrigger = new JMenuItem("Editar trigger... (assistente)");
+			editTrigger.addActionListener(a -> editTrigger(obj));
+			menu.add(editTrigger);
+			JMenuItem createTriggerItem = new JMenuItem("Novo trigger...");
+			createTriggerItem.addActionListener(a -> createTrigger());
+			menu.add(createTriggerItem);
+			JMenuItem dropTrigger = new JMenuItem("Excluir trigger...");
+			dropTrigger.addActionListener(a -> dropTrigger(obj));
+			menu.add(dropTrigger);
+		}
+		if (obj.type() == NodeType.ROUTINE) {
+			menu.addSeparator();
+			boolean isProcedure = "PROCEDURE".equals(obj.kind());
+			JMenuItem createRoutineItem = new JMenuItem(isProcedure ? "Nova procedure..." : "Nova function...");
+			createRoutineItem.addActionListener(a -> createRoutine(obj.kind()));
+			menu.add(createRoutineItem);
+			JMenuItem dropRoutine = new JMenuItem(isProcedure ? "Excluir procedure..." : "Excluir function...");
+			dropRoutine.addActionListener(a -> dropRoutine(obj));
+			menu.add(dropRoutine);
 		}
 		return menu;
+	}
+
+	/**
+	 * "Importar CSV..." (fase 3 do GAP_ANALYSIS_DBA_DEV.md) — le e parseia o
+	 * arquivo em background ({@link CsvUtil#parseLine}, linha a linha),
+	 * assume a PRIMEIRA linha como cabecalho (unico modo suportado hoje),
+	 * depois abre o {@link CsvImportDialog} ja com os dados prontos (mesmo
+	 * padrao "carrega antes de mostrar" de {@link #openUserManagement()}).
+	 */
+	private void importCsv(ObjNode obj) {
+		if (activeWorkspace == null || !activeWorkspace.mgr.isConnected() || currentSchema == null) {
+			statusBar.setText(" Abra um esquema antes de importar CSV.");
+			return;
+		}
+		JFileChooser fc = new JFileChooser();
+		fc.setDialogTitle("Importar CSV para \"" + obj.name() + "\"");
+		fc.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("Arquivo CSV (*.csv)", "csv"));
+		if (fc.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) {
+			return;
+		}
+		File file = fc.getSelectedFile();
+		Conexao ws = activeWorkspace;
+		String schemaName = currentSchema.name();
+		List<ColumnInfo> tableColumns = obj.table() != null ? obj.table().columns() : List.of();
+		statusBar.setText(" Lendo " + file.getName() + "...");
+		new SwingWorker<Object[], Void>() {
+			@Override
+			protected Object[] doInBackground() throws Exception {
+				List<String> headers = null;
+				List<String[]> rows = new ArrayList<>();
+				try (java.io.BufferedReader reader = java.nio.file.Files.newBufferedReader(file.toPath(),
+						java.nio.charset.StandardCharsets.UTF_8)) {
+					String line;
+					while ((line = reader.readLine()) != null) {
+						List<String> fields = CsvUtil.parseLine(line, ',');
+						if (headers == null) {
+							headers = fields;
+						} else {
+							rows.add(fields.toArray(new String[0]));
+						}
+					}
+				}
+				return new Object[] { headers == null ? List.of() : headers, rows };
+			}
+
+			@Override
+			@SuppressWarnings("unchecked")
+			protected void done() {
+				try {
+					Object[] result = get();
+					List<String> headers = (List<String>) result[0];
+					List<String[]> rows = (List<String[]>) result[1];
+					statusBar.setText(" Pronto.");
+					if (rows.isEmpty()) {
+						JOptionPane.showMessageDialog(MainWindow.this,
+								"O arquivo nao tem linhas de dados (so cabecalho, ou esta vazio).",
+								"Importar CSV", JOptionPane.WARNING_MESSAGE);
+						return;
+					}
+					CsvImportDialog.open(MainWindow.this, schemaName, obj.name(), tableColumns, headers, rows,
+							(schema, tableName, targetColumns, csvRows, onProgress, onOk, onErr) -> runCsvImport(ws,
+									schema, tableName, targetColumns, csvRows, onProgress, onOk, onErr));
+				} catch (Exception ex) {
+					statusBar.setText(" Falha ao ler o arquivo CSV.");
+					JOptionPane.showMessageDialog(MainWindow.this, "Falha ao ler o arquivo:\n" + ex.getMessage(),
+							"Importar CSV", JOptionPane.ERROR_MESSAGE);
+				}
+			}
+		}.execute();
+	}
+
+	/**
+	 * Insere as linhas em lote (PreparedStatement + executeBatch, a cada 500
+	 * linhas) numa UNICA transacao (tudo ou nada, mesmo espirito do
+	 * {@link GridEditController#apply}). Todo valor vai como STRING via
+	 * {@code setString} (celula vazia vira NULL) — o MySQL faz a conversao
+	 * implicita pro tipo real da coluna; suficiente para o caso de uso
+	 * (importar CSV de teste/planilha), sem precisar resolver o tipo exato
+	 * de cada coluna de destino aqui.
+	 */
+	private void runCsvImport(Conexao ws, String schema, String table, List<String> columns, List<String[]> rows,
+			java.util.function.IntConsumer onProgress, Runnable onSuccess,
+			java.util.function.Consumer<Exception> onErr) {
+		new SwingWorker<Void, Integer>() {
+			private static final int BATCH_SIZE = 500;
+
+			@Override
+			protected Void doInBackground() throws Exception {
+				Connection conn = ws.mgr.getConnection();
+				boolean prevAutoCommit = conn.getAutoCommit();
+				conn.setAutoCommit(false);
+				StringBuilder sql = new StringBuilder("INSERT INTO ")
+						.append(dialect.quoteIdentifier(schema)).append('.').append(dialect.quoteIdentifier(table))
+						.append(" (");
+				for (int i = 0; i < columns.size(); i++) {
+					sql.append(i > 0 ? ", " : "").append(dialect.quoteIdentifier(columns.get(i)));
+				}
+				sql.append(") VALUES (");
+				for (int i = 0; i < columns.size(); i++) {
+					sql.append(i > 0 ? ", ?" : "?");
+				}
+				sql.append(')');
+				try (PreparedStatement ps = conn.prepareStatement(sql.toString())) {
+					int inBatch = 0;
+					for (int r = 0; r < rows.size(); r++) {
+						String[] row = rows.get(r);
+						for (int c = 0; c < columns.size(); c++) {
+							String value = c < row.length ? row[c] : null;
+							if (value == null || value.isEmpty()) {
+								ps.setNull(c + 1, java.sql.Types.VARCHAR);
+							} else {
+								ps.setString(c + 1, value);
+							}
+						}
+						ps.addBatch();
+						inBatch++;
+						if (inBatch >= BATCH_SIZE) {
+							ps.executeBatch();
+							inBatch = 0;
+						}
+						publish(r + 1);
+					}
+					if (inBatch > 0) {
+						ps.executeBatch();
+					}
+					conn.commit();
+				} catch (Exception ex) {
+					conn.rollback();
+					throw ex;
+				} finally {
+					conn.setAutoCommit(prevAutoCommit);
+				}
+				return null;
+			}
+
+			@Override
+			protected void process(List<Integer> chunks) {
+				if (!chunks.isEmpty()) {
+					onProgress.accept(chunks.get(chunks.size() - 1));
+				}
+			}
+
+			@Override
+			protected void done() {
+				try {
+					get();
+					onSuccess.run();
+				} catch (java.util.concurrent.ExecutionException ex) {
+					Throwable cause = ex.getCause();
+					onErr.accept(cause instanceof Exception e2 ? e2 : ex);
+				} catch (Exception ex) {
+					onErr.accept(ex);
+				}
+			}
+		}.execute();
+	}
+
+	/**
+	 * Submenu "Manutencao" (fase 2 do GAP_ANALYSIS_DBA_DEV.md) — OPTIMIZE/
+	 * ANALYZE/CHECK TABLE com um clique, em vez de precisar digitar o SQL na
+	 * mao (o que a maioria dos DBAs vindos de phpMyAdmin/Workbench estranha
+	 * nao ter, ver o documento). As 3 instrucoes devolvem um RESULT SET (nao
+	 * so uma contagem de linhas — colunas Table/Op/Msg_type/Msg_text), entao
+	 * usam {@link #runQuery} (nao {@link #runDdlStatements}, que descarta
+	 * qualquer resultado) e mostram a mensagem do servidor.
+	 */
+	private JMenu buildTableMaintenanceMenu(ObjNode obj) {
+		JMenu menu = new JMenu("Manutencao");
+		menu.add(maintenanceItem("Otimizar (OPTIMIZE TABLE)", obj, dialect::optimizeTableStatement));
+		menu.add(maintenanceItem("Recalcular estatisticas (ANALYZE TABLE)", obj, dialect::analyzeTableStatement));
+		menu.add(maintenanceItem("Verificar integridade (CHECK TABLE)", obj, dialect::checkTableStatement));
+		return menu;
+	}
+
+	private JMenuItem maintenanceItem(String label, ObjNode obj,
+			java.util.function.BiFunction<String, String, String> statementBuilder) {
+		JMenuItem item = new JMenuItem(label);
+		item.addActionListener(a -> runTableMaintenance(obj, statementBuilder.apply(currentSchema.name(), obj.name())));
+		return item;
+	}
+
+	private void runTableMaintenance(ObjNode obj, String sql) {
+		if (activeWorkspace == null || !activeWorkspace.mgr.isConnected() || currentSchema == null) {
+			statusBar.setText(" Abra um esquema antes de rodar manutencao de tabela.");
+			return;
+		}
+		Conexao ws = activeWorkspace;
+		statusBar.setText(" Executando manutencao em \"" + obj.name() + "\"...");
+		runQuery(ws, sql, rows -> {
+			statusBar.setText(" Pronto.");
+			StringBuilder sb = new StringBuilder();
+			for (Object[] row : rows) {
+				// Table, Op, Msg_type, Msg_text (ordem padrao do MySQL para
+				// OPTIMIZE/ANALYZE/CHECK TABLE) — junta so o essencial
+				// (tipo + mensagem) numa linha por resultado.
+				String msgType = row.length > 2 ? String.valueOf(row[2]) : "";
+				String msgText = row.length > 3 ? String.valueOf(row[3]) : "";
+				sb.append(msgType).append(": ").append(msgText).append('\n');
+			}
+			JOptionPane.showMessageDialog(this,
+					sb.length() > 0 ? sb.toString() : "Concluido (sem mensagem do servidor).",
+					"Manutencao de tabela — " + obj.name(), JOptionPane.INFORMATION_MESSAGE);
+		}, ex -> {
+			statusBar.setText(" Falha na manutencao de \"" + obj.name() + "\".");
+			JOptionPane.showMessageDialog(this, "Falha ao executar manutencao:\n" + ex.getMessage(),
+					"Manutencao de tabela", JOptionPane.ERROR_MESSAGE);
+		});
+	}
+
+	/**
+	 * "Gerar SELECT" (menu de contexto da arvore de objetos): monta um SELECT
+	 * completo — uma coluna por linha, na mesma ordem do banco — e abre numa
+	 * aba de editor NOVA (mesmo padrao de {@link #sendDdlToEditor}, so que
+	 * para uma consulta em vez de um DDL). Usa as colunas que a arvore JA tem
+	 * carregadas ({@code obj.table()}, preenchidas em {@link #addTableCategory}),
+	 * sem nenhum round-trip extra ao banco — ao contrario de "Gerar JOIN"
+	 * (FKs), que precisa do {@link TableMetadataCache}.
+	 */
+	private void generateSelect(ObjNode obj) {
+		List<ColumnInfo> cols = (obj.table() != null) ? obj.table().columns() : List.of();
+		StringBuilder sql = new StringBuilder("SELECT");
+		if (cols.isEmpty()) {
+			sql.append(" *\n");
+		} else {
+			sql.append('\n');
+			for (int i = 0; i < cols.size(); i++) {
+				// SEM crase/aspas de proposito: isto vai para o editor como um
+				// SQL "escrito pelo usuario", nao uma instrucao interna — pedido
+				// explicito do usuario ("nenhuma das instrucoes geradas devem
+				// ter a crase... nao usamos a crase quando escrevemos"). Ver
+				// mesma decisao em insertJoinStatement.
+				sql.append("    ").append(cols.get(i).name());
+				sql.append(i < cols.size() - 1 ? ",\n" : "\n");
+			}
+		}
+		sql.append("FROM ").append(obj.name()).append(";\n");
+
+		String baseTitle = "SELECT " + obj.name();
+		String title = baseTitle;
+		int n = 1;
+		while (titleExists(title)) {
+			title = baseTitle + " " + (++n);
+		}
+		if (addQueryTab(title, sql.toString())) {
+			statusBar.setText(" SELECT gerado numa nova aba do editor.");
+		} else {
+			statusBar.setText(" Nao foi possivel abrir uma aba nova (limite de abas atingido).");
+		}
+	}
+
+	/**
+	 * "Gerar JOIN" (menu de contexto da arvore de objetos): um submenu por
+	 * chave estrangeira que ESTA tabela declara (colunas locais apontando
+	 * para outra tabela), e dentro dele uma opcao por TIPO de juncao (INNER/
+	 * LEFT/RIGHT — ver {@link #buildJoinTypeMenu}). Ao escolher uma, monta um
+	 * {@code SELECT ... FROM ... JOIN ... ON ...} COMPLETO e ja FUNCIONAL
+	 * (as duas tabelas com alias curto, ver {@link #deriveAlias}) e cola
+	 * numa linha NOVA no editor SQL ATIVO, sempre ABAIXO do cursor (nunca
+	 * grudado no texto ja existente — bug relatado pelo usuario: uma versao
+	 * anterior colava so a clausula JOIN direto na posicao do cursor, o que
+	 * gerou "select * from operationJOIN ..." quando o cursor estava logo
+	 * apos "operation", sem separador nenhum; ver {@link #insertOnNewLineBelowCursor}).
+	 * Gera um bloco AUTOSSUFICIENTE de proposito (nao tenta reaproveitar/
+	 * reescrever o FROM que ja estiver no editor) — assim funciona sozinho
+	 * do jeito que sai, sem depender de o usuario ja ter dado um alias
+	 * compativel a tabela que estava digitando.
+	 * <p>
+	 * So cobre o sentido "para fora" (FK desta tabela apontando para outra);
+	 * o sentido inverso (outras tabelas que referenciam esta) exigiria varrer
+	 * o schema inteiro em vez de uma unica tabela — fora do escopo desta
+	 * primeira versao.
+	 * <p>
+	 * Os metadados (FKs) vem do {@link TableMetadataCache}, carregados sob
+	 * demanda — na PRIMEIRA vez que o usuario abre este menu para uma tabela
+	 * ainda nao consultada nesta sessao, a carga e disparada em segundo
+	 * plano e o item aparece desabilitado ("carregando..."); reabrir o menu
+	 * de novo (ja deve estar rapido, quase instantaneo) mostra as opcoes de
+	 * verdade.
+	 */
+	private JMenuItem buildGenerateJoinItem(ObjNode obj) {
+		String schemaName = (currentSchema != null) ? currentSchema.name() : null;
+		TableDetails details = tableMetadataCache.get(connectionManager(), schemaName, obj.name(), () -> { });
+		if (details == null) {
+			JMenuItem loading = new JMenuItem("Gerar JOIN (carregando estrutura...)");
+			loading.setEnabled(false);
+			return loading;
+		}
+		List<ForeignKeyInfo> fks = details.foreignKeys();
+		if (fks.isEmpty()) {
+			JMenuItem none = new JMenuItem("Gerar JOIN");
+			none.setEnabled(false);
+			none.setToolTipText("Esta tabela nao tem chaves estrangeiras conhecidas.");
+			return none;
+		}
+		if (fks.size() == 1) {
+			ForeignKeyInfo fk = fks.get(0);
+			return buildJoinTypeMenu(obj.name(), fk, "Gerar JOIN (" + fk.referencedTable() + ")");
+		}
+		// Mais de uma FK (ex.: varias colunas apontando para tabelas
+		// diferentes, ou ate para a MESMA tabela mais de uma vez): submenu
+		// com uma opcao por relacionamento, identificado pela tabela
+		// referenciada + a(s) coluna(s) locais usadas nela — cada uma, por
+		// sua vez, com os 3 tipos de juncao dentro.
+		JMenu submenu = new JMenu("Gerar JOIN");
+		for (ForeignKeyInfo fk : fks) {
+			String label = fk.referencedTable() + " (" + String.join(", ", fk.columns()) + ")";
+			submenu.add(buildJoinTypeMenu(obj.name(), fk, label));
+		}
+		return submenu;
+	}
+
+	/**
+	 * Ponte entre {@link TableMetadataCache} (cache de FK/PK/indices desta
+	 * janela) e {@link SqlCompletionProvider.ForeignKeyLookup} — liga os dois
+	 * uma unica vez no construtor (ver {@code completionProvider.setForeignKeyLookup}).
+	 * {@code SqlCompletionProvider} vive em {@code core.autocomplete} (sem
+	 * dependencia de {@code ui}), entao nao pode chamar {@link TableMetadataCache}
+	 * diretamente — so por essa ponte, sem acoplar os dois pacotes. Mesma
+	 * regra de "so o sentido para fora" de {@link #buildGenerateJoinItem}:
+	 * devolve so as FKs que a PROPRIA tabela declara.
+	 */
+	private List<ForeignKeyInfo> lookupForeignKeysForCompletion(String tableName) {
+		if (currentSchema == null) {
+			return List.of();
+		}
+		TableDetails details = tableMetadataCache.get(connectionManager(), currentSchema.name(), tableName, () -> { });
+		return (details != null) ? details.foreignKeys() : List.of();
+	}
+
+	/** Submenu com os 3 tipos de juncao suportados para uma FK especifica (ver {@link #buildGenerateJoinItem}). */
+	private JMenu buildJoinTypeMenu(String tableName, ForeignKeyInfo fk, String label) {
+		JMenu menu = new JMenu(label);
+		menu.add(joinTypeItem("INNER JOIN", tableName, fk));
+		menu.add(joinTypeItem("LEFT JOIN", tableName, fk));
+		menu.add(joinTypeItem("RIGHT JOIN", tableName, fk));
+		return menu;
+	}
+
+	private JMenuItem joinTypeItem(String joinKeyword, String tableName, ForeignKeyInfo fk) {
+		JMenuItem item = new JMenuItem(joinKeyword);
+		item.addActionListener(a -> insertJoinStatement(tableName, fk, joinKeyword));
+		return item;
+	}
+
+	/**
+	 * Monta {@code SELECT * FROM <tabela> <alias> <tipo de juncao> <tabela
+	 * referenciada> <alias> ON <alias>.<col> = <alias>.<col referenciada>}
+	 * (com {@code AND} entre pares de coluna, para FK composta) — SEMPRE um
+	 * bloco completo e ja funcional, nunca so a clausula JOIN solta — e cola
+	 * no editor SQL ATIVO numa linha NOVA, sempre abaixo do cursor (ver
+	 * {@link #insertOnNewLineBelowCursor}).
+	 */
+	private void insertJoinStatement(String tableName, ForeignKeyInfo fk, String joinKeyword) {
+		SqlEditorPane editor = currentEditor();
+		if (editor == null) {
+			statusBar.setText(" Abra uma aba de editor antes de gerar o JOIN.");
+			return;
+		}
+		String refTable = fk.referencedTable();
+		String alias = TableAliasGenerator.deriveAlias(tableName);
+		String refAlias = TableAliasGenerator.deriveDistinctAlias(refTable, tableName, alias);
+		List<String> cols = fk.columns();
+		List<String> refCols = fk.referencedColumns();
+		// SEM crase/aspas de proposito (mesmo criterio de generateSelect): o
+		// resultado vai para o editor como SQL "escrito pelo usuario".
+		StringBuilder sql = new StringBuilder("SELECT * FROM ")
+				.append(tableName).append(' ').append(alias).append('\n')
+				.append(joinKeyword).append(' ').append(refTable).append(' ').append(refAlias)
+				.append(" ON ");
+		for (int i = 0; i < cols.size(); i++) {
+			if (i > 0) {
+				sql.append(" AND ");
+			}
+			sql.append(alias).append('.').append(cols.get(i))
+					.append(" = ")
+					.append(refAlias).append('.').append(refCols.get(i));
+		}
+		sql.append(';');
+		insertOnNewLineBelowCursor(editor.textArea(), sql.toString());
+		editor.textArea().requestFocusInWindow();
+	}
+
+	/**
+	 * Insere {@code text} SEMPRE numa linha NOVA, logo abaixo da linha onde o
+	 * cursor esta agora — nunca grudado no fim do texto ja digitado naquela
+	 * linha. Antes desta correcao, "Gerar JOIN" usava
+	 * {@code textArea.replaceSelection(...)} (cola exatamente na posicao do
+	 * cursor, sem nenhum separador): se o cursor estivesse logo apos
+	 * "operation" (sem espaco/quebra de linha depois), o resultado colado
+	 * virava "operationJOIN ..." — bug relatado pelo usuario com uma
+	 * captura de tela. Devolve o cursor para o fim do texto inserido.
+	 */
+	private static void insertOnNewLineBelowCursor(org.fife.ui.rsyntaxtextarea.RSyntaxTextArea textArea, String text) {
+		try {
+			int caret = textArea.getCaretPosition();
+			int line = textArea.getLineOfOffset(caret);
+			int lineEnd = textArea.getLineEndOffset(line);
+			// getLineEndOffset(line) ja inclui a quebra de linha (aponta pro
+			// INICIO da linha seguinte) para toda linha que NAO seja a
+			// ultima do documento — so a ultima (sem "\n" no fim) precisa
+			// que a gente insira essa quebra na mao antes do texto.
+			boolean lastLine = (line == textArea.getLineCount() - 1);
+			String insertText = lastLine ? ("\n" + text + "\n") : (text + "\n");
+			textArea.insert(insertText, lineEnd);
+			textArea.setCaretPosition(Math.min(lineEnd + insertText.length(), textArea.getDocument().getLength()));
+		} catch (javax.swing.text.BadLocationException ex) {
+			AppLogger.warning("Falha ao inserir SQL gerado no editor", ex);
+		}
 	}
 
 	/**
@@ -4511,14 +6169,17 @@ public class MainWindow extends JFrame {
 		// explicito do usuario ("qualquer texto aqui dentro pode ser
 		// selecionado... ate nas propriedades").
 		JComponent title = SelectableLabel.of(obj.name());
-		title.setFont(title.getFont().deriveFont(Font.BOLD, 14f));
+		title.setFont(title.getFont().deriveFont(14f));
+		// Nivel PRIMARIO (nome do objeto) — antes so definia o peso (Bold),
+		// sem cor explicita.
+		Typography.primary(title);
 		JComponent sub = SelectableLabel.of(prettyKind(obj.kind()) + "  ·  " + currentSchema.name());
 		// setForeground com um Color explicito CONGELA o valor (nao acompanha
 		// GridTheme.applyPalette num toggle de tema ao vivo, com a janela ja
 		// aberta — mesma familia de bug corrigida em FkInspectorWindow: "eu
 		// preciso fechar e abrir de novo"). O updateUI() do dialogo abaixo
 		// reaplica isto sempre que o L&F mudar, sem precisar fechar/reabrir.
-		Runnable applySubColor = () -> sub.setForeground(GridTheme.MUTED_TEXT);
+		Runnable applySubColor = () -> Typography.tertiary(sub);
 		applySubColor.run();
 
 		// JDialog nao e um JComponent (nao tem updateUI() proprio) — so o
@@ -4556,9 +6217,14 @@ public class MainWindow extends JFrame {
 		ResultTableModel idxModel = null;
 		ResultTableModel fkModel = null;
 		if (isTableLike) {
-			colModel = metadataModel("Colunas", "#", "Coluna", "Tipo", "Nulo", "Chave", "Default", "Extra",
+			// SEM coluna "#" de proposito: o ResultGrid ja tem sua propria
+			// numeracao de linha (RowNumberGutter, a coluna cinza sem
+			// cabecalho a esquerda) — repetir a posicao como coluna de DADOS
+			// (colorida em azul/numerico, ver GridTheme.COLOR_INTEGER) criava
+			// duas numeracoes lado a lado, relatado como bug pelo usuario.
+			colModel = metadataModel("Colunas", "Coluna", "Tipo", "Nulo", "Chave", "Default", "Extra",
 					"Comentario");
-			tabs.addTab("Colunas", metadataGrid("Colunas", colModel));
+			tabs.addTab("Colunas", metadataGrid("Colunas", colModel, 1));
 			// Indices e FKs sao especificos de tabelas (views nao tem).
 			if ("TABLE".equals(obj.kind())) {
 				idxModel = metadataModel("Indices", "Indice", "Unico", "Tipo", "Colunas");
@@ -4569,12 +6235,14 @@ public class MainWindow extends JFrame {
 			}
 		}
 
-		JTextArea ddlArea = new JTextArea("Carregando definicao...");
-		ddlArea.setEditable(false);
-		// Mesma fonte monoespacada do editor SQL principal — consistencia
-		// tipografica entre toda area de texto de codigo do app (ver
-		// SqlEditorPane#monospaceFont).
-		ddlArea.setFont(SqlEditorPane.monospaceFont(12));
+		// RSyntaxTextArea com o MESMO destaque de sintaxe/paleta semantica do
+		// editor de consultas (ver SqlEditorPane#styleAsReadOnlySql) — antes
+		// era um JTextArea puro, sem NENHUMA cor (pedido do "Sistema Semantico
+		// de Cores por Tipo de Dado": o DDL deve usar a mesma paleta em
+		// qualquer lugar do app onde SQL apareca).
+		org.fife.ui.rsyntaxtextarea.RSyntaxTextArea ddlArea =
+				new org.fife.ui.rsyntaxtextarea.RSyntaxTextArea("Carregando definicao...");
+		SqlEditorPane.styleAsReadOnlySql(ddlArea);
 		tabs.addTab("DDL", new JScrollPane(ddlArea));
 
 		dialog.add(head, BorderLayout.NORTH);
@@ -4605,9 +6273,7 @@ public class MainWindow extends JFrame {
 	private ResultTableModel metadataModel(String title, String... columns) {
 		Vector<String> names = new Vector<>(Arrays.asList(columns));
 		Class<?>[] types = new Class<?>[columns.length];
-		for (int i = 0; i < columns.length; i++) {
-			types[i] = "#".equals(columns[i]) ? Integer.class : String.class;
-		}
+		Arrays.fill(types, String.class);
 		String[] nulls = new String[columns.length];
 		return new ResultTableModel(names, types, nulls, nulls, nulls);
 	}
@@ -4616,10 +6282,37 @@ public class MainWindow extends JFrame {
 	private JComponent metadataGrid(String title, ResultTableModel model) {
 		String schemaName = (currentSchema != null) ? currentSchema.name() : null;
 		ResultGrid grid = new ResultGrid(model, connectionManager(), schemaName, tableMetadataCache,
-				() -> exportMetadataTable(title, model), this::scaledPx);
-		if (model.getColumnCount() > 0 && "#".equals(model.getColumnName(0))) {
-			grid.table().getColumnModel().getColumn(0).setMaxWidth(40);
-		}
+				() -> exportMetadataTable(title, model), this::scaledPx, resultRowHeightBasePx());
+		return grid;
+	}
+
+	/**
+	 * Igual a {@link #metadataGrid(String, ResultTableModel)}, mas colore o
+	 * valor de {@code typeColumnIndex} pela categoria semantica do TIPO que
+	 * ele representa (ex.: a celula com o texto "VARCHAR(255)" fica na MESMA
+	 * cor que uma coluna VARCHAR ganharia na grade de resultados — ver
+	 * {@link GridTheme#colorFor}). Usado pela aba "Colunas" do dialogo de
+	 * propriedades do objeto — pedido do "Sistema Semantico de Cores por Tipo
+	 * de Dado": um tipo de dado deve ter a MESMA cor em qualquer lugar do app
+	 * onde apareca, inclusive nesta lista de metadados (nao so na grade de
+	 * resultados).
+	 */
+	private JComponent metadataGrid(String title, ResultTableModel model, int typeColumnIndex) {
+		ResultGrid grid = (ResultGrid) metadataGrid(title, model);
+		TableColumn column = grid.table().getColumnModel().getColumn(typeColumnIndex);
+		column.setCellRenderer(new DefaultTableCellRenderer() {
+			private static final long serialVersionUID = 1L;
+
+			@Override
+			public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected,
+					boolean hasFocus, int row, int col) {
+				Component c = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, col);
+				if (!isSelected && value != null) {
+					c.setForeground(GridTheme.colorFor(SqlTypeKind.classify(value.toString())));
+				}
+				return c;
+			}
+		});
 		return grid;
 	}
 
@@ -4646,7 +6339,7 @@ public class MainWindow extends JFrame {
 				try {
 					TableDetails d = get();
 					for (ColumnDetail c : d.columns()) {
-						colModel.addRow(new Object[] { c.position(), c.name(), c.type(), c.nullable() ? "Sim" : "Nao",
+						colModel.addRow(new Object[] { c.name(), c.type(), c.nullable() ? "Sim" : "Nao",
 								prettyKey(c.key()), c.defaultValue() == null ? "" : c.defaultValue(),
 								c.extra() == null ? "" : c.extra(), c.comment() == null ? "" : c.comment() });
 					}
@@ -4745,7 +6438,15 @@ public class MainWindow extends JFrame {
 	 * classes de UI da arvore, no mesmo pacote (ver {@code ui}).
 	 */
 	enum NodeType {
-		SCHEMA, SCHEMA_PICK, CATEGORY, TABLE, VIEW, ROUTINE, TRIGGER, COLUMN
+		SCHEMA, SCHEMA_PICK, CATEGORY, TABLE, VIEW, ROUTINE, TRIGGER, COLUMN,
+		// Linha sintetica, sem acao nenhuma associada (nenhum listener de
+		// clique/menu de contexto trata este tipo — ver ObjectTreeCellRenderer
+		// e MainWindow#handleObjectTreeDoubleClick/#maybeShowObjectContextMenu,
+		// nenhum dos dois "case" bate com ela, entao um clique nao faz nada):
+		// mostrada SO quando uma busca nao encontra nenhum objeto (ver
+		// MainWindow#rebuildTree), pra nao deixar a arvore com a raiz sozinha
+		// e nenhuma pista do porque nao ha nada embaixo dela.
+		EMPTY_MESSAGE
 	}
 
 	/**

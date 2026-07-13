@@ -23,13 +23,23 @@ jobs:
           java-version: '17'
           cache: maven
 
-      - name: Compilar e gerar o fat JAR
-        run: mvn -B -DskipTests package
-
       - name: Derivar a versao a partir da tag (remove o 'v')
         id: ver
         shell: bash
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Sincronizar o pom.xml com a versao da tag
+        # Sem isto, o jar empacotado abaixo carrega a versao "solta" do
+        # pom.xml (ex.: 0.4.4-SNAPSHOT), desincronizada da tag publicada —
+        # e o sistema de atualizacao automatica (com.nureal.ide.core.update.AppVersion,
+        # que le Implementation-Version do manifesto do jar) compararia a
+        # versao ERRADA. Este passo faz a tag do Git ser a fonte unica de
+        # verdade: tag -> pom.xml -> manifesto do jar -> --app-version do
+        # jpackage, tudo com o MESMO numero.
+        run: mvn -B versions:set -DnewVersion="${{ steps.ver.outputs.version }}" -DgenerateBackupPoms=false
+
+      - name: Compilar e gerar o fat JAR
+        run: mvn -B -DskipTests package
 
       - name: Instalar o WiX Toolset (jpackage usa para gerar o .msi)
         run: choco install wixtoolset --no-progress -y

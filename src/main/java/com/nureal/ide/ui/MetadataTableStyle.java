@@ -6,6 +6,7 @@ import java.awt.Dimension;
 import javax.swing.BorderFactory;
 import javax.swing.JTable;
 import javax.swing.table.DefaultTableCellRenderer;
+import javax.swing.table.TableModel;
 
 /**
  * Mesmo visual (zebra, selecao, cabecalho) da grade de resultados
@@ -25,6 +26,30 @@ import javax.swing.table.DefaultTableCellRenderer;
 final class MetadataTableStyle {
 
     private MetadataTableStyle() {
+    }
+
+    /**
+     * Igual a {@code new JTable(model)} + {@link #apply}, so que o resultado
+     * tambem reaplica {@link #apply} sozinho a cada troca de tema —
+     * {@link #apply} setava selecao/fundo/cabecalho uma unica vez, CONGELADOS
+     * na paleta de quando a tabela foi criada (mesma familia de bug ja
+     * corrigida em {@code ResultGrid}$JTable, {@code ConnectionsPanel} etc.).
+     * Preferir este metodo a {@code new JTable(model)} + {@link #apply}
+     * separados em qualquer tabela de metadados NOVA (ver
+     * {@code DdlAssistantDialog}, unico consumidor hoje).
+     */
+    static JTable createStyledTable(TableModel model) {
+        JTable table = new JTable(model) {
+            private static final long serialVersionUID = 1L;
+
+            @Override
+            public void updateUI() {
+                super.updateUI();
+                apply(this);
+            }
+        };
+        apply(table);
+        return table;
     }
 
     static void apply(JTable table) {

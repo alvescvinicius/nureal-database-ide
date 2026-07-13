@@ -55,8 +55,13 @@ final class ColumnHeaderRenderer implements TableCellRenderer {
     private final JPanel panel = new JPanel(new BorderLayout(4, 0));
     private final JLabel nameLabel = new JLabel();
     private final JPanel sortZone = new JPanel(new GridLayout(2, 1, 0, 0));
-    private final JLabel upArrow = new JLabel("▲", SwingConstants.CENTER);   // ▲
-    private final JLabel downArrow = new JLabel("▼", SwingConstants.CENTER); // ▼
+    // Texto vazio de proposito: o glifo em si agora vem de um Icon (ver
+    // applySortIndicator), nao mais de um caractere Unicode "▲"/"▼" solto no
+    // JLabel — o TEXTO do label passa a ser usado so para o numero de
+    // prioridade da ordenacao multipla (ex.: "2"), quando houver, ao lado do
+    // icone (ver ICON_TEXT_GAP/setHorizontalTextPosition abaixo).
+    private final JLabel upArrow = new JLabel("", SwingConstants.CENTER);
+    private final JLabel downArrow = new JLabel("", SwingConstants.CENTER);
 
     private final Border normalBorder = BorderFactory.createCompoundBorder(
             BorderFactory.createMatteBorder(0, 0, 2, 1, GridTheme.HEADER_BORDER),
@@ -82,6 +87,14 @@ final class ColumnHeaderRenderer implements TableCellRenderer {
         Font arrowFont = upArrow.getFont().deriveFont(Font.BOLD, 8f);
         upArrow.setFont(arrowFont);
         downArrow.setFont(arrowFont);
+        // Numero de prioridade (multi-sort) cola por cima, a direita do
+        // icone, sem alargar a zona fixa de 18px (ver SORT_ZONE_WIDTH) —
+        // mesma leitura visual "▲2" de antes, so que agora o "▲" e um Icon
+        // vetorial e o "2" continua sendo o texto do proprio JLabel.
+        upArrow.setIconTextGap(1);
+        downArrow.setIconTextGap(1);
+        upArrow.setHorizontalTextPosition(SwingConstants.RIGHT);
+        downArrow.setHorizontalTextPosition(SwingConstants.RIGHT);
         sortZone.setOpaque(false);
         sortZone.setPreferredSize(new Dimension(SORT_ZONE_WIDTH, 1));
         sortZone.add(upArrow);
@@ -124,12 +137,21 @@ final class ColumnHeaderRenderer implements TableCellRenderer {
         this.highlightModelColumn = modelColumn;
     }
 
+    /** Tamanho do icone de seta — pequeno de proposito para caber nos ~9px de altura de cada metade da zona de ordenacao. */
+    private static final int ARROW_ICON_SIZE = 9;
+
     /**
      * Cada setinha reflete SO a sua propria direcao — nunca as duas ativas ao
      * mesmo tempo (a coluna esta ordenada ascendente OU descendente OU nem
      * uma das duas). O numero de prioridade (quando ha ordenacao multipla,
      * Ctrl+clique) aparece grudado na setinha ativa, a mesma convencao de
-     * antes (ex.: "▲2").
+     * antes (ex.: "▲2") — so que agora o "▲"/"▼" e um {@link IconType#SORT_ASCENDING}/
+     * {@link IconType#SORT_DESCENDING} de verdade (ver {@link Icons}), nao um
+     * glifo de texto Unicode direto no JLabel (unico lugar do app que ainda
+     * fazia isso). Como a cor precisa mudar dinamicamente entre ativa/inativa
+     * a cada repaint, o Icon e recriado aqui a cada chamada (nao da pra so
+     * trocar o foreground do JLabel como antes — um Icon ja nasce com a cor
+     * "assada" nele).
      */
     private void applySortIndicator(int modelColumn) {
         SortOrder order = sorter.orderOf(modelColumn);
@@ -139,10 +161,14 @@ final class ColumnHeaderRenderer implements TableCellRenderer {
         boolean ascActive = order == SortOrder.ASCENDING;
         boolean descActive = order == SortOrder.DESCENDING;
 
-        upArrow.setText(ascActive ? "▲" + suffix : "▲");
+        upArrow.setIcon(Icons.get(IconType.SORT_ASCENDING, ARROW_ICON_SIZE,
+                ascActive ? GridTheme.SORT_INDICATOR_ACTIVE : GridTheme.SORT_INDICATOR_INACTIVE));
+        upArrow.setText(ascActive ? suffix : "");
         upArrow.setForeground(ascActive ? GridTheme.SORT_INDICATOR_ACTIVE : GridTheme.SORT_INDICATOR_INACTIVE);
 
-        downArrow.setText(descActive ? "▼" + suffix : "▼");
+        downArrow.setIcon(Icons.get(IconType.SORT_DESCENDING, ARROW_ICON_SIZE,
+                descActive ? GridTheme.SORT_INDICATOR_ACTIVE : GridTheme.SORT_INDICATOR_INACTIVE));
+        downArrow.setText(descActive ? suffix : "");
         downArrow.setForeground(descActive ? GridTheme.SORT_INDICATOR_ACTIVE : GridTheme.SORT_INDICATOR_INACTIVE);
     }
 }

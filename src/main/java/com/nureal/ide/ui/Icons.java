@@ -371,6 +371,14 @@ final class Icons {
         m.put(IconType.THEME_LIGHT, (g2, s) -> circle(g2, s * 0.5, s * 0.5, s * 0.30, false));
         m.put(IconType.THEME_DARK, (g2, s) -> circle(g2, s * 0.5, s * 0.5, s * 0.30, true));
 
+        // Triangulos SOLIDOS (preenchidos), nao um "V"/chevron de contorno —
+        // mesma silhueta que os antigos glifos de texto "▲"/"▼" jah tinham,
+        // so agora um triangulo vetorial de verdade (escala com qualquer
+        // tamanho/DPI) em vez de depender da fonte do sistema ter aquele
+        // glifo Unicode especifico.
+        m.put(IconType.SORT_ASCENDING, (g2, s) -> triangle(g2, s * 0.5, s * 0.5, s * 0.9, Dir.UP, true));
+        m.put(IconType.SORT_DESCENDING, (g2, s) -> triangle(g2, s * 0.5, s * 0.5, s * 0.9, Dir.DOWN, true));
+
         return m;
     }
 

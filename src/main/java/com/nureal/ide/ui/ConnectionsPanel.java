@@ -1,10 +1,11 @@
 package com.nureal.ide.ui;
 
-import com.formdev.flatlaf.FlatClientProperties;
 import com.nureal.ide.core.connection.ConnectionProfile;
 import com.nureal.ide.core.connection.ConnectionStore;
 
 import javax.swing.BorderFactory;
+import javax.swing.BoxLayout;
+import javax.swing.Box;
 import javax.swing.DefaultListModel;
 import javax.swing.Icon;
 import javax.swing.JButton;
@@ -22,12 +23,13 @@ import javax.swing.SwingConstants;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import java.awt.BorderLayout;
+import java.awt.CardLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Font;
 import java.awt.Graphics;
-import java.awt.Insets;
 import java.awt.Graphics2D;
+import java.awt.GridBagLayout;
 import java.awt.RenderingHints;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
@@ -51,18 +53,35 @@ public class ConnectionsPanel extends JPanel {
     /**
      * Altura padrao (nao-escalada) do cartao de conexao — reduzida de 54 para
      * 34 quando o cartao passou a mostrar so o nome (ver {@link ConnectionRenderer}),
-     * sem a segunda linha "usuario@host:porta/schema". Usada por
-     * {@code MainWindow#refreshDynamicSizing}/{@code #buildLeftSide} como base
-     * do zoom, em vez de um numero magico repetido em dois lugares.
+     * de 34 para 26 (com uma unica linha de texto, 34 ficava bem mais alto que
+     * a arvore de Objetos), e agora de 26 para 24: desde que a arvore de
+     * Objetos ganhou icone de tipo em toda linha abrivel (Rodada 2, ver
+     * {@code ObjectTreeCellRenderer#typeIcon}), as duas listas passaram a
+     * carregar a MESMA composicao "icone pequeno + texto", entao nao havia
+     * mais motivo pra manter alturas diferentes so por seguranca. Este valor
+     * agora e a UNICA fonte de verdade tambem para a arvore de Objetos (ver
+     * {@code MainWindow#buildObjectBrowser}/{@code #refreshDynamicSizing}) —
+     * as duas compartilham a mesma constante em vez de dois numeros magicos
+     * proximos, mas nao identicos, em arquivos diferentes.
      */
-    static final int DEFAULT_ROW_HEIGHT = 34;
+    static final int DEFAULT_ROW_HEIGHT = 24;
 
-	private final ConnectionStore store;
+    private final ConnectionStore store;
     private final Consumer<ConnectionProfile> connectAction;
     private final Consumer<ConnectionProfile> disconnectAction;
     private final DefaultListModel<ConnectionProfile> model = new DefaultListModel<>();
     private final JList<ConnectionProfile> list = new JList<>(model);
     private final JTextField search = new JTextField();
+    /**
+     * Alterna entre a lista e o estado vazio (ver {@link #buildEmptyState()})
+     * — mesma receita (CardLayout + JLabel de icone/titulo/subtitulo) que
+     * {@code MainWindow#buildEmptyState}/{@code #resultsCards} ja usa pro
+     * painel de Resultados, pra esta lista nao ser a unica area do app sem
+     * nenhuma pista visual quando fica sem nada pra mostrar.
+     */
+    private final JPanel listCards = new JPanel(new CardLayout());
+    private JLabel emptyTitle;
+    private JLabel emptySub;
     private final Set<String> connectedNames = new HashSet<>();
     private List<ConnectionProfile> all = new ArrayList<>();
     private String connectingName;
@@ -85,28 +104,49 @@ public class ConnectionsPanel extends JPanel {
         reload();
     }
 
-    private JComponent buildHeader() {
-        JLabel title = new JLabel("CONEXOES");
-        title.putClientProperty("FlatLaf.styleClass", "small");
-        title.setFont(title.getFont().deriveFont(Font.BOLD, 11f));
-        title.setForeground(GridTheme.MUTED_TEXT);
+    /**
+     * Sem isto, a cor de SELECAO da lista ficava CONGELADA na paleta de
+     * quando o painel foi construido (chamado uma unica vez, em
+     * {@link #buildList}) — alternar claro/escuro nao reflete sozinho em
+     * {@code list.setSelectionBackground/Foreground} porque um {@code Color}
+     * java e um valor imutavel copiado na hora da chamada, nao uma
+     * referencia "viva" a {@link GridTheme}. Mesma familia de bug ja
+     * corrigida em {@code ResultGrid}/{@code SqlEditorPane}/{@code FkInspectorWindow}
+     * — faltava aqui (e em {@code HistoryPanel}/{@code SavedQueriesPanel},
+     * ver la). Guard contra {@code null}: o PRIMEIRO {@code updateUI()}
+     * deste painel e disparado pelo proprio {@code super(new BorderLayout(...))}
+     * do construtor, ANTES de {@link #list} ser de fato inicializado.
+     */
+    @Override
+    public void updateUI() {
+        super.updateUI();
+        if (list != null) {
+            list.setSelectionBackground(GridTheme.SELECTION_BACKGROUND);
+            list.setSelectionForeground(GridTheme.SELECTION_FOREGROUND);
+        }
+    }
 
-        JButton novo = new JButton("Nova");
-        // GridTheme.HEADER_FOREGROUND (nao um literal proprio): valor claro
-        // ja era EXATAMENTE 0x334155, so nunca acompanhava o tema escuro —
-        // icone "sumia" (baixo contraste) com o app no modo escuro.
-        novo.setIcon(Icons.get(IconType.NEW, 13, GridTheme.HEADER_FOREGROUND));
+    private JComponent buildHeader() {
+        // Ver Typography#sectionHeader: MESMA receita de "OBJETOS" (MainWindow),
+        // "HISTORICO" e "QUERIES SALVAS" — ponto unico, sem copia colada.
+        JLabel title = Typography.sectionHeader("CONEXOES");
+
+        // Botao SO DE ICONE (nao mais texto "Nova" com contorno) — antes este
+        // era o UNICO cabecalho de painel lateral com um idioma de botao
+        // diferente do painel de Objetos (que ja usa icones-so no cabecalho,
+        // ver MainWindow#buildObjectBrowserPanel/createSchemaButton). Spec de
+        // padronizacao visual: "todos os paineis devem possuir cabecalhos
+        // iguais" — mesmo icone (IconType.NEW), mesmo tamanho (13) e mesma
+        // cor (GridTheme.MUTED_TEXT) que o botao equivalente do painel de
+        // Objetos, mesmo estilo (Buttons#styleIconButton).
+        // Buttons.iconButton (nao mais "new JButton(Icons.get(...))" solto):
+        // o icone se refaz sozinho a cada troca de tema — antes ficava
+        // congelado na cor MUTED_TEXT do tema em que a janela abriu (mesmo
+        // bug sistemico corrigido no botao equivalente do painel de Objetos,
+        // ver javadoc de Buttons#iconButton).
+        JButton novo = Buttons.iconButton(IconType.NEW, 13, () -> GridTheme.MUTED_TEXT);
         novo.setToolTipText("Nova conexao");
         novo.addActionListener(e -> onNew());
-        novo.setIconTextGap(6);
-        novo.setMargin(new Insets(4, 10, 4, 10));
-        novo.setFont(novo.getFont().deriveFont(12f));
-        // Botao secundario com contorno (nao preenchido) — mesma linguagem de
-        // arco discreto usada na barra de ferramentas do editor (ver
-        // MainWindow#buildToolbar), so que aqui em versao "outline", ja que
-        // esta ao lado do titulo da secao, nao de uma acao primaria.
-        novo.putClientProperty("JButton.buttonType", "roundRect");
-        novo.putClientProperty(FlatClientProperties.STYLE, "arc: 8; borderWidth: 1");
 
         JPanel titleRow = new JPanel(new BorderLayout());
         titleRow.setOpaque(false);
@@ -179,7 +219,68 @@ public class ConnectionsPanel extends JPanel {
 
         JScrollPane sp = new JScrollPane(list);
         sp.setBorder(BorderFactory.createEmptyBorder());
-        return sp;
+
+        listCards.add(sp, "list");
+        listCards.add(buildEmptyState(), "empty");
+        return listCards;
+    }
+
+    /**
+     * Estado vazio da lista: nenhuma conexao cadastrada ainda, OU a busca nao
+     * encontrou nada — texto varia conforme o caso (ver {@link #updateEmptyState}).
+     * Mesma composicao (icone 40px reativo ao tema + titulo + subtitulo) que
+     * {@code MainWindow#buildEmptyState} usa pro painel de Resultados, pra
+     * manter um UNICO "idioma" de estado vazio em toda a IDE.
+     */
+    private JComponent buildEmptyState() {
+        JLabel icon = new JLabel();
+        Buttons.bindThemedIcon(icon, IconType.CONNECTION, 40, () -> GridTheme.MUTED_TEXT);
+        icon.setAlignmentX(Component.CENTER_ALIGNMENT);
+
+        emptyTitle = new JLabel();
+        emptyTitle.setFont(emptyTitle.getFont().deriveFont(13f));
+        Typography.primary(emptyTitle);
+        emptyTitle.setAlignmentX(Component.CENTER_ALIGNMENT);
+
+        emptySub = new JLabel();
+        Typography.tertiary(emptySub);
+        emptySub.setAlignmentX(Component.CENTER_ALIGNMENT);
+
+        JPanel box = new JPanel();
+        box.setOpaque(false);
+        box.setLayout(new BoxLayout(box, BoxLayout.Y_AXIS));
+        box.add(icon);
+        box.add(Box.createVerticalStrut(10));
+        box.add(emptyTitle);
+        box.add(Box.createVerticalStrut(2));
+        box.add(emptySub);
+
+        JPanel center = new JPanel(new GridBagLayout());
+        center.setOpaque(false);
+        center.add(box);
+        return center;
+    }
+
+    /**
+     * Mostra a lista ou o estado vazio (ver {@link #listCards}), com o texto
+     * certo pro caso: nenhuma conexao cadastrada (lista de {@link #all} vazia
+     * de verdade) e diferente de busca sem resultado (ha conexoes, mas
+     * nenhuma bate com {@link #search}) — cada um pede uma acao diferente do
+     * usuario (cadastrar vs. limpar o filtro).
+     */
+    private void updateEmptyState(boolean empty) {
+        ((CardLayout) listCards.getLayout()).show(listCards, empty ? "empty" : "list");
+        if (!empty || emptyTitle == null) {
+            return;
+        }
+        String query = search.getText() == null ? "" : search.getText().trim();
+        if (all.isEmpty()) {
+            emptyTitle.setText("Nenhuma conexao cadastrada");
+            emptySub.setText("Clique em + para criar a primeira");
+        } else {
+            emptyTitle.setText("Nenhuma conexao encontrada");
+            emptySub.setText(query.isEmpty() ? "Tente outro termo de busca" : "Nada bate com \"" + query + "\"");
+        }
     }
 
     private void maybeMenu(MouseEvent e) {
@@ -194,10 +295,16 @@ public class ConnectionsPanel extends JPanel {
         boolean connected = selected != null && connectedNames.contains(selected.name());
 
         JPopupMenu menu = new JPopupMenu();
+        // Os 4 itens deste menu agora seguem a MESMA receita (icone 15px,
+        // GridTheme.HEADER_FOREGROUND) — antes so "Editar.../Excluir" tinham
+        // icone, "Conectar/Desconectar" ficavam so texto no MESMO menu,
+        // inconsistencia interna (nao uma questao de outro painel).
         JMenuItem connect = new JMenuItem("Conectar");
+        connect.setIcon(Icons.get(IconType.CONNECTION, 15, GridTheme.HEADER_FOREGROUND));
         connect.setEnabled(!connected);
         connect.addActionListener(a -> connectSelected());
         JMenuItem disconnect = new JMenuItem("Desconectar");
+        disconnect.setIcon(Icons.get(IconType.DISCONNECT, 15, GridTheme.HEADER_FOREGROUND));
         disconnect.setEnabled(connected);
         disconnect.addActionListener(a -> disconnectSelected());
         JMenuItem edit = new JMenuItem("Editar...");
@@ -325,6 +432,7 @@ public class ConnectionsPanel extends JPanel {
         for (ConnectionProfile p : filtered) {
             model.addElement(p);
         }
+        updateEmptyState(filtered.isEmpty());
         if (previouslySelected != null) {
             list.setSelectedValue(previouslySelected, false);
         }
@@ -492,7 +600,7 @@ public class ConnectionsPanel extends JPanel {
     private final class ConnectionRenderer extends javax.swing.DefaultListCellRenderer {
         private static final long serialVersionUID = 1L;
 
-		@Override
+        @Override
         public Component getListCellRendererComponent(
                 JList<?> list, Object value, int index,
                 boolean isSelected, boolean cellHasFocus) {
@@ -521,9 +629,13 @@ public class ConnectionsPanel extends JPanel {
                 boolean connected = connectedNames.contains(p.name());
                 boolean active = p.name().equals(activeName);
                 if (connected) {
-                    dotColor = new Color(0x059669);
+                    // Mesmo verde de MainWindow#setConnectedState (ACCENT da
+                    // marca) — antes um literal PROPRIO (0x059669, que so por
+                    // coincidencia ja era EXATAMENTE o mesmo valor de ACCENT).
+                    dotColor = MainWindow.ACCENT;
                 } else if (p.name().equals(connectingName)) {
-                    dotColor = new Color(0xF59E0B);
+                    // Mesmo ambar de MainWindow#setConnectingState.
+                    dotColor = GridTheme.HEADER_HIGHLIGHT_BORDER;
                 } else {
                     dotColor = new Color(0xC4C9D1);
                 }

@@ -109,7 +109,16 @@ public final class CaretContextResolver {
         String clause = nearestClause(before, tokenStart);
         if (clause != null) {
             if (TABLE_CLAUSE.contains(clause)) {
-                return new CaretContext(Kind.TABLE, List.of(), List.of());
+                // 'tables' aqui = tabelas JA em uso no statement (FROM/JOIN
+                // anteriores a este ponto) — antes sempre List.of(); passa a
+                // vir preenchido pra quem resolve o contexto (SqlCompletionProvider)
+                // saber, ao sugerir a PROXIMA tabela (tipicamente apos JOIN),
+                // quais ja estao na consulta e poder relacionar por FK (ver
+                // "auxiliar de montagem de queries" — sugestao inteligente de
+                // JOIN). Pro FROM da PRIMEIRA tabela isso naturalmente vem
+                // vazio (nada foi referenciado ainda), entao nao muda nada
+                // pra esse caso.
+                return new CaretContext(Kind.TABLE, scopeTables(stmt), List.of());
             }
             if (COLUMN_CLAUSE.contains(clause)) {
                 return new CaretContext(Kind.COLUMN, scopeTables(stmt), scopeRefs(stmt));

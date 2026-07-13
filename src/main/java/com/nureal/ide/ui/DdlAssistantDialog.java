@@ -1,7 +1,6 @@
 package com.nureal.ide.ui;
 
 import java.awt.BorderLayout;
-import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dialog;
 import java.awt.Dimension;
@@ -21,8 +20,6 @@ import java.util.Set;
 import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-
-import com.formdev.flatlaf.FlatClientProperties;
 
 import javax.swing.BorderFactory;
 import javax.swing.DefaultCellEditor;
@@ -61,11 +58,17 @@ import com.nureal.ide.core.metadata.model.TableInfo;
  * pre-visualizacao do DDL final (ja formatado — ver {@link SqlFormatter})
  * antes de executar.
  * <p>
- * No modo "alterar tabela", so PERMITE ADICOES (novas colunas, FKs, indices):
- * mudar/remover algo que ja existe fica fora do escopo guiado (risco de
- * perda de dados exige revisao manual do usuario) — ver
- * {@code DatabaseDialect#alterTableAddStatements}. As colunas atuais
- * aparecem em uma grade separada, so leitura, para dar contexto.
+ * No modo "alterar tabela": colunas/FKs/indices NOVOS (ver
+ * {@code DatabaseDialect#alterTableAddStatements}) ficam nas grades de baixo
+ * de cada aba, editaveis livremente. As colunas/FKs/indices JA EXISTENTES
+ * aparecem em uma grade "atual" no topo de cada aba — colunas existentes
+ * podem ter tipo/tamanho/nulo/default/comentario editados (gera MODIFY
+ * COLUMN) e qualquer coluna/FK/indice existente pode ser marcado para
+ * remover (gera DROP COLUMN/DROP FOREIGN KEY/DROP INDEX) — ver
+ * {@code DatabaseDialect#alterTableModifyStatements}. Renomear coluna e
+ * remover a chave primaria continuam fora do escopo guiado (risco/ambiguidade
+ * altos demais para um assistente). Qualquer remocao pedida exige uma
+ * confirmacao extra antes de executar (ver {@link Session#onExecute}).
  */
 final class DdlAssistantDialog {
 
@@ -118,10 +121,13 @@ final class DdlAssistantDialog {
         private JTextField nameField;
         private JTextField commentField;
         private DefaultTableModel columnsModel;
+        private DefaultTableModel existingColumnsModel; // alter mode: editaveis (MODIFY) + "Remover" (DROP)
         private DefaultTableModel fkModel;
+        private DefaultTableModel existingFkModel; // alter mode: so "Remover" (DROP FOREIGN KEY)
         private DefaultTableModel indexModel;
+        private DefaultTableModel existingIndexModel; // alter mode: so "Remover" (DROP INDEX, exceto PRIMARY)
         private JTextArea suggestionsArea;
-        private JTextArea previewArea;
+        private org.fife.ui.rsyntaxtextarea.RSyntaxTextArea previewArea;
         private JTabbedPane tabs;
         private int suggestionsTabIndex;
         private int previewTabIndex;
@@ -189,9 +195,11 @@ final class DdlAssistantDialog {
             form.add(commentField, c);
 
             JLabel banner = new JLabel(alterMode
-                    ? "Modo ALTERAR: so adiciona colunas/chaves/indices novos (nunca modifica ou remove o que ja existe)."
+                    ? "Modo ALTERAR: adicione colunas/chaves/indices novos nas grades de baixo, ou edite/marque "
+                            + "\"Remover\" nas grades \"atuais\" no topo de cada aba (isto gera MODIFY/DROP — pede confirmacao extra)."
                     : "Modo CRIAR: monte a tabela do zero, com sugestoes de normalizacao antes de executar.");
-            banner.setForeground(GridTheme.MUTED_TEXT);
+            // Nivel TERCIARIO (texto auxiliar) — ver Typography.
+            Typography.tertiary(banner);
             banner.setBorder(BorderFactory.createEmptyBorder(0, 10, 6, 10));
 
             JPanel wrap = new JPanel(new BorderLayout());
@@ -229,25 +237,40 @@ final class DdlAssistantDialog {
             panel.setBorder(BorderFactory.createEmptyBorder(8, 10, 8, 10));
 
             if (alterMode) {
-                DefaultTableModel existingModel = new DefaultTableModel(
-                        new String[] { "Coluna", "Tipo", "Nulo", "Chave", "Default", "Extra" }, 0) {
+                // Colunas EXISTENTES: "Coluna"/"Chave"/"Extra" ficam so-leitura (nome
+                // nao muda — ver banner; chave/extra sao preservados por baixo dos
+                // panos ao montar o MODIFY COLUMN, ver collectModifiedColumns());
+                // Tipo/Tamanho/Nulo/Default/Comentario sao editaveis (viram MODIFY
+                // COLUMN se algum valor mudar); "Remover" marca DROP COLUMN.
+                String[] existingHeaders = { "Coluna", "Tipo", "Tamanho", "Nulo", "Chave", "Extra", "Default",
+                        "Comentario", "Remover" };
+                existingColumnsModel = new DefaultTableModel(existingHeaders, 0) {
                     private static final long serialVersionUID = 1L;
 
                     @Override
+                    public Class<?> getColumnClass(int columnIndex) {
+                        return (columnIndex == 3 || columnIndex == 8) ? Boolean.class : String.class;
+                    }
+
+                    @Override
                     public boolean isCellEditable(int row, int column) {
-                        return false;
+                        return column != 0 && column != 4 && column != 5;
                     }
                 };
                 for (ColumnDetail cd : existingDetails.columns()) {
-                    existingModel.addRow(new Object[] { cd.name(), cd.type(), cd.nullable() ? "sim" : "nao",
-                            cd.key(), cd.defaultValue(), cd.extra() });
+                    String[] parts = parseType(cd.type());
+                    existingColumnsModel.addRow(new Object[] { cd.name(), parts[0], parts[1], cd.nullable(),
+                            cd.key(), cd.extra(), nullToEmpty(cd.defaultValue()), nullToEmpty(cd.comment()),
+                            Boolean.FALSE });
                 }
-                JTable existingTable = new JTable(existingModel);
-                MetadataTableStyle.apply(existingTable);
+                JTable existingTable = MetadataTableStyle.createStyledTable(existingColumnsModel);
+                existingTable.getColumnModel().getColumn(1).setCellEditor(new DefaultCellEditor(new JComboBox<>(TYPES)));
+                existingTable.putClientProperty("terminateEditOnFocusLost", Boolean.TRUE);
                 JScrollPane existingScroll = new JScrollPane(existingTable);
                 existingScroll.setPreferredSize(new Dimension(880, 140));
                 JPanel existingWrap = new JPanel(new BorderLayout(0, 4));
-                existingWrap.add(new JLabel("Colunas atuais (somente leitura):"), BorderLayout.NORTH);
+                existingWrap.add(new JLabel("Colunas atuais (edite para MODIFY, marque \"Remover\" para DROP):"),
+                        BorderLayout.NORTH);
                 existingWrap.add(existingScroll, BorderLayout.CENTER);
                 panel.add(existingWrap, BorderLayout.NORTH);
             }
@@ -275,8 +298,7 @@ final class DdlAssistantDialog {
             if (!alterMode) {
                 addDefaultColumnRow(columnsModel);
             }
-            JTable table = new JTable(columnsModel);
-            MetadataTableStyle.apply(table);
+            JTable table = MetadataTableStyle.createStyledTable(columnsModel);
             table.getColumnModel().getColumn(1).setCellEditor(new DefaultCellEditor(new JComboBox<>(TYPES)));
             table.putClientProperty("terminateEditOnFocusLost", Boolean.TRUE);
 
@@ -294,8 +316,8 @@ final class DdlAssistantDialog {
                     columnsModel.removeRow(rows[i]);
                 }
             });
-            styleSecondaryButton(addRow);
-            styleSecondaryButton(removeRow);
+            Buttons.styleSecondary(addRow);
+            Buttons.styleSecondary(removeRow);
             JPanel buttons = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 4));
             buttons.add(addRow);
             buttons.add(removeRow);
@@ -322,11 +344,42 @@ final class DdlAssistantDialog {
             JPanel panel = new JPanel(new BorderLayout(0, 8));
             panel.setBorder(BorderFactory.createEmptyBorder(8, 10, 8, 10));
 
+            JComponent north = null;
+            if (alterMode) {
+                String[] existingHeaders = { "Nome (constraint)", "Coluna(s) local(is)", "Tabela referenciada",
+                        "Coluna(s) referenciada(s)", "ON UPDATE", "ON DELETE", "Remover" };
+                existingFkModel = new DefaultTableModel(existingHeaders, 0) {
+                    private static final long serialVersionUID = 1L;
+
+                    @Override
+                    public Class<?> getColumnClass(int columnIndex) {
+                        return columnIndex == 6 ? Boolean.class : String.class;
+                    }
+
+                    @Override
+                    public boolean isCellEditable(int row, int column) {
+                        return column == 6;
+                    }
+                };
+                for (ForeignKeyInfo fk : existingDetails.foreignKeys()) {
+                    existingFkModel.addRow(new Object[] { fk.name(), String.join(", ", fk.columns()),
+                            fk.referencedTable(), String.join(", ", fk.referencedColumns()),
+                            nullToEmpty(fk.onUpdate()), nullToEmpty(fk.onDelete()), Boolean.FALSE });
+                }
+                JTable existingTable = MetadataTableStyle.createStyledTable(existingFkModel);
+                JScrollPane existingScroll = new JScrollPane(existingTable);
+                existingScroll.setPreferredSize(new Dimension(880, 120));
+                JPanel existingWrap = new JPanel(new BorderLayout(0, 4));
+                existingWrap.add(new JLabel("Chaves estrangeiras atuais (marque \"Remover\" para DROP FOREIGN KEY):"),
+                        BorderLayout.NORTH);
+                existingWrap.add(existingScroll, BorderLayout.CENTER);
+                north = existingWrap;
+            }
+
             String[] headers = { "Coluna(s) local(is)", "Tabela referenciada", "Coluna(s) referenciada(s)",
                     "ON UPDATE", "ON DELETE" };
             fkModel = new DefaultTableModel(headers, 0);
-            JTable table = new JTable(fkModel);
-            MetadataTableStyle.apply(table);
+            JTable table = MetadataTableStyle.createStyledTable(fkModel);
             List<String> tableNames = new ArrayList<>();
             for (TableInfo t : schema.tables()) {
                 tableNames.add(t.name());
@@ -355,17 +408,24 @@ final class DdlAssistantDialog {
                 stopEditing(table);
                 suggestForeignKeys();
             });
-            styleSecondaryButton(addRow);
-            styleSecondaryButton(removeRow);
-            styleSecondaryButton(suggest);
+            Buttons.styleSecondary(addRow);
+            Buttons.styleSecondary(removeRow);
+            Buttons.styleSecondary(suggest);
             JPanel buttons = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 4));
             buttons.add(addRow);
             buttons.add(removeRow);
             buttons.add(suggest);
 
             JScrollPane scroll = new JScrollPane(table);
-            panel.add(scroll, BorderLayout.CENTER);
-            panel.add(buttons, BorderLayout.SOUTH);
+            JPanel newWrap = new JPanel(new BorderLayout(0, 4));
+            newWrap.add(new JLabel(alterMode ? "Chaves estrangeiras novas a adicionar:" : "Chaves estrangeiras:"),
+                    BorderLayout.NORTH);
+            newWrap.add(scroll, BorderLayout.CENTER);
+            newWrap.add(buttons, BorderLayout.SOUTH);
+            if (north != null) {
+                panel.add(north, BorderLayout.NORTH);
+            }
+            panel.add(newWrap, BorderLayout.CENTER);
             return panel;
         }
 
@@ -426,6 +486,43 @@ final class DdlAssistantDialog {
             JPanel panel = new JPanel(new BorderLayout(0, 8));
             panel.setBorder(BorderFactory.createEmptyBorder(8, 10, 8, 10));
 
+            JComponent north = null;
+            if (alterMode) {
+                // Indice "PRIMARY" (chave primaria) fica de fora desta grade de
+                // proposito: removê-lo exige DROP PRIMARY KEY (sintaxe/risco
+                // diferentes de um DROP INDEX comum) — mesmo criterio ja usado
+                // para nao oferecer PK/AI em colunas novas no modo alterar.
+                String[] existingHeaders = { "Nome", "Coluna(s)", "Unico", "Remover" };
+                existingIndexModel = new DefaultTableModel(existingHeaders, 0) {
+                    private static final long serialVersionUID = 1L;
+
+                    @Override
+                    public Class<?> getColumnClass(int columnIndex) {
+                        return columnIndex == 3 ? Boolean.class : String.class;
+                    }
+
+                    @Override
+                    public boolean isCellEditable(int row, int column) {
+                        return column == 3;
+                    }
+                };
+                for (IndexInfo idx : existingDetails.indexes()) {
+                    if ("PRIMARY".equalsIgnoreCase(idx.name())) {
+                        continue;
+                    }
+                    existingIndexModel.addRow(new Object[] { idx.name(), String.join(", ", idx.columns()),
+                            idx.unique(), Boolean.FALSE });
+                }
+                JTable existingTable = MetadataTableStyle.createStyledTable(existingIndexModel);
+                JScrollPane existingScroll = new JScrollPane(existingTable);
+                existingScroll.setPreferredSize(new Dimension(880, 120));
+                JPanel existingWrap = new JPanel(new BorderLayout(0, 4));
+                existingWrap.add(new JLabel("Indices atuais (marque \"Remover\" para DROP INDEX; chave primaria nao aparece aqui):"),
+                        BorderLayout.NORTH);
+                existingWrap.add(existingScroll, BorderLayout.CENTER);
+                north = existingWrap;
+            }
+
             String[] headers = { "Nome (opcional)", "Coluna(s)", "Unico" };
             indexModel = new DefaultTableModel(headers, 0) {
                 private static final long serialVersionUID = 1L;
@@ -435,8 +532,7 @@ final class DdlAssistantDialog {
                     return columnIndex == 2 ? Boolean.class : String.class;
                 }
             };
-            JTable table = new JTable(indexModel);
-            MetadataTableStyle.apply(table);
+            JTable table = MetadataTableStyle.createStyledTable(indexModel);
             table.putClientProperty("terminateEditOnFocusLost", Boolean.TRUE);
 
             JButton addRow = new JButton("+ Indice");
@@ -454,17 +550,23 @@ final class DdlAssistantDialog {
                 stopEditing(table);
                 suggestIndexesForForeignKeys();
             });
-            styleSecondaryButton(addRow);
-            styleSecondaryButton(removeRow);
-            styleSecondaryButton(suggest);
+            Buttons.styleSecondary(addRow);
+            Buttons.styleSecondary(removeRow);
+            Buttons.styleSecondary(suggest);
             JPanel buttons = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 4));
             buttons.add(addRow);
             buttons.add(removeRow);
             buttons.add(suggest);
 
             JScrollPane scroll = new JScrollPane(table);
-            panel.add(scroll, BorderLayout.CENTER);
-            panel.add(buttons, BorderLayout.SOUTH);
+            JPanel newWrap = new JPanel(new BorderLayout(0, 4));
+            newWrap.add(new JLabel(alterMode ? "Indices novos a adicionar:" : "Indices:"), BorderLayout.NORTH);
+            newWrap.add(scroll, BorderLayout.CENTER);
+            newWrap.add(buttons, BorderLayout.SOUTH);
+            if (north != null) {
+                panel.add(north, BorderLayout.NORTH);
+            }
+            panel.add(newWrap, BorderLayout.CENTER);
             return panel;
         }
 
@@ -502,7 +604,7 @@ final class DdlAssistantDialog {
             suggestionsArea.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
             JButton refresh = new JButton("Atualizar sugestoes");
             refresh.addActionListener(a -> refreshSuggestions());
-            styleSecondaryButton(refresh);
+            Buttons.styleSecondary(refresh);
             panel.add(new JScrollPane(suggestionsArea), BorderLayout.CENTER);
             JPanel south = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 4));
             south.add(refresh);
@@ -536,12 +638,12 @@ final class DdlAssistantDialog {
         private JComponent buildPreviewTab() {
             JPanel panel = new JPanel(new BorderLayout(0, 8));
             panel.setBorder(BorderFactory.createEmptyBorder(8, 10, 8, 10));
-            previewArea = new JTextArea();
-            previewArea.setEditable(false);
-            // Mesma fonte monoespacada do editor SQL principal (ver
-            // SqlEditorPane#monospaceFont), nao Font.MONOSPACED generico —
-            // consistencia tipografica entre toda area de texto de codigo do app.
-            previewArea.setFont(SqlEditorPane.monospaceFont(13));
+            // RSyntaxTextArea com o MESMO destaque de sintaxe/paleta semantica
+            // do editor de consultas (ver SqlEditorPane#styleAsReadOnlySql) —
+            // antes era um JTextArea puro (so a fonte monoespacada, nenhuma
+            // cor); pedido do "Sistema Semantico de Cores por Tipo de Dado".
+            previewArea = new org.fife.ui.rsyntaxtextarea.RSyntaxTextArea();
+            SqlEditorPane.styleAsReadOnlySql(previewArea);
             previewArea.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
             JButton refresh = new JButton("Atualizar pre-visualizacao");
             refresh.addActionListener(a -> refreshPreview());
@@ -556,9 +658,9 @@ final class DdlAssistantDialog {
                     sendToEditor.accept(previewArea.getText());
                 }
             });
-            styleSecondaryButton(refresh);
-            styleSecondaryButton(copy);
-            styleSecondaryButton(toEditor);
+            Buttons.styleSecondary(refresh);
+            Buttons.styleSecondary(copy);
+            Buttons.styleSecondary(toEditor);
             JPanel south = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 4));
             south.add(refresh);
             south.add(copy);
@@ -578,7 +680,9 @@ final class DdlAssistantDialog {
             try {
                 List<String> statements = buildStatements();
                 if (statements.isEmpty()) {
-                    return alterMode ? "-- Nenhuma coluna, chave estrangeira ou indice novo foi adicionado ainda."
+                    return alterMode
+                            ? "-- Nada a fazer ainda: adicione uma coluna/chave/indice novo, edite uma coluna "
+                                    + "existente ou marque \"Remover\" em alguma grade \"atual\"."
                             : "-- Adicione ao menos uma coluna na aba \"Colunas\".";
                 }
                 SqlFormatter formatter = new SqlFormatter(SqlFormatter.KeywordCase.UPPER, SqlFormatter.Style.STANDARD,
@@ -598,18 +702,16 @@ final class DdlAssistantDialog {
         private JComponent buildFooter() {
             JButton close = new JButton("Fechar");
             close.addActionListener(a -> dialog.dispose());
-            styleSecondaryButton(close);
+            Buttons.styleSecondary(close);
 
             // Acao PRIMARIA: mesmo tratamento do botao "Executar" da barra de
-            // ferramentas principal (ver MainWindow#styleRunButton) — verde da
+            // ferramentas principal (ver Buttons#stylePrimary) — verde da
             // marca, sem borda/fill extra do FlatLaf padrao, pra ficar
-            // inequivocamente a acao em destaque do dialogo.
+            // inequivocamente a acao em destaque do dialogo. Antes
+            // reimplementava o mesmo trecho na mao em vez de chamar o
+            // helper compartilhado.
             JButton execute = new JButton(alterMode ? "Executar ALTER TABLE" : "Executar CREATE TABLE");
-            execute.setBackground(MainWindow.ACCENT);
-            execute.setForeground(Color.WHITE);
-            execute.setMargin(new Insets(6, 14, 6, 14));
-            execute.putClientProperty(FlatClientProperties.STYLE,
-                    "arc: 8; focusWidth: 0; innerFocusWidth: 0; borderWidth: 0");
+            Buttons.stylePrimary(execute);
             execute.addActionListener(a -> onExecute());
 
             JPanel panel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 8));
@@ -631,10 +733,24 @@ final class DdlAssistantDialog {
             }
             if (statements.isEmpty()) {
                 JOptionPane.showMessageDialog(dialog,
-                        alterMode ? "Adicione ao menos uma coluna, chave estrangeira ou indice novo."
+                        alterMode ? "Adicione, modifique ou marque para remover ao menos uma coluna/chave/indice."
                                 : "Adicione ao menos uma coluna.",
                         "Assistente de DDL", JOptionPane.WARNING_MESSAGE);
                 return;
+            }
+            // Qualquer remocao (coluna/FK/indice) e destrutiva/irreversivel — pede
+            // confirmacao extra, separada da execucao em si (mesmo criterio ja
+            // usado em outras acoes destrutivas do app, ex.: Backup/Restore).
+            if (alterMode && hasDestructiveChanges()) {
+                int choice = JOptionPane.showConfirmDialog(dialog,
+                        "Esta alteracao vai REMOVER permanentemente coluna(s), chave(s) estrangeira(s) e/ou "
+                                + "indice(s) existentes da tabela \"" + alterTableName + "\" — dados dessas colunas "
+                                + "sao perdidos e a operacao nao pode ser desfeita.\n\nConfira a aba \"DDL "
+                                + "(pre-visualizacao)\" antes, se ainda nao conferiu. Continuar mesmo assim?",
+                        "Confirmar remocao", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+                if (choice != JOptionPane.YES_OPTION) {
+                    return;
+                }
             }
             if (runner == null) {
                 return;
@@ -667,7 +783,17 @@ final class DdlAssistantDialog {
             List<ForeignKeyInfo> fks = collectForeignKeys(false);
             List<IndexInfo> idxs = collectIndexes(false);
             if (alterMode) {
-                return dialect.alterTableAddStatements(alterTableName, newColumns, fks, idxs);
+                // Modify/drop ANTES de add: assim, remover uma FK/indice e criar
+                // outro no lugar (mesmas colunas) na mesma execucao funciona sem
+                // colisao de nome, e uma coluna marcada para remover nunca aparece
+                // por engano nas sugestoes (ver collectAllColumnsForAdvisor, que ja
+                // ignora colunas ausentes de existingDetails so por nao ser mais
+                // usada — aqui o filtro e so no proprio DDL final).
+                List<String> statements = new ArrayList<>();
+                statements.addAll(dialect.alterTableModifyStatements(alterTableName, collectModifiedColumns(),
+                        collectDroppedColumns(), collectDroppedForeignKeys(), collectDroppedIndexes()));
+                statements.addAll(dialect.alterTableAddStatements(alterTableName, newColumns, fks, idxs));
+                return statements;
             }
             String tableName = nameField.getText().trim();
             if (tableName.isEmpty()) {
@@ -753,6 +879,96 @@ final class DdlAssistantDialog {
             return all;
         }
 
+        /**
+         * Colunas EXISTENTES cujo tipo/tamanho/nulo/default/comentario mudou na
+         * grade "atual" (aba Colunas) — viram MODIFY COLUMN. Chave primaria e
+         * AUTO_INCREMENT nao sao editaveis nesta grade (ver isCellEditable de
+         * {@link #existingColumnsModel}); o AUTO_INCREMENT original e sempre
+         * preservado para nao ser derrubado sem querer ao gerar o MODIFY (o
+         * MySQL exige restatar TODO o atributo da coluna, nao so o que mudou).
+         * Colunas marcadas para remover (coluna 8, "Remover") ficam de fora —
+         * viram DROP COLUMN em {@link #collectDroppedColumns()}, nao MODIFY.
+         */
+        private List<NewColumnSpec> collectModifiedColumns() {
+            List<NewColumnSpec> mods = new ArrayList<>();
+            if (!alterMode || existingColumnsModel == null) {
+                return mods;
+            }
+            List<ColumnDetail> originals = existingDetails.columns();
+            for (int r = 0; r < existingColumnsModel.getRowCount() && r < originals.size(); r++) {
+                if (bool(existingColumnsModel.getValueAt(r, 8))) {
+                    continue; // marcada para remover — nao faz sentido tambem "modificar"
+                }
+                ColumnDetail original = originals.get(r);
+                String[] origParts = parseType(original.type());
+                String type = str(existingColumnsModel.getValueAt(r, 1)).trim();
+                String length = str(existingColumnsModel.getValueAt(r, 2)).trim();
+                boolean nullable = bool(existingColumnsModel.getValueAt(r, 3));
+                String def = str(existingColumnsModel.getValueAt(r, 6)).trim();
+                String comment = str(existingColumnsModel.getValueAt(r, 7)).trim();
+                boolean changed = !type.equalsIgnoreCase(origParts[0]) || !length.equals(origParts[1])
+                        || nullable != original.nullable() || !def.equals(nullToEmpty(original.defaultValue()))
+                        || !comment.equals(nullToEmpty(original.comment()));
+                if (!changed) {
+                    continue;
+                }
+                boolean autoIncrement = original.extra() != null
+                        && original.extra().toLowerCase(Locale.ROOT).contains("auto_increment");
+                mods.add(new NewColumnSpec(original.name(), type.isEmpty() ? origParts[0] : type, length, nullable,
+                        false, autoIncrement, def, comment));
+            }
+            return mods;
+        }
+
+        /** Nomes das colunas EXISTENTES marcadas "Remover" na aba Colunas — viram DROP COLUMN. */
+        private List<String> collectDroppedColumns() {
+            List<String> dropped = new ArrayList<>();
+            if (!alterMode || existingColumnsModel == null) {
+                return dropped;
+            }
+            List<ColumnDetail> originals = existingDetails.columns();
+            for (int r = 0; r < existingColumnsModel.getRowCount() && r < originals.size(); r++) {
+                if (bool(existingColumnsModel.getValueAt(r, 8))) {
+                    dropped.add(originals.get(r).name());
+                }
+            }
+            return dropped;
+        }
+
+        /** Nomes das constraints de FK EXISTENTES marcadas "Remover" — viram DROP FOREIGN KEY. */
+        private List<String> collectDroppedForeignKeys() {
+            List<String> dropped = new ArrayList<>();
+            if (!alterMode || existingFkModel == null) {
+                return dropped;
+            }
+            for (int r = 0; r < existingFkModel.getRowCount(); r++) {
+                if (bool(existingFkModel.getValueAt(r, 6))) {
+                    dropped.add(str(existingFkModel.getValueAt(r, 0)));
+                }
+            }
+            return dropped;
+        }
+
+        /** Nomes de indice EXISTENTES marcados "Remover" (exceto PRIMARY, ja fora da grade) — viram DROP INDEX. */
+        private List<String> collectDroppedIndexes() {
+            List<String> dropped = new ArrayList<>();
+            if (!alterMode || existingIndexModel == null) {
+                return dropped;
+            }
+            for (int r = 0; r < existingIndexModel.getRowCount(); r++) {
+                if (bool(existingIndexModel.getValueAt(r, 3))) {
+                    dropped.add(str(existingIndexModel.getValueAt(r, 0)));
+                }
+            }
+            return dropped;
+        }
+
+        /** Se ha QUALQUER modificacao ou remocao pendente (usado so para decidir se pede confirmacao extra). */
+        private boolean hasDestructiveChanges() {
+            return !collectDroppedColumns().isEmpty() || !collectDroppedForeignKeys().isEmpty()
+                    || !collectDroppedIndexes().isEmpty();
+        }
+
         /** "varchar(255)" -&gt; {"VARCHAR","255"}; "int" -&gt; {"INT",""}; "tinyint(1) unsigned" -&gt; {"TINYINT","1"}. */
         private static String[] parseType(String columnType) {
             if (columnType == null) {
@@ -819,22 +1035,6 @@ final class DdlAssistantDialog {
             return out;
         }
 
-        /**
-         * Estilo "outline" padrao dos botoes secundarios do app (mesmo visual
-         * do "Formatar" na barra de ferramentas principal — ver
-         * {@code MainWindow#buildToolbar}): contorno fino, sem preenchimento,
-         * cantos arredondados. Aplicado a todos os botoes deste assistente
-         * que nao sejam a acao PRIMARIA (Executar CREATE/ALTER TABLE, ver
-         * {@link #buildFooter}), para o dialogo parar de misturar o estilo
-         * "cru" (fill solido padrao do FlatLaf) dos botoes de tabela
-         * (+/-/Sugerir/Atualizar/Copiar/Enviar) com o estilo outline usado no
-         * resto da IDE.
-         */
-        private static void styleSecondaryButton(JButton button) {
-            button.putClientProperty("JButton.buttonType", "roundRect");
-            button.putClientProperty(FlatClientProperties.STYLE, "arc: 8; borderWidth: 1");
-            button.setMargin(new Insets(4, 10, 4, 10));
-        }
 
         private static void stopEditing(JTable table) {
             if (table.isEditing()) {
@@ -848,6 +1048,10 @@ final class DdlAssistantDialog {
 
         private static boolean bool(Object v) {
             return v instanceof Boolean b && b;
+        }
+
+        private static String nullToEmpty(String s) {
+            return s == null ? "" : s;
         }
     }
 }

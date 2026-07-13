@@ -8,15 +8,19 @@ import java.sql.SQLException;
 import javax.swing.SwingConstants;
 
 /**
- * Colunas binarias/complexas (BLOB/JSON/XML/...): rosa choque, alinhado a
- * esquerda.
+ * Colunas BINARIAS nativas (BLOB/BINARY/VARBINARY/GEOMETRY/...), alinhado a
+ * esquerda. Rodada 2 do "Sistema Semantico de Cores": binario nao tem mais
+ * cor propria na GRADE — usa {@link GridTheme#colorFor(com.nureal.ide.core.sql.SqlTypeKind)}
+ * (que devolve {@code COLOR_DEFAULT_TEXT} pra esta categoria), a MESMA fonte
+ * usada por todo o resto do sistema, em vez de ler {@code GridTheme.COLOR_BINARY}
+ * diretamente — {@code COLOR_BINARY} continua existindo so pro editor SQL.
+ * JSON e XML sao categorias PROPRIAS (ciano/turquesa, ver
+ * {@link PlainTypedCellRenderer}), nao passam mais por este renderer.
  *
  * BLOB e CLOB nao tem um {@code toString()} util (um {@code byte[]} imprime
  * algo como "[B@1a2b3c", e um driver de CLOB costuma imprimir o nome interno
  * da classe) — aqui eles ganham uma representacao legivel (tamanho em
- * bytes/KB para BLOB, previa de texto para CLOB). JSON/XML normalmente ja
- * chegam como String comum do driver, entao usam o texto direto (truncado
- * pela base, ver {@link CellText}).
+ * bytes/KB para BLOB, previa de texto para CLOB).
  */
 final class BinaryCellRenderer extends AbstractTypedCellRenderer {
 
@@ -29,7 +33,7 @@ final class BinaryCellRenderer extends AbstractTypedCellRenderer {
 
     @Override
     Color colorFor(Object value) {
-        return GridTheme.COLOR_BINARY;
+        return GridTheme.colorFor(com.nureal.ide.core.sql.SqlTypeKind.BINARY);
     }
 
     @Override

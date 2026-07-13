@@ -124,6 +124,13 @@
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                                     <manifestEntries>
                                         <Main-Class>${exec.mainClass}</Main-Class>
+                                        <!-- Implementation-Version: unica forma da app saber sua PROPRIA
+                                             versao em runtime (ver com.nureal.ide.core.update.AppVersion) —
+                                             o pom.xml so existe em tempo de build. O workflow de release
+                                             (.github/workflows/release.yml) roda "versions:set" com a
+                                             versao derivada da tag do Git ANTES de empacotar, entao esta
+                                             entrada acaba sempre igual a tag publicada. -->
+                                        <Implementation-Version>${project.version}</Implementation-Version>
                                     </manifestEntries>
                                 </transformer>
                                 <!-- preserva os META-INF/services (driver JDBC, FlatLaf, etc.) -->

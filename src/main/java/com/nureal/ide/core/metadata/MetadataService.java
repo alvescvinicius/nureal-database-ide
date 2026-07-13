@@ -5,6 +5,7 @@ import com.nureal.ide.core.metadata.model.ColumnDetail;
 import com.nureal.ide.core.metadata.model.ColumnInfo;
 import com.nureal.ide.core.metadata.model.ForeignKeyInfo;
 import com.nureal.ide.core.metadata.model.IndexInfo;
+import com.nureal.ide.core.metadata.model.SchemaForeignKey;
 import com.nureal.ide.core.metadata.model.SchemaInfo;
 import com.nureal.ide.core.metadata.model.TableDetails;
 import com.nureal.ide.core.metadata.model.TableInfo;
@@ -19,6 +20,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Le a estrutura do banco. A chave da performance: UMA consulta ao information_schema
@@ -172,6 +174,68 @@ public class MetadataService {
         cols.forEach((name, columns) -> indexes.add(
                 new IndexInfo(name, unique.get(name), type.get(name), columns)));
         return indexes;
+    }
+
+    /**
+     * Todas as chaves estrangeiras do schema INTEIRO, numa unica consulta —
+     * usada pelo Diagrama ER ({@code ErDiagramWindow}), que precisa desenhar
+     * as relacoes entre todas as tabelas de uma vez (ver
+     * {@link #loadForeignKeys}, que e por tabela e exigiria uma consulta por
+     * tabela aqui). Mesma tecnica de agrupar em memoria por CONSTRAINT_NAME
+     * usada por {@link #loadForeignKeys}, so que agora a tabela de origem
+     * tambem varia por constraint (guardada em {@code fromTable}).
+     */
+    public List<SchemaForeignKey> loadSchemaForeignKeys(Connection conn, String schema) throws SQLException {
+        Map<String, List<String>> cols = new LinkedHashMap<>();
+        Map<String, List<String>> refCols = new LinkedHashMap<>();
+        Map<String, String> fromTable = new HashMap<>();
+        Map<String, String> refTable = new HashMap<>();
+        Map<String, String> onUpdate = new HashMap<>();
+        Map<String, String> onDelete = new HashMap<>();
+        try (PreparedStatement ps = conn.prepareStatement(dialect.foreignKeysQueryForSchema())) {
+            ps.setString(1, schema);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    String name = rs.getString("CONSTRAINT_NAME");
+                    cols.computeIfAbsent(name, k -> new ArrayList<>())
+                            .add(rs.getString("COLUMN_NAME"));
+                    refCols.computeIfAbsent(name, k -> new ArrayList<>())
+                            .add(rs.getString("REFERENCED_COLUMN_NAME"));
+                    fromTable.put(name, rs.getString("TABLE_NAME"));
+                    refTable.put(name, rs.getString("REFERENCED_TABLE_NAME"));
+                    onUpdate.put(name, rs.getString("UPDATE_RULE"));
+                    onDelete.put(name, rs.getString("DELETE_RULE"));
+                }
+            }
+        }
+        List<SchemaForeignKey> fks = new ArrayList<>();
+        cols.forEach((name, columns) -> fks.add(new SchemaForeignKey(
+                name, fromTable.get(name), columns, refTable.get(name), refCols.get(name),
+                onUpdate.get(name), onDelete.get(name))));
+        return fks;
+    }
+
+    /**
+     * Colunas de chave primaria de TODO o schema, agrupadas por tabela — numa
+     * unica consulta, mesma tecnica de {@link #loadSchemaForeignKeys}. Usada
+     * pelo Diagrama ER para destacar a(s) coluna(s) PK de cada caixa (ver
+     * {@code ErDiagramCanvas}); {@link ColumnInfo} (o que {@link #loadSchema}
+     * ja carrega) nao tem esse dado — so vem via {@link #loadTableDetails},
+     * que e por tabela, caro demais pra rodar uma vez por tabela do schema so
+     * pra montar o diagrama.
+     */
+    public Map<String, Set<String>> loadSchemaPrimaryKeys(Connection conn, String schema) throws SQLException {
+        Map<String, Set<String>> byTable = new HashMap<>();
+        try (PreparedStatement ps = conn.prepareStatement(dialect.primaryKeysQueryForSchema())) {
+            ps.setString(1, schema);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    byTable.computeIfAbsent(rs.getString("TABLE_NAME"), k -> new java.util.LinkedHashSet<>())
+                            .add(rs.getString("COLUMN_NAME"));
+                }
+            }
+        }
+        return byTable;
     }
 
     private List<ForeignKeyInfo> loadForeignKeys(Connection conn, String schema, String table)

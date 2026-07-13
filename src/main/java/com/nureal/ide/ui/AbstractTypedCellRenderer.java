@@ -13,7 +13,7 @@ import javax.swing.table.DefaultTableCellRenderer;
  * Base comum dos renderers "por tipo" da grade de resultados
  * ({@link IdentifierCellRenderer}, {@link NumberCellRenderer},
  * {@link TemporalCellRenderer}, {@link BooleanCellRenderer},
- * {@link BinaryCellRenderer}, {@link TextCellRenderer}).
+ * {@link BinaryCellRenderer}, {@link PlainTypedCellRenderer}).
  *
  * Cada COLUNA recebe UMA instancia fixa do renderer do seu grupo — a
  * classificacao (ver {@link RendererFactory}) acontece uma unica vez, quando
@@ -87,9 +87,11 @@ abstract class AbstractTypedCellRenderer extends DefaultTableCellRenderer {
     }
 
     /**
-     * Cor de destaque de chave (dourado = PK, laranja = FK) para a coluna sob
-     * o cursor de pintura, ou {@code null} se a coluna nao e chave de
-     * nenhuma tabela (ou os metadados ainda nao carregaram). Consulta o
+     * Cor de destaque de chave (dourado = PK, amarelo = FK — cores distintas
+     * desde a Rodada 2 do "Sistema Semantico de Cores", pedido explicito do
+     * usuario para nao confundir as duas) para a coluna sob o cursor de
+     * pintura, ou {@code null} se a coluna nao e chave de nenhuma tabela (ou
+     * os metadados ainda nao carregaram). Consulta o
      * {@link ColumnMetadataResolver} guardado pela {@link ResultGrid} desta
      * tabela especifica (client property — ver {@link RendererFactory#KEY_METADATA_RESOLVER}),
      * o MESMO usado pelo indicador de FK do cabecalho e pelo popup de
@@ -218,14 +220,16 @@ abstract class AbstractTypedCellRenderer extends DefaultTableCellRenderer {
 
     /**
      * Gancho para subclasses limparem estado de "scratch" PROPRIO (campos de
-     * instancia usados so entre {@link #colorFor} e uma pintura customizada,
-     * ex.: {@link BadgeCellRenderer#paintComponent}) antes de CADA celula ser
-     * processada — chamado incondicionalmente aqui em cima, mesmo para
-     * valores nulos (que nunca chamam {@link #colorFor}). Sem isto, um estado
-     * setado por uma celula NAO-NULA anterior pintada por esta MESMA
-     * instancia compartilhada vazaria para a proxima celula, mesmo se ela for
-     * nula — mesma familia de bug ja vista e corrigida com COLOR_NULL (ver
-     * topo desta classe). Default: nada a limpar.
+     * instancia usados so entre {@link #colorFor} e uma pintura customizada)
+     * antes de CADA celula ser processada — chamado incondicionalmente aqui
+     * em cima, mesmo para valores nulos (que nunca chamam {@link #colorFor}).
+     * Sem isto, um estado setado por uma celula NAO-NULA anterior pintada por
+     * esta MESMA instancia compartilhada vazaria para a proxima celula, mesmo
+     * se ela for nula — mesma familia de bug ja vista e corrigida com
+     * COLOR_NULL (ver topo desta classe). Default: nada a limpar. Nenhuma
+     * subclasse atual usa este gancho (o antigo {@code BadgeCellRenderer} foi
+     * removido — ver "Sistema Semantico de Cores por Tipo de Dado" em
+     * DESIGN_SYSTEM.md); mantido como ponto de extensao.
      */
     void resetTypedState() {
     }

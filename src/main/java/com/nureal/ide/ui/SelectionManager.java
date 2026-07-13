@@ -7,6 +7,8 @@ import javax.swing.JComponent;
 import javax.swing.JTable;
 import javax.swing.KeyStroke;
 import javax.swing.ListSelectionModel;
+import javax.swing.SwingUtilities;
+import java.awt.Component;
 import java.awt.Rectangle;
 import java.awt.event.ActionEvent;
 import java.awt.event.FocusAdapter;
@@ -14,6 +16,8 @@ import java.awt.event.FocusEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.event.MouseMotionAdapter;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Toda a logica de selecao e hover da grade de resultados, estilo Excel:
@@ -94,6 +98,26 @@ final class SelectionManager {
     /** {@code true} so durante um clique simples (sem Shift/Ctrl/duplo-clique) — ver {@link #pressRow}. */
     private boolean plainPress;
 
+    /**
+     * Componentes cujo foco NAO deve limpar a selecao da tabela (ver
+     * {@link #installFocusClearing}) — tipicamente a PROPRIA barra de acoes
+     * deste resultado (botoes "Nova linha"/"Excluir linha(s)"/"Descartar"/
+     * "Salvar alteracoes"), registrada via {@link #keepSelectionOnFocusTo}.
+     * Bug relatado pelo usuario ("Excluir linha nao esta funcionando"): um
+     * clique simples selecionava a linha, mas clicar no botao "Excluir
+     * linha(s)" move o foco da JANELA para o PROPRIO botao ANTES do seu
+     * {@code actionPerformed} rodar — {@code focusLost} disparava primeiro e
+     * limpava a selecao (era exatamente essa a intencao original: "clicar em
+     * qualquer OUTRA area da aplicacao limpa a selecao"), entao quando o
+     * botao finalmente lia {@code selectedModelRows()}, a selecao ja estava
+     * vazia e nada acontecia — nenhum erro, nenhuma linha marcada. Excluir
+     * este cenario especifico (foco indo para a barra de acoes DESTA MESMA
+     * grade) resolve sem perder o comportamento original para cliques em
+     * QUALQUER outro lugar do app (outra aba, o editor SQL, o explorador de
+     * objetos etc.).
+     */
+    private final List<JComponent> exemptFromFocusClear = new ArrayList<>();
+
     private SelectionManager(JTable table) {
         this.table = table;
     }
@@ -144,7 +168,7 @@ final class SelectionManager {
                     // visualizador do menu de contexto "Ver conteudo completo"
                     // (JTextArea selecionavel + botao Copiar).
                     if (!table.isCellEditable(row, col)) {
-                        CellContentViewer.show(table, table.getColumnName(col), table.getValueAt(row, col));
+                        CellContentViewer.show(table, col, table.getValueAt(row, col));
                     }
                 } else if (e.isShiftDown()) {
                     extendRowRangeTo(row, col);
@@ -455,11 +479,32 @@ final class SelectionManager {
         table.addFocusListener(new FocusAdapter() {
             @Override
             public void focusLost(FocusEvent e) {
-                if (!e.isTemporary()) {
-                    table.clearSelection();
+                if (e.isTemporary()) {
+                    return;
                 }
+                Component opposite = e.getOppositeComponent();
+                if (opposite != null) {
+                    for (JComponent exempt : exemptFromFocusClear) {
+                        if (opposite == exempt || SwingUtilities.isDescendingFrom(opposite, exempt)) {
+                            return; // foco foi para a barra de acoes desta mesma grade — ver javadoc de exemptFromFocusClear
+                        }
+                    }
+                }
+                table.clearSelection();
             }
         });
+    }
+
+    /**
+     * Registra {@code other} (e todos os seus descendentes) como um destino
+     * de foco que NAO deve limpar a selecao da tabela — ver
+     * {@link #exemptFromFocusClear}. Chamado uma vez por {@link ResultGrid}
+     * com a barra de acoes ({@link ResultStatusBar#asComponent()}) assim que
+     * as duas existem (a barra e construida DEPOIS da grade, ver
+     * {@code MainWindow#buildGridPanel}).
+     */
+    void keepSelectionOnFocusTo(JComponent other) {
+        exemptFromFocusClear.add(other);
     }
 
     // ---------- Hover (nao altera selecao) ----------

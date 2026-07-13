@@ -142,12 +142,12 @@ final class FkInspectorWindow {
             // SqlEditorPane#buildBreadcrumbBar).
             filterBar.setBackground(FlatLaf.isLafDark() ? new Color(0x1A, 0x1B, 0x1E) : new Color(0xEC, 0xEE, 0xF1));
             filterBar.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, GridTheme.HEADER_BORDER));
-            filterLabel.setForeground(GridTheme.MUTED_TEXT);
+            Typography.tertiary(filterLabel);
             south.setBackground(GridTheme.HEADER_BACKGROUND);
             south.setBorder(BorderFactory.createCompoundBorder(
                     BorderFactory.createMatteBorder(1, 0, 0, 0, GridTheme.HEADER_BORDER),
                     BorderFactory.createEmptyBorder(0, 4, 0, 4)));
-            status.setForeground(GridTheme.MUTED_TEXT);
+            Typography.tertiary(status);
         };
         applyChrome.run();
 

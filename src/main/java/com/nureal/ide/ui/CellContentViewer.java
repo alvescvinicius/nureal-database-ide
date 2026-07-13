@@ -10,18 +10,18 @@ import java.sql.Blob;
 import java.sql.Clob;
 
 import com.nureal.ide.core.log.AppLogger;
+import com.nureal.ide.core.sql.SqlTypeKind;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JDialog;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
+import javax.swing.JTable;
 import javax.swing.JTextArea;
 import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 import javax.swing.WindowConstants;
-
-import com.formdev.flatlaf.FlatClientProperties;
 
 /**
  * Visualizador de conteudo completo de uma celula — item "Ver conteudo
@@ -42,7 +42,29 @@ final class CellContentViewer {
     private CellContentViewer() {
     }
 
+    /**
+     * Atalho para abrir a partir de uma celula da grade (ver
+     * {@code SelectionManager}/{@code ResultContextMenu}): resolve o tipo SQL
+     * real da coluna (para colorir o valor com a MESMA cor semantica da
+     * grade, ver {@link GridTheme#colorFor}) a partir do {@link ResultTableModel}
+     * da propria tabela, quando disponivel.
+     */
+    static void show(JTable table, int viewColumn, Object rawValue) {
+        String columnName = (viewColumn >= 0) ? table.getColumnName(viewColumn) : "";
+        String sqlType = null;
+        if (viewColumn >= 0 && table.getModel() instanceof ResultTableModel model) {
+            sqlType = model.sqlType(table.convertColumnIndexToModel(viewColumn));
+        }
+        show(table, columnName, sqlType, rawValue);
+    }
+
+    /** @deprecated use {@link #show(JTable, int, Object)} quando houver uma grade — assim o valor ganha a cor do tipo real. */
+    @Deprecated
     static void show(Component parent, String columnName, Object rawValue) {
+        show(parent, columnName, null, rawValue);
+    }
+
+    static void show(Component parent, String columnName, String sqlType, Object rawValue) {
         java.awt.Window owner = SwingUtilities.getWindowAncestor(parent);
         JDialog dialog = new JDialog(owner, "Conteudo completo: " + columnName, JDialog.ModalityType.MODELESS);
         dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
@@ -57,16 +79,28 @@ final class CellContentViewer {
         // largura fixa (inconsistencia de tipografia).
         area.setFont(SqlEditorPane.monospaceFont(12));
         area.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+        // Cor do texto = cor semantica do TIPO real da coluna (ver
+        // GridTheme#colorFor) — mesma identidade visual da grade, pedido do
+        // "Sistema Semantico de Cores por Tipo de Dado". Sem tipo conhecido
+        // (chamador antigo, ou coluna computada sem metadado), fica no
+        // foreground padrao do tema em vez de adivinhar.
+        if (sqlType != null) {
+            area.setForeground(GridTheme.colorFor(SqlTypeKind.classify(sqlType)));
+        }
 
-        JButton copy = new JButton("Copiar", Icons.get(IconType.COPY, 13, GridTheme.MUTED_TEXT));
+        // Dialogo MODELESS (fica aberto enquanto o usuario mexe no resto do
+        // app) — Buttons.bindThemedIcon evita que o icone fique congelado se
+        // o tema for alternado com este dialogo ainda aberto (mesmo bug
+        // sistemico corrigido no resto do app, ver Buttons#bindThemedIcon).
+        JButton copy = new JButton("Copiar");
+        Buttons.bindThemedIcon(copy, IconType.COPY, 13, () -> GridTheme.MUTED_TEXT);
         copy.addActionListener(e -> copyToClipboard(area.getText()));
         copy.setIconTextGap(6);
         // Mesmo estilo "outline" dos botoes secundarios do resto do app (ver
-        // MainWindow#buildToolbar, botao "Formatar") — antes era um JButton
-        // cru, unico dialogo com esse visual "fora do padrao".
-        copy.putClientProperty("JButton.buttonType", "roundRect");
-        copy.putClientProperty(FlatClientProperties.STYLE, "arc: 8; borderWidth: 1");
-        copy.setMargin(new java.awt.Insets(4, 12, 4, 12));
+        // Buttons#styleSecondary) — antes reimplementava o mesmo trecho na
+        // mao, com uma margem (4,12,4,12) que ja tinha divergido da margem
+        // canonica (4,10,4,10) usada em todo outro botao secundario do app.
+        Buttons.styleSecondary(copy);
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 8));
         buttons.add(copy);
 

@@ -25,6 +25,14 @@ public class UiPreferences {
     /** Indice padrao em {@code MainWindow.ZOOM_LEVELS} (100%). */
     public static final int DEFAULT_ZOOM_INDEX = 2;
 
+    /**
+     * Indice padrao em {@code MainWindow.ROW_SPACING_LEVELS} ("Padrao", 22px
+     * de altura de linha) — o MESMO valor que a grade de resultados sempre
+     * usou antes deste controle existir, para quem atualiza a IDE nao ver
+     * nenhuma mudanca visual ate escolher um espacamento diferente.
+     */
+    public static final int DEFAULT_ROW_SPACING_INDEX = 1;
+
     private final Path file;
 
     public UiPreferences() {
@@ -45,10 +53,11 @@ public class UiPreferences {
     /** Estado imutavel das preferencias de UI. */
     public record State(boolean sidebarOnRight, boolean resultsVertical,
                          int zoomIndex, boolean compactMode, boolean keepAliveEnabled,
-                         int keepAliveIntervalSeconds) {
+                         int keepAliveIntervalSeconds, int rowSpacingIndex) {
 
         public static State defaults() {
-            return new State(false, false, DEFAULT_ZOOM_INDEX, false, false, DEFAULT_KEEP_ALIVE_SECONDS);
+            return new State(false, false, DEFAULT_ZOOM_INDEX, false, false, DEFAULT_KEEP_ALIVE_SECONDS,
+                    DEFAULT_ROW_SPACING_INDEX);
         }
     }
 
@@ -63,6 +72,7 @@ public class UiPreferences {
         boolean compactMode = false;
         boolean keepAliveEnabled = false;
         int keepAliveIntervalSeconds = DEFAULT_KEEP_ALIVE_SECONDS;
+        int rowSpacingIndex = DEFAULT_ROW_SPACING_INDEX;
 
         List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);
         for (String raw : lines) {
@@ -83,13 +93,14 @@ public class UiPreferences {
                 case "compactMode" -> compactMode = Boolean.parseBoolean(value);
                 case "keepAliveEnabled" -> keepAliveEnabled = Boolean.parseBoolean(value);
                 case "keepAliveIntervalSeconds" -> keepAliveIntervalSeconds = parseSeconds(value);
+                case "rowSpacingIndex" -> rowSpacingIndex = parseRowSpacingIndex(value);
                 default -> {
                     // ignora chaves desconhecidas (versoes futuras)
                 }
             }
         }
         return new State(sidebarOnRight, resultsVertical, zoomIndex, compactMode, keepAliveEnabled,
-                keepAliveIntervalSeconds);
+                keepAliveIntervalSeconds, rowSpacingIndex);
     }
 
     /** Grava as preferencias, criando a pasta se necessario. */
@@ -106,6 +117,7 @@ public class UiPreferences {
         sb.append("compactMode=").append(state.compactMode()).append('\n');
         sb.append("keepAliveEnabled=").append(state.keepAliveEnabled()).append('\n');
         sb.append("keepAliveIntervalSeconds=").append(state.keepAliveIntervalSeconds()).append('\n');
+        sb.append("rowSpacingIndex=").append(state.rowSpacingIndex()).append('\n');
         Files.write(file, sb.toString().getBytes(StandardCharsets.UTF_8));
     }
 
@@ -114,6 +126,22 @@ public class UiPreferences {
             return Integer.parseInt(s);
         } catch (NumberFormatException e) {
             return DEFAULT_ZOOM_INDEX;
+        }
+    }
+
+    /**
+     * Assim como {@link #parseIndex}, nao valida contra o tamanho real de
+     * {@code MainWindow.ROW_SPACING_LEVELS} — este pacote ({@code core}) nao
+     * conhece a UI de proposito (mesma razao documentada em
+     * {@code SqlCompletionProvider}). {@code MainWindow} e quem faz o
+     * "clamp" final contra o array de verdade, do mesmo jeito que ja faz
+     * hoje para {@code zoomIndex} (ver {@code clampZoomIndex}).
+     */
+    private static int parseRowSpacingIndex(String s) {
+        try {
+            return Integer.parseInt(s);
+        } catch (NumberFormatException e) {
+            return DEFAULT_ROW_SPACING_INDEX;
         }
     }
 

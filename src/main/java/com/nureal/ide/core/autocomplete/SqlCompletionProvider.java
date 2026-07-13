@@ -3,19 +3,25 @@ package com.nureal.ide.core.autocomplete;
 import com.nureal.ide.core.autocomplete.CaretContextResolver.CaretContext;
 import com.nureal.ide.core.autocomplete.CaretContextResolver.TableRef;
 import com.nureal.ide.core.metadata.model.ColumnInfo;
+import com.nureal.ide.core.metadata.model.ForeignKeyInfo;
 import com.nureal.ide.core.metadata.model.SchemaInfo;
 import com.nureal.ide.core.metadata.model.TableInfo;
+import com.nureal.ide.core.sql.TableAliasGenerator;
+import org.fife.ui.autocomplete.AbstractCompletion;
 import org.fife.ui.autocomplete.BasicCompletion;
 import org.fife.ui.autocomplete.Completion;
 import org.fife.ui.autocomplete.DefaultCompletionProvider;
+import org.fife.ui.autocomplete.ShorthandCompletion;
 
 import javax.swing.text.JTextComponent;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Gera as sugestoes a partir do cache de metadados, sensiveis ao contexto do cursor.
@@ -45,6 +51,35 @@ public class SqlCompletionProvider extends DefaultCompletionProvider {
     /** Indice tabela(lowercase) -> TableInfo, para resolver "alias." rapido. */
     private volatile Map<String, TableInfo> tablesByName = new LinkedHashMap<>();
 
+    /**
+     * Fonte das chaves estrangeiras JA CONHECIDAS de uma tabela — usada pelo
+     * "auxiliar de montagem de queries" (ver {@link #addTablesForJoinContext})
+     * pra sugerir, ao completar o nome da tabela logo apos um JOIN, primeiro
+     * as tabelas relacionadas por FK as que ja estao no FROM/JOIN da consulta
+     * (ver {@link CaretContextResolver}). Deliberadamente um {@code interface}
+     * funcional simples (nao a classe de cache de verdade, {@code
+     * com.nureal.ide.ui.TableMetadataCache}): este pacote e {@code core}, sem
+     * dependencia de {@code ui}/Swing — quem monta o editor (MainWindow) que
+     * liga esta ponte via {@link #setForeignKeyLookup}. Pode devolver lista
+     * vazia se a tabela ainda nao foi consultada (a implementacao tipica
+     * dispara a carga em segundo plano e devolve vazio POR ENQUANTO — a
+     * proxima tecla digitada tenta de novo, ja com o cache quente).
+     */
+    @FunctionalInterface
+    public interface ForeignKeyLookup {
+        List<ForeignKeyInfo> foreignKeysOf(String tableName);
+    }
+
+    private volatile ForeignKeyLookup fkLookup = tableName -> List.of();
+
+    /**
+     * Tabela(nome original, PRESERVANDO caixa) -> snippet completo pronto pra
+     * inserir no lugar do nome (ver {@link #addTablesForJoinContext}) —
+     * recalculado do zero a cada chamada de {@link #getCompletionsImpl},
+     * nunca acumula entre chamadas diferentes.
+     */
+    private final Map<String, String> fkSnippets = new LinkedHashMap<>();
+
     public SqlCompletionProvider(List<String> keywords) {
         this.keywords = keywords;
         // Auto-ativa o popup ao digitar letras E logo apos um ponto.
@@ -61,6 +96,11 @@ public class SqlCompletionProvider extends DefaultCompletionProvider {
             }
         }
         this.tablesByName = index;
+    }
+
+    /** Liga a fonte de FKs (ver {@link ForeignKeyLookup}) — chamado uma vez por MainWindow ao construir o provider. */
+    public void setForeignKeyLookup(ForeignKeyLookup lookup) {
+        this.fkLookup = (lookup != null) ? lookup : (tableName -> List.of());
     }
 
     @Override
@@ -81,7 +121,7 @@ public class SqlCompletionProvider extends DefaultCompletionProvider {
                 addQualifiedColumns(candidates, ctx.refs());
                 addScopedColumns(candidates, ctx.tables());
             }
-            case TABLE -> addTables(candidates);
+            case TABLE -> addTablesForJoinContext(candidates, ctx.tables());
             case GENERAL -> {
                 addKeywords(candidates);
                 addTables(candidates);
@@ -118,7 +158,19 @@ public class SqlCompletionProvider extends DefaultCompletionProvider {
             if (result.size() >= MAX_RESULTS) {
                 break;
             }
-            BasicCompletion completion = new BasicCompletion(this, e.getKey(), e.getValue());
+            // Tabela relacionada por FK (ver addTablesForJoinContext): o
+            // ROTULO exibido no popup continua so o nome da tabela (chave do
+            // mapa), mas o texto REALMENTE inserido ao escolher e o snippet
+            // inteiro "tabela alias ON ..." — ShorthandCompletion e feito
+            // exatamente pra isso (rotulo curto, insercao mais longa).
+            // Tipo declarado como AbstractCompletion (nao a interface
+            // Completion): setRelevance(int) e um metodo de AbstractCompletion,
+            // nao da interface — BasicCompletion e ShorthandCompletion
+            // (via BasicCompletion) sempre estendem AbstractCompletion.
+            String snippet = fkSnippets.get(e.getKey());
+            AbstractCompletion completion = (snippet != null)
+                    ? new ShorthandCompletion(this, e.getKey(), snippet, e.getValue())
+                    : new BasicCompletion(this, e.getKey(), e.getValue());
             completion.setRelevance(relevance--);
             result.add(completion);
         }
@@ -139,6 +191,73 @@ public class SqlCompletionProvider extends DefaultCompletionProvider {
         for (TableInfo t : s.tables()) {
             out.putIfAbsent(t.name(), "tabela");
         }
+    }
+
+    /**
+     * Igual a {@link #addTables}, so que para o contexto TABLE de verdade
+     * (FROM/JOIN/UPDATE/INTO — ver {@link CaretContextResolver}): quando
+     * {@code tablesInScope} ja tem alguma tabela (tipicamente o caso de estar
+     * completando o alvo de um JOIN, com a primeira tabela ja no FROM), as
+     * tabelas RELACIONADAS por FK a alguma delas entram PRIMEIRO — via
+     * {@link #fkLookup} — cada uma com o snippet completo ja pronto (ver
+     * {@link #fkSnippets}); o resto do schema entra depois, na ordem de
+     * sempre. Sem nada em {@code tablesInScope} (ex.: completando a
+     * PRIMEIRA tabela de um FROM, nada foi referenciado ainda), o
+     * comportamento e IDENTICO ao de antes desta funcionalidade.
+     * <p>
+     * So considera o sentido "para fora" (FK que a tabela em uso DECLARA,
+     * apontando pra outra) — o mesmo escopo documentado em
+     * {@code MainWindow#insertJoinStatement}; o sentido inverso exigiria
+     * varrer o schema inteiro, fora do escopo desta primeira versao.
+     */
+    private void addTablesForJoinContext(Map<String, String> out, List<String> tablesInScope) {
+        fkSnippets.clear();
+        SchemaInfo s = this.schema;
+        if (s == null) {
+            return;
+        }
+        Set<String> already = new LinkedHashSet<>();
+        for (String t : tablesInScope) {
+            already.add(t.toLowerCase(Locale.ROOT));
+        }
+        for (String baseTable : tablesInScope) {
+            String baseAlias = TableAliasGenerator.deriveAlias(baseTable);
+            for (ForeignKeyInfo fk : fkLookup.foreignKeysOf(baseTable)) {
+                String refTable = fk.referencedTable();
+                if (refTable == null || already.contains(refTable.toLowerCase(Locale.ROOT))
+                        || out.containsKey(refTable)) {
+                    // null: FK sem tabela referenciada valida (nao deveria
+                    // acontecer, mas por seguranca); ja em "already": tabela
+                    // que ja esta na consulta, juntar de novo nao faz
+                    // sentido; ja em "out": outra FK ja ofereceu a mesma
+                    // tabela referenciada antes (ex.: duas colunas apontando
+                    // pra ela).
+                    continue;
+                }
+                String refAlias = TableAliasGenerator.deriveDistinctAlias(refTable, baseTable, baseAlias);
+                fkSnippets.put(refTable, joinSnippet(refTable, refAlias, baseAlias, fk));
+                out.put(refTable, "relacionado por FK a " + baseTable);
+            }
+        }
+        for (TableInfo t : s.tables()) {
+            out.putIfAbsent(t.name(), "tabela");
+        }
+    }
+
+    /** Monta {@code "<tabela> <alias> ON <baseAlias>.<col> = <alias>.<col referenciada>"} (com AND para FK composta). */
+    private static String joinSnippet(String refTable, String refAlias, String baseAlias, ForeignKeyInfo fk) {
+        StringBuilder sql = new StringBuilder(refTable).append(' ').append(refAlias).append(" ON ");
+        List<String> cols = fk.columns();
+        List<String> refCols = fk.referencedColumns();
+        for (int i = 0; i < cols.size(); i++) {
+            if (i > 0) {
+                sql.append(" AND ");
+            }
+            sql.append(baseAlias).append('.').append(cols.get(i))
+                    .append(" = ")
+                    .append(refAlias).append('.').append(refCols.get(i));
+        }
+        return sql.toString();
     }
 
     /**

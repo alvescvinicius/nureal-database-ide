@@ -1,5 +1,6 @@
 package com.nureal.ide.ui;
 
+import com.nureal.ide.core.log.AppLogger;
 import com.nureal.ide.core.metadata.model.ForeignKeyInfo;
 
 import javax.swing.JFileChooser;
@@ -178,7 +179,7 @@ final class ResultContextMenu {
             String text = (value == null) ? "" : value.toString();
             menu.add(item("Filtrar por este valor", () -> filter.filterByValue(modelColumn, text)));
             menu.add(item("Ver conteudo completo", () ->
-                    CellContentViewer.show(table, table.getColumnName(col), value)));
+                    CellContentViewer.show(table, col, value)));
             if (fkOrigin != null && metadataSource != null) {
                 ColumnMetadata meta = metadataSource.metadataFor(modelColumn);
                 if (meta != null && meta.hasForeignKey()) {
@@ -244,7 +245,26 @@ final class ResultContextMenu {
 
     private static JMenuItem item(String text, Runnable action) {
         JMenuItem item = new JMenuItem(text);
-        item.addActionListener(e -> action.run());
+        // Sem este try/catch, uma excecao de runtime dentro de "action" (ex.:
+        // NullPointerException ao montar o Inspetor de FK) escapava direto
+        // para o tratador padrao do EDT — que, num app empacotado sem console
+        // anexado (o caso normal do usuario final), nao mostra NADA: o clique
+        // simplesmente "nao fazia nada" aos olhos de quem usa a IDE, sem
+        // qualquer pista do motivo (bug relatado: "a visualizacao de tabelas
+        // origem nao esta funcionando", sem nenhum erro visivel). Agora
+        // qualquer falha em QUALQUER item deste menu (Visualizar Origem,
+        // copiar, exportar, filtrar, ordenar, informacoes da coluna) fica
+        // visivel na hora E registrada em ~/.nureal-ide/nureal-ide.log.
+        item.addActionListener(e -> {
+            try {
+                action.run();
+            } catch (Exception ex) {
+                AppLogger.severe("Falha ao executar acao do menu de contexto: " + text, ex);
+                JOptionPane.showMessageDialog(e.getSource() instanceof java.awt.Component c ? DialogUtil.owner(c) : null,
+                        "Nao foi possivel completar \"" + text + "\":\n" + ex.getMessage(),
+                        "Erro", JOptionPane.ERROR_MESSAGE);
+            }
+        });
         return item;
     }
 

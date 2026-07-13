@@ -48,6 +48,9 @@ final class ResultGrid extends JPanel {
 
     private static final long serialVersionUID = 1L;
 
+    /** Altura de linha padrao (px, antes de {@code scale}) quando o chamador nao pede uma explicita — ver o construtor de 6 args. */
+    private static final int DEFAULT_ROW_HEIGHT_BASE_PX = 22;
+
     private final JTable table;
     private final ColumnSorter sorter;
     private final String fingerprint;
@@ -57,6 +60,7 @@ final class ResultGrid extends JPanel {
     private final JTextField columnSearchField = new JTextField(10);
     private final GridEditController editController;
     private final ColumnHeaderRenderer headerRenderer;
+    private final SelectionManager selection;
     /**
      * Notificado sempre que a selecao de celulas muda, com a contagem de
      * celulas selecionadas e a soma dos valores numericos entre elas
@@ -86,10 +90,25 @@ final class ResultGrid extends JPanel {
      * @param schema           schema atual (pode ser {@code null})
      * @param metadataCache    cache de metadados de tabela, COMPARTILHADO entre todas as grades da sessao
      * @param exportExcel      acao "Exportar Excel" (delegada a MainWindow, que ja sabe exportar varias abas)
-     * @param scale            funcao de escala de UI (zoom) — mesma usada pelo resto da janela
+     * @param scale            funcao de escala de UI (zoom + modo compacto) — mesma usada pelo resto da janela
      */
     ResultGrid(ResultTableModel model, ConnectionManager connectionManager, String schema,
             TableMetadataCache metadataCache, Runnable exportExcel, IntUnaryOperator scale) {
+        this(model, connectionManager, schema, metadataCache, exportExcel, scale, DEFAULT_ROW_HEIGHT_BASE_PX);
+    }
+
+    /**
+     * @param rowHeightBasePx altura de linha em px, ANTES de {@code scale} —
+     *                        pedido explicito do usuario: um controle SEPARADO
+     *                        do zoom da interface, so para o espacamento das
+     *                        linhas da grade (ver {@code MainWindow#resultRowHeightBasePx}/
+     *                        {@code ROW_SPACING_LEVELS}). {@code scale} continua
+     *                        aplicado por cima (zoom/modo compacto tambem
+     *                        escalam a altura final), os dois se combinam em
+     *                        vez de um substituir o outro.
+     */
+    ResultGrid(ResultTableModel model, ConnectionManager connectionManager, String schema,
+            TableMetadataCache metadataCache, Runnable exportExcel, IntUnaryOperator scale, int rowHeightBasePx) {
         super(new BorderLayout());
 
         // Sempre criado (nunca null) mas so vira editavel de fato quando
@@ -132,7 +151,7 @@ final class ResultGrid extends JPanel {
             public void updateUI() {
                 super.updateUI();
                 if (ResultGrid.this.table != null) {
-                    styleTable(this, scale);
+                    styleTable(this, scale, rowHeightBasePx);
                 }
             }
         };
@@ -141,7 +160,7 @@ final class ResultGrid extends JPanel {
         // setToolTipText(...) faz implicitamente) — sem isto, a celula nunca
         // mostraria tooltip mesmo com o metodo sobrescrito corretamente.
         javax.swing.ToolTipManager.sharedInstance().registerComponent(table);
-        styleTable(table, scale);
+        styleTable(table, scale, rowHeightBasePx);
 
         // Resolver de metadados (PK/FK/indices/comentario) desta grade
         // especifica — guardado como client property ANTES de instalar os
@@ -158,7 +177,7 @@ final class ResultGrid extends JPanel {
         ColumnHeaderRenderer.MetadataSource metadataSource =
                 col -> resolver.resolve(model, col, () -> table.getTableHeader().repaint());
 
-        SelectionManager selection = SelectionManager.install(table);
+        this.selection = SelectionManager.install(table);
 
         // Resumo de selecao (contagem + soma): ouve os DOIS modelos de
         // selecao (linha E coluna) separadamente — um arrasto horizontal
@@ -286,6 +305,17 @@ final class ResultGrid extends JPanel {
         return editController;
     }
 
+    /**
+     * Evita que clicar em {@code other} (tipicamente a barra de acoes deste
+     * MESMO resultado — ver {@link ResultStatusBar#asComponent()}) limpe a
+     * selecao da grade — ver {@link SelectionManager#keepSelectionOnFocusTo}
+     * para o bug que isto corrige ("Excluir linha(s)" nao fazia nada porque o
+     * proprio clique no botao ja limpava a selecao antes do botao le-la).
+     */
+    void keepSelectionOnFocusTo(JComponent other) {
+        selection.keepSelectionOnFocusTo(other);
+    }
+
     /** Linhas selecionadas convertidas para indices de MODELO (ver {@link GridEditController}). */
     int[] selectedModelRows() {
         int[] viewRows = table.getSelectedRows();
@@ -315,8 +345,12 @@ final class ResultGrid extends JPanel {
 
     // ---------- Estilo base da tabela ----------
 
-    private static void styleTable(JTable table, IntUnaryOperator scale) {
-        table.setRowHeight(scale.applyAsInt(22));
+    private static void styleTable(JTable table, IntUnaryOperator scale, int rowHeightBasePx) {
+        // rowHeightBasePx vem do controle de "Espacamento de linhas" do menu
+        // Layout (ver MainWindow#ROW_SPACING_LEVELS) — scale (zoom/modo
+        // compacto) continua se aplicando por cima do valor escolhido, os
+        // dois se combinam em vez de um substituir o outro.
+        table.setRowHeight(scale.applyAsInt(rowHeightBasePx));
         table.setShowGrid(true);
         table.setGridColor(GridTheme.GRID_LINE);
         table.setIntercellSpacing(new Dimension(0, 1));
@@ -349,7 +383,7 @@ final class ResultGrid extends JPanel {
         // de uma grade inteira no tema escuro — bug relatado pelo usuario
         // ("caixa branca" ao editar uma celula no tema escuro).
         table.setBackground(GridTheme.ZEBRA_EVEN);
-        table.setForeground(GridTheme.COLOR_TEXTUAL);
+        table.setForeground(GridTheme.COLOR_DEFAULT_TEXT);
         // minWidth e um limite DURO do proprio Swing: passado disto, o
         // usuario simplesmente NAO CONSEGUE arrastar a divisoria do
         // cabecalho. De proposito um valor MINUSCULO e INDEPENDENTE da
@@ -521,8 +555,8 @@ final class ResultGrid extends JPanel {
             bar.setOpaque(true);
             bar.setBackground(GridTheme.HEADER_BACKGROUND);
             bar.setBorder(javax.swing.BorderFactory.createMatteBorder(0, 0, 1, 0, GridTheme.HEADER_BORDER));
-            columnLabel.setForeground(GridTheme.MUTED_TEXT);
-            label.setForeground(GridTheme.MUTED_TEXT);
+            Typography.tertiary(columnLabel);
+            Typography.tertiary(label);
         };
         filterBarChromeRefresh.run();
         return bar;

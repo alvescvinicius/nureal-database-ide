@@ -14,25 +14,32 @@ import java.awt.Graphics;
 import java.util.Locale;
 
 /**
- * Arvore de objetos — visual DELIBERADAMENTE simples (2a versao; a primeira,
- * com um bloco de fundo colorido cobrindo cada linha inteira por categoria,
- * ficou "gritando" demais e foi abandonada a pedido do usuario):
+ * Arvore de objetos.
  *
  * <ul>
- * <li>Sem icone de tipo (schema/tabela/view/funcao/procedure/trigger) e sem
- * icone padrao de pasta/arquivo do Swing — a lista ficava poluida
- * visualmente. O unico "icone" que sobrevive e a bolinha de status na RAIZ
- * (schema), no lugar do triangulo de expandir/recolher que o {@code JTree}
- * nao desenha mais ali (ver {@code MainWindow#buildObjectBrowser},
- * {@code setShowsRootHandles(false)}) — a MESMA bolinha verde/ambar/cinza da
- * lista de conexoes (ver {@link ConnectionsPanel#statusDot}).</li>
- * <li>Categoria (Tabelas/Visualizacoes/Procedures/Functions/Triggers) e os
- * objetos dentro dela: SEM cor por categoria (removida a pedido do usuario —
- * "gritava" demais) — texto no peso/cor padrao da arvore. O UNICO destaque e
+ * <li>Icone de tipo por CONCEITO (tabela/view/procedure/function/trigger —
+ * ver {@link #iconTypeFor}), na cor neutra {@link GridTheme#MUTED_TEXT} tanto
+ * na categoria (Tabelas/Visualizacoes/Procedures/Functions/Triggers) quanto
+ * em cada objeto dentro dela. Rodada 2 (pedido explicito do usuario, "vamos
+ * melhorar e colocar icones"): reverte a Rodada 1, que tinha removido TODO
+ * icone de tipo por ter ficado poluido visualmente com um bloco de fundo
+ * colorido por categoria — desta vez o icone e so um glifo pequeno e
+ * monocromatico ao lado do texto, sem nenhum fundo colorido, entao nao
+ * reintroduz o problema original. Coluna continua SEM icone (o texto ja
+ * mostra nome + tipo via HTML, ver {@link #columnHtml}) — so os niveis
+ * categoria/tabela/view/rotina/trigger ganham icone. O unico "icone" que ja
+ * existia antes e continua e a bolinha de status na RAIZ (schema), no lugar
+ * do triangulo de expandir/recolher que o {@code JTree} nao desenha mais ali
+ * (ver {@code MainWindow#buildObjectBrowser}, {@code setShowsRootHandles(false)})
+ * — a MESMA bolinha verde/ambar/cinza da lista de conexoes (ver
+ * {@link ConnectionsPanel#statusDot}).</li>
+ * <li>Categoria e os objetos dentro dela: SEM cor de TEXTO por categoria
+ * (mantido da Rodada 1 — "gritava" demais) — so o icone (Rodada 2) e o
  * negrito num cinza medio (nunca preto forte) enquanto o galho estiver
  * EXPANDIDO, ou seja, o "caminho" por onde se esta navegando agora (ver
  * {@link #applyPathStyle}). Uma categoria SEM nenhum objeto (contador "(0)")
- * fica sempre em cinza mudo e peso normal, nunca em negrito.</li>
+ * fica sempre em cinza mudo e peso normal, nunca em negrito — o icone
+ * continua aparecendo mesmo assim, so o texto fica mudo.</li>
  * <li>Fundo de linha so existe para a SELECAO (ver {@link #backgroundFor}) —
  * o MESMO cinza clarinho em QUALQUER linha, inclusive o schema. Cobre a
  * linha inteira via um truque padrao de JTree: o
@@ -58,6 +65,9 @@ final class ObjectTreeCellRenderer extends DefaultTreeCellRenderer {
      */
     static final int SCHEMA_SWITCH_ICON_SIZE = 12;
     static final int SCHEMA_SWITCH_ICON_MARGIN = 10;
+
+    /** Tamanho do icone de tipo (categoria/tabela/view/rotina/trigger) — pequeno, nao compete com o texto numa linha de arvore densa. */
+    private static final int TYPE_ICON_SIZE = 14;
 
     private boolean paintSwitchArrow;
 
@@ -172,19 +182,34 @@ final class ObjectTreeCellRenderer extends DefaultTreeCellRenderer {
                 setText(obj.display().toUpperCase(Locale.ROOT));
             }
             // Categoria e os proprios objetos abriveis (tabela/view/
-            // procedure/function/trigger): SEM cor por categoria (removida a
-            // pedido do usuario — ficava "gritando" demais). O unico
-            // destaque agora e peso da fonte, e so enquanto o galho estiver
-            // EXPANDIDO — ou seja, o "caminho" por onde estamos navegando
-            // agora fica em negrito; o resto usa o texto padrao da arvore.
-            case CATEGORY -> applyPathStyle(emptyCategory, expanded);
-            case TABLE, VIEW, ROUTINE, TRIGGER -> applyPathStyle(false, expanded);
+            // procedure/function/trigger): SEM cor de TEXTO por categoria
+            // (removida a pedido do usuario — ficava "gritando" demais),
+            // mas COM icone de tipo (Rodada 2 — ver javadoc da classe). O
+            // unico destaque de TEXTO continua sendo o peso da fonte, e so
+            // enquanto o galho estiver EXPANDIDO — ou seja, o "caminho" por
+            // onde estamos navegando agora fica em negrito; o resto usa o
+            // texto padrao da arvore.
+            case CATEGORY -> {
+                setIcon(typeIcon(obj.kind()));
+                applyPathStyle(emptyCategory, expanded);
+            }
+            case TABLE, VIEW, ROUTINE, TRIGGER -> {
+                setIcon(typeIcon(obj.kind()));
+                applyPathStyle(false, expanded);
+            }
             // Coluna: o texto (nome em negrito + tipo em cinza) e todo
             // montado via HTML em columnHtml — sem cor de categoria (fica
             // discreta de proposito, ja aninhada duas vezes).
             case COLUMN -> setText(columnHtml(obj.name(), obj.columnType()));
             case SCHEMA_PICK -> {
                 // mantem o padrao — lista de escolha de schema, sem categoria.
+            }
+            // Linha sintetica de "busca sem resultado" (ver MainWindow#rebuildTree)
+            // — sem icone, italico e no mesmo cinza mudo de uma categoria vazia,
+            // pra ficar claramente uma MENSAGEM e nao um objeto clicavel de verdade.
+            case EMPTY_MESSAGE -> {
+                setForeground(GridTheme.MUTED_TEXT);
+                setFont(getFont().deriveFont(Font.ITALIC));
             }
         }
     }
@@ -211,6 +236,41 @@ final class ObjectTreeCellRenderer extends DefaultTreeCellRenderer {
     /** Cinza medio para o "caminho atual" em negrito — deliberadamente NAO preto forte. */
     private static Color pathColor() {
         return FlatLaf.isLafDark() ? new Color(0xC7CBD1) : new Color(0x4B5563);
+    }
+
+    /**
+     * Icone de tipo para uma categoria ou objeto da arvore, a partir de
+     * {@code obj.kind()} ("TABLE"/"VIEW"/"PROCEDURE"/"FUNCTION"/"TRIGGER" —
+     * ver {@code MainWindow#rebuildTree}/{@code addTableCategory}/
+     * {@code addNameCategory}, quem propaga esse valor). Sempre na cor
+     * neutra {@link GridTheme#MUTED_TEXT} (nunca {@link IconTheme#colorFor},
+     * que devolveria {@link IconTheme#INK} — preto fixo, ilegivel no tema
+     * escuro) — resolvida de novo A CADA pintura (nao cacheada), entao segue
+     * sozinha uma troca de tema claro/escuro sem precisar do truque de
+     * {@code Buttons#bindThemedIcon} (que so existe para icones presos num
+     * {@code JButton}/{@code JLabel} de vida longa, nunca recriado; este
+     * renderer ja e chamado de novo a cada linha/repaint). {@code null}
+     * quando {@code kind} nao mapeia pra nenhum tipo conhecido (schema/
+     * coluna/lista de escolha de schema — esses casos nem chegam a chamar
+     * este metodo, ver {@link #style}).
+     */
+    private static Icon typeIcon(String kind) {
+        IconType type = iconTypeFor(kind);
+        return (type == null) ? null : Icons.get(type, TYPE_ICON_SIZE, GridTheme.MUTED_TEXT);
+    }
+
+    private static IconType iconTypeFor(String kind) {
+        if (kind == null) {
+            return null;
+        }
+        return switch (kind) {
+            case "TABLE" -> IconType.TABLE;
+            case "VIEW" -> IconType.VIEW;
+            case "PROCEDURE" -> IconType.PROCEDURE;
+            case "FUNCTION" -> IconType.FUNCTION;
+            case "TRIGGER" -> IconType.TRIGGER;
+            default -> null;
+        };
     }
 
     /** Nome da coluna em negrito + tipo em cinza mudo, ex.: <b>id</b> : bigint. */

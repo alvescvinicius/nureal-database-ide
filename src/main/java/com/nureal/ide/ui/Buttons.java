@@ -2,6 +2,7 @@ package com.nureal.ide.ui;
 
 import java.awt.Color;
 import java.awt.Insets;
+import java.util.function.Supplier;
 
 import javax.swing.JButton;
 
@@ -18,12 +19,10 @@ import com.formdev.flatlaf.FlatClientProperties;
  * {@code CellContentViewer} — qualquer ajuste futuro (raio, espacamento)
  * exigiria lembrar de mudar em todos os lugares ao mesmo tempo.
  * <p>
- * Nao cobre botoes SO DE ICONE (toolbar/breadcrumb, estilo
- * {@code "toolBarButton"}) nem o botao "Executar" verde da barra de
- * ferramentas principal (estilos proprios, ver
- * {@code MainWindow#styleRunButton}) — so a acao SECUNDARIA (contorno) e a
- * acao PRIMARIA com texto (preenchida na cor da marca) de dialogos e barras
- * de acao como {@link ResultStatusBar}.
+ * Tambem cobre botoes SO DE ICONE (toolbar/breadcrumb, estilo
+ * {@code "toolBarButton"} — ver {@link #styleIconButton}); a unica excecao
+ * continua o botao "Executar" verde da barra de ferramentas principal
+ * (estilo proprio, ver {@code MainWindow#styleRunButton}).
  */
 final class Buttons {
 
@@ -43,5 +42,82 @@ final class Buttons {
         button.setForeground(Color.WHITE);
         button.setMargin(new Insets(6, 14, 6, 14));
         button.putClientProperty(FlatClientProperties.STYLE, "arc: 8; focusWidth: 0; innerFocusWidth: 0; borderWidth: 0");
+    }
+
+    /**
+     * Botao SO DE ICONE (toolbar principal, cabecalho do painel de Objetos,
+     * barra de resultados, linha de acoes do editor, barra de localizar) —
+     * plano, sem preenchimento nem borda visivel, so o hover do FlatLaf. Ate
+     * esta ficar centralizado aqui, cada uma das 5 barras que usam este
+     * padrao tinha sua PROPRIA margem copiada/colada (5,5,5,5 / 4,4,4,4 /
+     * 3,3,3,3 conforme o arquivo) — sem motivo funcional pra divergir, so
+     * inconsistencia acumulada (spec de padronizacao visual: "mesmo
+     * espacamento interno" em todo componente do mesmo tipo).
+     */
+    static void styleIconButton(JButton button) {
+        button.putClientProperty("JButton.buttonType", "toolBarButton");
+        button.putClientProperty(FlatClientProperties.STYLE, "arc: 8");
+        button.setMargin(new Insets(4, 4, 4, 4));
+    }
+
+    /**
+     * Prende o ICONE de um botao (SO-icone ou com texto, ex.: "Salvar"/
+     * "Historico") a paleta atual, reconstruindo-o a cada troca de tema —
+     * bug sistemico encontrado na revisao de codigo: {@code Icons.get(type,
+     * size, color)} "queima" a cor pedida DENTRO da imagem do icone no
+     * momento em que e chamado (ver {@code Icons.VectorIcon}/
+     * {@code FlatSVGIcon.ColorFilter}); um botao criado uma unica vez com
+     * {@code new JButton(Icons.get(..., GridTheme.X))} ou
+     * {@code button.setIcon(Icons.get(...))} fica com o icone CONGELADO na
+     * paleta clara/escura de quando foi montado, porque nada volta a chamar
+     * {@code Icons.get} depois disso — {@code MainWindow#toggleTheme} so
+     * redesenha a CHROME padrao do FlatLaf (via {@code FlatLaf.updateUI()}),
+     * nunca o bitmap de um icone ja atribuido. O sintoma so aparece depois do
+     * PRIMEIRO alternar de tema (dai passar despercebido): o icone continua
+     * com a cor do tema anterior, geralmente ilegivel ou de baixo contraste
+     * contra o novo fundo.
+     * <p>
+     * Mecanismo: {@code JComponent#setUI} (chamado de dentro de
+     * {@code updateUI()}) dispara um {@code PropertyChangeEvent} no nome
+     * fixo {@code "UI"} SEMPRE que o Look and Feel e trocado/recarregado —
+     * ouvir esse evento e mais simples e mais seguro que subclassificar
+     * {@code JButton} so para sobrescrever {@code updateUI()} (evita todo o
+     * problema de "campos ainda nulos no primeiro updateUI(), disparado de
+     * dentro do proprio construtor da superclasse" que outros pontos do app
+     * precisam contornar com guarda null, ver {@code ResultGrid}/
+     * {@code ConnectionsPanel}). {@code colorSupplier} deve ler um campo
+     * MUTAVEL como {@code GridTheme.MUTED_TEXT}, nunca capturar um
+     * {@code Color} ja resolvido, senao a troca de tema continua invisivel
+     * pra este botao.
+     */
+    static void bindThemedIcon(JButton button, IconType type, int size, Supplier<Color> colorSupplier) {
+        Runnable refreshIcon = () -> button.setIcon(Icons.get(type, size, colorSupplier.get()));
+        refreshIcon.run();
+        button.addPropertyChangeListener("UI", e -> refreshIcon.run());
+    }
+
+    /** Igual a {@link #bindThemedIcon}, para uma cor FIXA (nao reativa ao tema, ex.: {@link Color#WHITE}). */
+    static void bindThemedIcon(JButton button, IconType type, int size, Color fixedColor) {
+        bindThemedIcon(button, type, size, () -> fixedColor);
+    }
+
+    /** Igual a {@link #bindThemedIcon(JButton, IconType, int, Supplier)}, para um {@code JLabel} (ex.: icone estatico de estado vazio/placeholder). */
+    static void bindThemedIcon(javax.swing.JLabel label, IconType type, int size, Supplier<Color> colorSupplier) {
+        Runnable refreshIcon = () -> label.setIcon(Icons.get(type, size, colorSupplier.get()));
+        refreshIcon.run();
+        label.addPropertyChangeListener("UI", e -> refreshIcon.run());
+    }
+
+    /** Cria um botao SO DE ICONE (ver {@link #styleIconButton}) ja com o icone reativo ao tema (ver {@link #bindThemedIcon}). */
+    static JButton iconButton(IconType type, int size, Supplier<Color> colorSupplier) {
+        JButton button = new JButton();
+        styleIconButton(button);
+        bindThemedIcon(button, type, size, colorSupplier);
+        return button;
+    }
+
+    /** Igual ao outro {@link #iconButton}, para uma cor FIXA (nao reativa ao tema, ex.: {@link Color#WHITE}). */
+    static JButton iconButton(IconType type, int size, Color fixedColor) {
+        return iconButton(type, size, () -> fixedColor);
     }
 }

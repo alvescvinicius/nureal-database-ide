@@ -509,9 +509,6 @@ public class SqlEditorPane extends JPanel {
      */
     private void applyEditorPalette() {
         boolean dark = FlatLaf.isLafDark();
-        // Tema CLARO: default.xml do proprio RSyntaxTextArea, sem nenhuma
-        // sobrescrita — confirmado pelo usuario como correto ("no tema light
-        // fica como esta, correto"), nao mexer.
         String resource = dark ? "/org/fife/ui/rsyntaxtextarea/themes/dark.xml"
                 : "/org/fife/ui/rsyntaxtextarea/themes/default.xml";
         try (InputStream in = getClass().getResourceAsStream(resource)) {
@@ -536,14 +533,22 @@ public class SqlEditorPane extends JPanel {
             // desaturada demais (baixo contraste, "sumia") e depois um
             // experimento so preto-vira-branco (sem NENHUMA cor de destaque,
             // FROM/WHERE/numeros todos iguais) — esta usa os tons EXATOS do
-            // VS Code Dark+ (azul para palavra-chave, laranja para string,
-            // verde para numero/comentario, amarelo para funcao), um dos
-            // esquemas de mais alto contraste/legibilidade ja testados em
-            // produção por uma IDE.
-            applyVsCodeDarkSyntaxColors(scheme);
+            // VS Code Dark+ como base, agora com keyword/string/numero/booleano
+            // SUBSTITUIDOS pela paleta semantica unica (ver
+            // applySemanticSyntaxColors) — pedido do "Sistema Semantico de
+            // Cores por Tipo de Dado".
+            applySemanticSyntaxColors(scheme, true);
             textArea.setBackground(new Color(0x1E, 0x1E, 0x1E));
             textArea.setForeground(new Color(0xD4, 0xD4, 0xD4));
         } else {
+            // ANTES o tema CLARO usava o default.xml do RSyntaxTextArea sem
+            // nenhuma sobrescrita ("no tema light fica como esta, correto").
+            // O Sistema Semantico de Cores por Tipo de Dado agora EXIGE
+            // explicitamente que "o Syntax Highlight utilize exatamente a
+            // mesma paleta" nos dois temas — pedido novo que substitui aquela
+            // decisao antiga; sem isto, a mesma coluna/valor mudaria de cor so
+            // por alternar claro/escuro, o oposto do que o sistema pede.
+            applySemanticSyntaxColors(scheme, false);
             // Sem isto, voltar do escuro para o claro (Theme.load(default.xml)
             // sozinho NAO reseta de forma confiavel o fundo/texto PROPRIOS do
             // componente, so o SyntaxScheme) deixava o fundo/texto presos nos
@@ -582,33 +587,40 @@ public class SqlEditorPane extends JPanel {
     }
 
     /**
-     * Paleta de sintaxe do tema ESCURO — mesmos tons do VS Code Dark+ (um dos
-     * esquemas de realce mais usados/testados que existe, alto contraste
-     * contra fundo escuro): azul para palavra-chave, laranja para string,
-     * verde-claro para numero, verde-escuro para comentario, amarelo para
-     * funcao, cinza bem claro (nao branco puro) para identificador/operador
-     * comuns.
+     * Paleta de sintaxe UNICA do editor — usa {@link GridTheme} (o mesmo
+     * "Sistema Semantico de Cores por Tipo de Dado" da grade de resultados,
+     * ver DESIGN_SYSTEM.md) para palavras-chave, literais de texto/numero/
+     * booleano, e uma paleta PROPRIA (nao ligada a tipo de dado) so para
+     * comentario/funcao/operador/variavel — elementos de SINTAXE, nao de
+     * TIPO. {@code dark} escolhe qual variante de {@link GridTheme} esta
+     * ativa no momento (o campo ja foi trocado por {@code GridTheme#applyPalette}
+     * antes desta chamada, ver {@code MainWindow#toggleTheme}).
+     * <p>
+     * LIMITACAO CONHECIDA (documentada em DESIGN_SYSTEM.md): um literal de
+     * string como {@code '2026-06-01'} NAO pode ser distinguido de
+     * {@code 'João'} so pela sintaxe — os dois sao a MESMA producao lexica
+     * (string entre aspas simples). Colori-los de forma diferente exigiria
+     * saber contra qual COLUNA (e o tipo dela) aquele literal esta sendo
+     * comparado — analise semantica bem alem de um syntax highlighter, fora
+     * do escopo desta rodada. Todo literal de string usa a cor de TEXTO.
      */
-    private static void applyVsCodeDarkSyntaxColors(SyntaxScheme scheme) {
-        Color keyword = new Color(0x56, 0x9C, 0xD6);
-        Color string = new Color(0xCE, 0x91, 0x78);
-        Color number = new Color(0xB5, 0xCE, 0xA8);
-        Color comment = new Color(0x6A, 0x99, 0x55);
-        Color function = new Color(0xDC, 0xDC, 0xAA);
-        Color identifier = new Color(0xD4, 0xD4, 0xD4);
-        Color operator = new Color(0xD4, 0xD4, 0xD4);
-        Color variable = new Color(0x9C, 0xDC, 0xFE);
+    private static void applySemanticSyntaxColors(SyntaxScheme scheme, boolean dark) {
+        Color comment = dark ? new Color(0x7F, 0x84, 0x8E) : new Color(0x8A, 0x91, 0x99);
+        Color function = dark ? new Color(0xDC, 0xDC, 0xAA) : new Color(0x82, 0x77, 0x17);
+        Color identifier = dark ? new Color(0xD4, 0xD4, 0xD4) : Color.BLACK;
+        Color operator = identifier;
+        Color variable = dark ? new Color(0x9C, 0xDC, 0xFE) : new Color(0x00, 0x60, 0xC0);
 
-        setStyleColor(scheme, TokenTypes.RESERVED_WORD, keyword); // SELECT/FROM/WHERE...
-        setStyleColor(scheme, TokenTypes.RESERVED_WORD_2, keyword);
+        setStyleColor(scheme, TokenTypes.RESERVED_WORD, GridTheme.COLOR_KEYWORD); // SELECT/FROM/WHERE...
+        setStyleColor(scheme, TokenTypes.RESERVED_WORD_2, GridTheme.COLOR_KEYWORD);
         setStyleColor(scheme, TokenTypes.FUNCTION, function); // COUNT()/NOW()...
         setStyleColor(scheme, TokenTypes.IDENTIFIER, identifier); // texto comum/colunas
-        setStyleColor(scheme, TokenTypes.LITERAL_STRING_DOUBLE_QUOTE, string); // 'valor'
-        setStyleColor(scheme, TokenTypes.LITERAL_CHAR, string);
-        setStyleColor(scheme, TokenTypes.LITERAL_NUMBER_DECIMAL_INT, number);
-        setStyleColor(scheme, TokenTypes.LITERAL_NUMBER_FLOAT, number);
-        setStyleColor(scheme, TokenTypes.LITERAL_NUMBER_HEXADECIMAL, number);
-        setStyleColor(scheme, TokenTypes.LITERAL_BOOLEAN, number);
+        setStyleColor(scheme, TokenTypes.LITERAL_STRING_DOUBLE_QUOTE, GridTheme.COLOR_TEXTUAL); // 'valor'
+        setStyleColor(scheme, TokenTypes.LITERAL_CHAR, GridTheme.COLOR_TEXTUAL);
+        setStyleColor(scheme, TokenTypes.LITERAL_NUMBER_DECIMAL_INT, GridTheme.COLOR_INTEGER);
+        setStyleColor(scheme, TokenTypes.LITERAL_NUMBER_FLOAT, GridTheme.COLOR_DECIMAL);
+        setStyleColor(scheme, TokenTypes.LITERAL_NUMBER_HEXADECIMAL, GridTheme.COLOR_INTEGER);
+        setStyleColor(scheme, TokenTypes.LITERAL_BOOLEAN, GridTheme.COLOR_BOOLEAN); // TRUE/FALSE (ver SqlHighlightTokenMaker)
         setStyleColor(scheme, TokenTypes.COMMENT_EOL, comment);
         setStyleColor(scheme, TokenTypes.COMMENT_MULTILINE, comment);
         setStyleColor(scheme, TokenTypes.COMMENT_DOCUMENTATION, comment);
@@ -618,7 +630,9 @@ public class SqlEditorPane extends JPanel {
         // DATA_TYPE (nomes de tabela/view/procedure) fica de fora de proposito:
         // continua so em NEGRITO, cor null (herda a de IDENTIFIER acima) —
         // mesmo comportamento pedido originalmente (ver o comentario no
-        // construtor).
+        // construtor) — "Objetos" e "Colunas" do sistema semantico sao
+        // deliberadamente neutros/brancos, para nao competir com as
+        // palavras-chave (ver GridTheme.COLOR_OBJECT_NAME/COLOR_COLUMN_NAME).
     }
 
     /** Gutter (numeros de linha) — mesma logica de {@link #applyEditorPalette}. */
@@ -712,9 +726,6 @@ public class SqlEditorPane extends JPanel {
         textArea.addCaretListener(e -> update.run());
     }
 
-    /** Cor do sublinhado ao passar o mouse sobre um objeto do banco — ver {@link #installObjectHover}. */
-    private static final Color OBJECT_HOVER_UNDERLINE = new Color(0x33, 0x41, 0x55);
-
     /**
      * Um objeto de banco (tabela/view/procedure/function/trigger) encontrado
      * sob o cursor do mouse no editor — ver {@link #resolveObjectAt}. Secao
@@ -740,7 +751,7 @@ public class SqlEditorPane extends JPanel {
      * tambem chama {@link #resolveObjectAt}.
      */
     private void installObjectHover(RSyntaxTextArea textArea) {
-        Highlighter.HighlightPainter underline = new UnderlineHighlightPainter(OBJECT_HOVER_UNDERLINE);
+        Highlighter.HighlightPainter underline = new UnderlineHighlightPainter();
         Object[] tag = { null };
         textArea.addMouseMotionListener(new MouseMotionAdapter() {
             @Override
@@ -792,8 +803,55 @@ public class SqlEditorPane extends JPanel {
         });
     }
 
-    /** Cor do destaque de referencias (tabela + alias) — ver {@link #installReferenceHighlight}. */
-    private static final Color REFERENCE_HIGHLIGHT_BG = new Color(0xB8, 0x86, 0x0B, 55);
+    /**
+     * Cor do destaque de referencias (tabela + alias) — ver
+     * {@link #installReferenceHighlight}. Le {@link FlatLaf#isLafDark()} a
+     * cada pintura (nao guarda uma copia): antes era um {@code Color}
+     * {@code static final} unico (alpha 55/255, ~21%) pros dois temas — no
+     * tema escuro isso ficava "pouco visivel" (relato do usuario, com
+     * captura de tela mostrando o destaque quase imperceptivel em cima de
+     * "operation"/"o"). Agora e um alpha bem mais forte (~130-150/255),
+     * ainda na mesma familia dourado/ambar do "mark all" (ver
+     * {@code MARK_ALL_HIGHLIGHT_COLOR} em {@link #applyEditorPalette}) pra
+     * continuar lendo como "isto e uma referencia", nao um erro/aviso.
+     */
+    private static Color referenceHighlightColor() {
+        return FlatLaf.isLafDark() ? new Color(0xD1, 0xA3, 0x3B, 150) : new Color(0xB8, 0x86, 0x0B, 110);
+    }
+
+    /**
+     * Pinta o destaque de referencias com {@link #referenceHighlightColor()}
+     * lido NA HORA de cada repaint (mesma tecnica de {@link UnderlineHighlightPainter}
+     * logo abaixo) — sem isto, a cor ficaria congelada no valor de quando o
+     * highlighter foi instalado (uma unica vez, no construtor da aba),
+     * exatamente o bug que motivou esta correcao: alternar claro/escuro numa
+     * aba ja aberta nao mudava mais nada aqui, so em abas novas.
+     */
+    private static final class ReferenceHighlightPainter implements Highlighter.HighlightPainter {
+        @Override
+        public void paint(Graphics g, int p0, int p1, Shape bounds, JTextComponent c) {
+            try {
+                Rectangle r0 = c.modelToView2D(p0).getBounds();
+                Rectangle r1 = c.modelToView2D(p1).getBounds();
+                g.setColor(referenceHighlightColor());
+                if (r0.y == r1.y) {
+                    g.fillRect(r0.x, r0.y, Math.max(1, r1.x - r0.x), r0.height);
+                } else {
+                    // Nome de tabela/alias nunca deveria quebrar linha, mas
+                    // por seguranca pinta cada linha separada em vez de um
+                    // retangulo so, que ficaria "torto" atravessando linhas.
+                    Rectangle alloc = bounds.getBounds();
+                    g.fillRect(r0.x, r0.y, alloc.x + alloc.width - r0.x, r0.height);
+                    for (int y = r0.y + r0.height; y < r1.y; y += r0.height) {
+                        g.fillRect(alloc.x, y, alloc.width, r0.height);
+                    }
+                    g.fillRect(alloc.x, r1.y, Math.max(1, r1.x - alloc.x), r1.height);
+                }
+            } catch (BadLocationException ignored) {
+                // offset invalido (documento mudou na hora): so nao pinta desta vez
+            }
+        }
+    }
 
     /**
      * Destaca TODAS as ocorrencias do objeto (tabela/view/...) E do alias sob
@@ -812,7 +870,7 @@ public class SqlEditorPane extends JPanel {
      * identificado por {@code scanReferenceGroups}.
      */
     private void installReferenceHighlight(RSyntaxTextArea textArea) {
-        Highlighter.HighlightPainter painter = new DefaultHighlighter.DefaultHighlightPainter(REFERENCE_HIGHLIGHT_BG);
+        Highlighter.HighlightPainter painter = new ReferenceHighlightPainter();
         List<Object> tags = new ArrayList<>();
         String[] lastKey = { null };
         textArea.addCaretListener(e -> {
@@ -931,21 +989,29 @@ public class SqlEditorPane extends JPanel {
         row.add(runButton);
 
         if (onHistory != null) {
-            JButton historyButton = new JButton(Icons.get(IconType.HISTORY, 13, GridTheme.MUTED_TEXT));
+            // Icone via Buttons.bindThemedIcon (nao Icons.get(...) direto no
+            // construtor): sem isto, cada aba de editor aberta ANTES de um
+            // toggleTheme() ficava com este icone congelado na cor do tema
+            // anterior (mesmo bug sistemico corrigido em MainWindow/
+            // ConnectionsPanel, ver Buttons#bindThemedIcon).
+            JButton historyButton = new JButton();
+            Buttons.bindThemedIcon(historyButton, IconType.HISTORY, 13, () -> GridTheme.MUTED_TEXT);
             historyButton.setToolTipText("Ver historico de execucoes desta conexao");
             historyButton.addActionListener(e -> onHistory.run());
             row.add(historyButton);
         }
 
         if (onToggleExpand != null) {
-            JButton expandButton = new JButton(Icons.get(IconType.EXPAND, 13, GridTheme.MUTED_TEXT));
+            JButton expandButton = new JButton();
+            Buttons.bindThemedIcon(expandButton, IconType.EXPAND, 13, () -> GridTheme.MUTED_TEXT);
             expandButton.setToolTipText("Expandir/recolher editor (oculta paineis laterais)");
             expandButton.addActionListener(e -> onToggleExpand.run());
             row.add(expandButton);
         }
 
         if (onMoreOptions != null) {
-            JButton moreButton = new JButton(Icons.get(IconType.MORE, 13, GridTheme.MUTED_TEXT));
+            JButton moreButton = new JButton();
+            Buttons.bindThemedIcon(moreButton, IconType.MORE, 13, () -> GridTheme.MUTED_TEXT);
             moreButton.setToolTipText("Mais opcoes desta aba");
             moreButton.addActionListener(e -> onMoreOptions.accept(moreButton));
             row.add(moreButton);
@@ -953,9 +1019,7 @@ public class SqlEditorPane extends JPanel {
 
         for (java.awt.Component c : row.getComponents()) {
             if (c instanceof JButton btn) {
-                btn.putClientProperty("JButton.buttonType", "toolBarButton");
-                btn.putClientProperty(com.formdev.flatlaf.FlatClientProperties.STYLE, "arc: 8");
-                btn.setMargin(new java.awt.Insets(3, 3, 3, 3));
+                Buttons.styleIconButton(btn);
             }
         }
         return row;
@@ -1199,21 +1263,24 @@ public class SqlEditorPane extends JPanel {
         };
     }
 
-    /** Sublinhado discreto sob um trecho de texto — ver {@link #installObjectHover}. */
+    /**
+     * Sublinhado discreto sob um trecho de texto — ver {@link #installObjectHover}.
+     * SEM campo de cor proprio de proposito: le {@link GridTheme#HEADER_FOREGROUND}
+     * DIRETO a cada pintura (nao guarda uma copia no construtor) — antes a
+     * cor vinha de uma constante {@code static final} da classe (congelada no
+     * carregamento, sempre o tom do tema CLARO), entao o sublinhado ficava
+     * escuro-sobre-escuro (quase invisivel) no tema escuro, mesma familia de
+     * bug ja vista e corrigida em outros lugares do app (cor explicita que
+     * nao acompanha {@code GridTheme#applyPalette}).
+     */
     private static final class UnderlineHighlightPainter implements Highlighter.HighlightPainter {
-
-        private final Color color;
-
-        UnderlineHighlightPainter(Color color) {
-            this.color = color;
-        }
 
         @Override
         public void paint(Graphics g, int p0, int p1, Shape bounds, JTextComponent c) {
             try {
                 Rectangle r0 = c.modelToView2D(p0).getBounds();
                 Rectangle r1 = c.modelToView2D(p1).getBounds();
-                g.setColor(color);
+                g.setColor(GridTheme.HEADER_FOREGROUND);
                 if (r0.y == r1.y) {
                     int y = r0.y + r0.height - 2;
                     g.drawLine(r0.x, y, r1.x, y);
@@ -1329,25 +1396,32 @@ public class SqlEditorPane extends JPanel {
         findField = new JTextField(22);
         replaceField = new JTextField(22);
         findStatus = new JLabel();
-        findStatus.setForeground(GridTheme.MUTED_TEXT);
+        Typography.tertiary(findStatus);
 
         matchCaseBtn = new JToggleButton("Aa");
         matchCaseBtn.setToolTipText("Diferenciar maiusculas/minusculas");
         wholeWordBtn = new JToggleButton("W");
         wholeWordBtn.setToolTipText("Palavra inteira");
 
-        Color iconColor = GridTheme.MUTED_TEXT;
-        JButton prev = new JButton(Icons.get(IconType.CHEVRON_LEFT, 12, iconColor));
+        // Barra de localizar e construida UMA VEZ e so escondida/mostrada
+        // (nao recriada) — os 3 icones abaixo precisam de Buttons.bindThemedIcon
+        // (nao Icons.get(..., iconColor) resolvido uma unica vez), senao
+        // ficam congelados no tema em que a aba foi aberta (mesmo bug
+        // sistemico corrigido no resto do app, ver Buttons#bindThemedIcon).
+        JButton prev = new JButton();
+        Buttons.bindThemedIcon(prev, IconType.CHEVRON_LEFT, 12, () -> GridTheme.MUTED_TEXT);
         prev.setToolTipText("Anterior (Shift+Enter)");
         prev.addActionListener(e -> findPrevious());
-        JButton next = new JButton(Icons.get(IconType.CHEVRON_RIGHT, 12, iconColor));
+        JButton next = new JButton();
+        Buttons.bindThemedIcon(next, IconType.CHEVRON_RIGHT, 12, () -> GridTheme.MUTED_TEXT);
         next.setToolTipText("Proximo (Enter)");
         next.addActionListener(e -> findNext());
         JButton replaceOne = new JButton("Substituir");
         replaceOne.addActionListener(e -> replaceOne());
         JButton replaceAll = new JButton("Substituir tudo");
         replaceAll.addActionListener(e -> replaceAll());
-        JButton close = new JButton(Icons.get(IconType.CLOSE, 12, iconColor));
+        JButton close = new JButton();
+        Buttons.bindThemedIcon(close, IconType.CLOSE, 12, () -> GridTheme.MUTED_TEXT);
         close.setToolTipText("Fechar (Esc)");
         close.addActionListener(e -> hideFindBar());
 
@@ -1357,16 +1431,14 @@ public class SqlEditorPane extends JPanel {
         bindKey(findField, "ESCAPE", this::hideFindBar);
         bindKey(replaceField, "ESCAPE", this::hideFindBar);
 
-        // Mesmo padrao do resto do app (ver Buttons/toolBarButton) — antes
+        // Mesmo padrao do resto do app (ver Buttons#styleIconButton) — antes
         // eram botoes PADRAO do Swing, unica barra da janela sem nenhum
-        // estilo aplicado. Icone-so (prev/next/close) fica "toolBarButton"
-        // (mesma linguagem da barra de ferramentas); os dois com texto
-        // (Substituir/Substituir tudo) ficam "roundRect" (acao secundaria,
-        // igual qualquer outro botao de texto do app).
+        // estilo aplicado. Icone-so (prev/next/close) fica no estilo de
+        // botao-so-de-icone (mesma linguagem da barra de ferramentas); os
+        // dois com texto (Substituir/Substituir tudo) ficam "roundRect" (acao
+        // secundaria, igual qualquer outro botao de texto do app).
         for (JButton btn : new JButton[] { prev, next, close }) {
-            btn.putClientProperty("JButton.buttonType", "toolBarButton");
-            btn.putClientProperty(com.formdev.flatlaf.FlatClientProperties.STYLE, "arc: 8");
-            btn.setMargin(new java.awt.Insets(3, 3, 3, 3));
+            Buttons.styleIconButton(btn);
         }
         for (JButton btn : new JButton[] { replaceOne, replaceAll }) {
             Buttons.styleSecondary(btn);
@@ -1576,6 +1648,84 @@ public class SqlEditorPane extends JPanel {
     /** Atalho de {@link #monospaceFont(String, int)} sem preferencia salva — deteccao automatica. */
     static Font monospaceFont(int size) {
         return pickEditorFont(null, size);
+    }
+
+    /**
+     * Configura {@code area} como um visualizador de SQL SOMENTE LEITURA com
+     * exatamente a MESMA sintaxe destacada do editor principal (mesmo
+     * TokenMaker, mesma paleta semantica de cores — ver
+     * {@link #applySemanticSyntaxColors}) — usado pelo "DDL (pre-visualizacao)"
+     * do assistente de criar/alterar tabela e pela aba "DDL" do dialogo de
+     * propriedades do objeto (SHOW CREATE TABLE/VIEW/...). Pedido do "Sistema
+     * Semantico de Cores por Tipo de Dado": o DDL exibido deve usar a MESMA
+     * cor de palavra-chave/tipo que o editor de consultas, nao um texto plano
+     * sem nenhum destaque.
+     * <p>
+     * Nao acompanha uma troca de tema AO VIVO (diferente do editor principal,
+     * que tem {@link #refreshTheme()}) — aceitavel aqui porque estes dois usos
+     * sao dialogos fechados/reabertos a cada vez, nunca deixados abertos
+     * atravessando um {@code MainWindow#toggleTheme()}.
+     */
+    static void styleAsReadOnlySql(RSyntaxTextArea area) {
+        area.setEditable(false);
+        area.setCodeFoldingEnabled(false);
+        area.setSyntaxEditingStyle(SyntaxConstants.SYNTAX_STYLE_SQL);
+        ((RSyntaxDocument) area.getDocument()).setSyntaxStyle(new SqlHighlightTokenMaker(area));
+        area.setFont(monospaceFont(12));
+
+        boolean dark = FlatLaf.isLafDark();
+        String resource = dark ? "/org/fife/ui/rsyntaxtextarea/themes/dark.xml"
+                : "/org/fife/ui/rsyntaxtextarea/themes/default.xml";
+        try (InputStream in = SqlEditorPane.class.getResourceAsStream(resource)) {
+            if (in != null) {
+                Theme.load(in).apply(area);
+            }
+        } catch (IOException ignored) {
+            // Segue com o que a area ja tinha.
+        }
+        applySemanticSyntaxColors(area.getSyntaxScheme(), dark);
+        if (dark) {
+            area.setBackground(new Color(0x1E, 0x1E, 0x1E));
+            area.setForeground(new Color(0xD4, 0xD4, 0xD4));
+        } else {
+            area.setBackground(Color.WHITE);
+            area.setForeground(Color.BLACK);
+        }
+    }
+
+    /**
+     * Igual a {@link #styleAsReadOnlySql}, so que EDITAVEL (com dobra de
+     * codigo ligada) — usado por corpos de SQL editaveis fora do editor
+     * principal de consultas: o SELECT de uma view ({@code ViewBuilderDialog})
+     * e o corpo de um trigger ({@code TriggerBuilderDialog}). Mesma limitacao
+     * de nao acompanhar troca de tema ao vivo (dialogo fechado/reaberto a cada
+     * vez), documentada em {@link #styleAsReadOnlySql}.
+     */
+    static void styleEditableSql(RSyntaxTextArea area) {
+        area.setEditable(true);
+        area.setCodeFoldingEnabled(true);
+        area.setSyntaxEditingStyle(SyntaxConstants.SYNTAX_STYLE_SQL);
+        ((RSyntaxDocument) area.getDocument()).setSyntaxStyle(new SqlHighlightTokenMaker(area));
+        area.setFont(monospaceFont(12));
+
+        boolean dark = FlatLaf.isLafDark();
+        String resource = dark ? "/org/fife/ui/rsyntaxtextarea/themes/dark.xml"
+                : "/org/fife/ui/rsyntaxtextarea/themes/default.xml";
+        try (InputStream in = SqlEditorPane.class.getResourceAsStream(resource)) {
+            if (in != null) {
+                Theme.load(in).apply(area);
+            }
+        } catch (IOException ignored) {
+            // Segue com o que a area ja tinha.
+        }
+        applySemanticSyntaxColors(area.getSyntaxScheme(), dark);
+        if (dark) {
+            area.setBackground(new Color(0x1E, 0x1E, 0x1E));
+            area.setForeground(new Color(0xD4, 0xD4, 0xD4));
+        } else {
+            area.setBackground(Color.WHITE);
+            area.setForeground(Color.BLACK);
+        }
     }
 
     /**

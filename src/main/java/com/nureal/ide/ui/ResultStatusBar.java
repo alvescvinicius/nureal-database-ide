@@ -55,6 +55,13 @@ final class ResultStatusBar {
     private final JButton exportButton = new JButton("Exportar");
     private final JMenuItem exportThisItem = new JMenuItem("Exportar este resultado...");
     private final JMenuItem exportAllItem = new JMenuItem("Exportar todos (uma aba por resultado)...");
+    /**
+     * CSV ja existia como opcao (ver {@link GridExporter}), mas so alcancavel
+     * pelo menu de clique-direito da grade — pouco descobrivel para quem
+     * procura "Exportar" so no botao (ver {@code GAP_ANALYSIS_DBA_DEV.md},
+     * fase 3). Mesma acao, so exposta tambem aqui, junto do Excel.
+     */
+    private final JMenuItem exportCsvItem = new JMenuItem("Exportar CSV...");
 
     // ---------- Barra de edicao (so aparece quando GridEditController.isEditable()) ----------
     private final JPanel editBar = new JPanel(new BorderLayout());
@@ -83,6 +90,8 @@ final class ResultStatusBar {
         JPopupMenu exportMenu = new JPopupMenu();
         exportMenu.add(exportThisItem);
         exportMenu.add(exportAllItem);
+        exportMenu.addSeparator();
+        exportMenu.add(exportCsvItem);
         exportButton.addActionListener(e -> exportMenu.show(exportButton, 0, exportButton.getHeight()));
 
         // Mesmo padrao "contorno" de botao secundario usado em qualquer
@@ -94,7 +103,8 @@ final class ResultStatusBar {
             Buttons.styleSecondary(btn);
         }
 
-        selectionSummary.setForeground(GridTheme.MUTED_TEXT);
+        // Nivel TERCIARIO (informacao auxiliar) — ver Typography.
+        Typography.tertiary(selectionSummary);
         // Clique copia a soma — mesmo gesto do Excel (clicar no "Soma:" da
         // barra de status copia o valor pronto pra colar), pedido explicito
         // do usuario pra facilitar reaproveitar o total sem digitar de novo.
@@ -131,10 +141,15 @@ final class ResultStatusBar {
         // ja era EXATAMENTE 0x334155 (mesmo "ink" usado no cabecalho da
         // grade), so nunca acompanhava o tema escuro (icone baixo-contraste
         // no modo escuro).
-        addRowButton.setIcon(Icons.get(IconType.NEW, 13, GridTheme.HEADER_FOREGROUND));
-        deleteRowsButton.setIcon(Icons.get(IconType.DELETE, 13, GridTheme.HEADER_FOREGROUND));
+        // Buttons.bindThemedIcon (nao Icons.get(...) resolvido uma unica vez
+        // no construtor): sem isto, os 2 icones abaixo ficavam congelados na
+        // cor HEADER_FOREGROUND do tema em que a grade foi criada (mesmo bug
+        // sistemico corrigido no resto do app, ver Buttons#bindThemedIcon).
+        Buttons.bindThemedIcon(addRowButton, IconType.NEW, 13, () -> GridTheme.HEADER_FOREGROUND);
+        Buttons.bindThemedIcon(deleteRowsButton, IconType.DELETE, 13, () -> GridTheme.HEADER_FOREGROUND);
         saveChangesButton.setIcon(Icons.get(IconType.SAVE, 13, Color.WHITE));
-        pendingLabel.setForeground(GridTheme.MUTED_TEXT);
+        // Nivel TERCIARIO (status auxiliar) — ver Typography.
+        Typography.tertiary(pendingLabel);
 
         // Mesmo padrao secundario/primario de qualquer dialogo do app (ver
         // Buttons) — "Salvar alteracoes" e a acao de CONFIRMACAO desta barra
@@ -180,6 +195,10 @@ final class ResultStatusBar {
 
     void onExportAll(Runnable action) {
         exportAllItem.addActionListener(e -> action.run());
+    }
+
+    void onExportCsv(Runnable action) {
+        exportCsvItem.addActionListener(e -> action.run());
     }
 
     void onToggleEditMode(Runnable action) {

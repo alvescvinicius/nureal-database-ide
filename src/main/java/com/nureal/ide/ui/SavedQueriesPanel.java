@@ -23,7 +23,6 @@ import javax.swing.event.DocumentListener;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
-import java.awt.Font;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.io.IOException;
@@ -73,11 +72,27 @@ public class SavedQueriesPanel extends JPanel {
         reload();
     }
 
+    /**
+     * Reaplica a cor de SELECAO a cada troca de tema — sem isto ficava
+     * CONGELADA na paleta de quando o painel foi construido (mesmo bug
+     * corrigido em {@link ConnectionsPanel}/{@link HistoryPanel}, ver la o
+     * javadoc completo). Guard contra {@code null}: o PRIMEIRO
+     * {@code updateUI()} vem do proprio {@code super(...)} do construtor,
+     * antes de {@link #list} existir.
+     */
+    @Override
+    public void updateUI() {
+        super.updateUI();
+        if (list != null) {
+            list.setSelectionBackground(GridTheme.SELECTION_BACKGROUND);
+            list.setSelectionForeground(GridTheme.SELECTION_FOREGROUND);
+        }
+    }
+
     private JComponent buildHeader() {
-        JLabel title = new JLabel("QUERIES SALVAS");
-        title.putClientProperty("FlatLaf.styleClass", "small");
-        title.setFont(title.getFont().deriveFont(Font.BOLD, 11f));
-        title.setForeground(GridTheme.MUTED_TEXT);
+        // Ver Typography#sectionHeader: MESMA receita de "OBJETOS"/"CONEXOES"/
+        // "HISTORICO" — ponto unico, sem copia colada.
+        JLabel title = Typography.sectionHeader("QUERIES SALVAS");
 
         search.putClientProperty("JTextField.placeholderText", "Buscar por titulo ou SQL...");
         search.putClientProperty("JTextField.showClearButton", true);

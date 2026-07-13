@@ -75,7 +75,15 @@ enum IconType {
     CHEVRON_LEFT(IconRole.NEUTRAL),
     CHEVRON_RIGHT(IconRole.NEUTRAL),
     THEME_LIGHT(IconRole.NEUTRAL),
-    THEME_DARK(IconRole.NEUTRAL);
+    THEME_DARK(IconRole.NEUTRAL),
+
+    // Ordenacao do cabecalho da grade (ver ColumnHeaderRenderer) — cor sempre
+    // informada pelo chamador (GridTheme.SORT_INDICATOR_ACTIVE/INACTIVE,
+    // dinamico conforme a coluna esta ordenada ou nao). Antes eram glifos de
+    // texto Unicode ("▲"/"▼") direto num JLabel, unico lugar do app que
+    // desenhava um indicador sem passar pelo catalogo de icones.
+    SORT_ASCENDING(IconRole.NEUTRAL),
+    SORT_DESCENDING(IconRole.NEUTRAL);
 
     private final IconRole role;
 

@@ -516,11 +516,23 @@ public final class SqlHighlightTokenMaker extends SQLTokenMaker {
         return offsets;
     }
 
+    /**
+     * TRUE/FALSE nao sao palavra-chave nem literal reconhecido pela gramatica
+     * MS-Access-oriented embutida no RSyntaxTextArea (so o TIPO {@code BOOLEAN}
+     * esta em {@link #KEYWORDS}, nao os LITERAIS) — sem isto, cairiam como
+     * IDENTIFIER comum, sem cor propria. Pedido do "Sistema Semantico de Cores
+     * por Tipo de Dado" (ver DESIGN_SYSTEM.md): literal booleano usa a MESMA
+     * cor roxa da coluna Boolean na grade (ver {@code GridTheme.COLOR_BOOLEAN}).
+     */
+    private static final Set<String> BOOLEAN_LITERALS = Set.of("TRUE", "FALSE");
+
     @Override
     public void addToken(char[] array, int start, int end, int tokenType, int startOffset) {
         if (end >= start && tokenType == TokenTypes.IDENTIFIER) {
             String word = new String(array, start, end - start + 1).toUpperCase(Locale.ROOT);
-            if (KEYWORDS.contains(word)) {
+            if (BOOLEAN_LITERALS.contains(word)) {
+                tokenType = TokenTypes.LITERAL_BOOLEAN;
+            } else if (KEYWORDS.contains(word)) {
                 tokenType = TokenTypes.RESERVED_WORD;
             } else if (FUNCTIONS.contains(word)) {
                 tokenType = TokenTypes.FUNCTION;
