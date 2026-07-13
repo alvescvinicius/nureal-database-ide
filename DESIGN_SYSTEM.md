@@ -712,6 +712,24 @@ formato chave=valor de `UiPreferences`) guarda `autoCheckEnabled` e
 automática do startup não repete o aviso para essa MESMA tag, mas some
 sozinha assim que um release mais novo sair.
 
+**Bug relatado pelo usuário — launcher `.exe` crashando com "GetMessage()
+failed" / System error 1400:** não era o `.msi` nem o `msiexec /i` acima —
+era o próprio launcher nativo que o `jpackage` gera pro Windows. Todo app
+empacotado com `jpackage` se REINICIA sozinho num segundo processo logo ao
+abrir, só pra poder ajustar a variável `PATH` antes de carregar a JVM
+(limitação do `jli.dll` — não dá pra mudar o `PATH` do processo atual), e
+espera esse segundo processo rodando um loop de mensagens do Windows
+(`GetMessage()`) que pode falhar (ex.: antivírus/EDR interferindo na
+criação do processo suspenso usado nesse truque) com exatamente o erro
+relatado. Corrigido no `.github/workflows/release.yml`: JDK do workflow
+subiu de 17 para 25 (a partir do JDK 24/JDK-8340311 o jpackage passou a ler
+uma propriedade `win.norestart=true` no `.cfg` da app-image pra pular esse
+reinício de vez — JDK 17 simplesmente não lê essa propriedade) e a geração
+do `.msi` virou 3 passos em vez de 1: `jpackage --type app-image` → injeta
+`win.norestart=true` na seção `[Application]` do `.cfg` gerado (não existe
+flag de linha de comando pra isto) → `jpackage --type msi --app-image
+<pasta>` empacota a app-image já editada.
+
 ## Pendências conhecidas (ainda não implementadas)
 
 1. **Azul "informação" (seção 2):** não existe hoje um campo semântico
@@ -724,3 +742,10 @@ sozinha assim que um release mais novo sair.
    Maven/JDK completo) — recomenda-se um build + inspeção visual dos quatro
    painéis laterais, da barra superior, do dialogo de propriedades de objeto
    e do assistente de DDL antes de considerar o design system "fechado".
+4. **Pipeline de release (3 passos + JDK 25) ainda não rodou de verdade** —
+   mudança em `.github/workflows/release.yml` (ver seção 17, "Bug relatado
+   pelo usuário") só foi revisada manualmente, nunca executada numa tag real.
+   Publicar uma tag de teste (`vX.Y.Z`) e conferir: (a) o workflow completa
+   os 3 passos sem erro, (b) o `.cfg` dentro da app-image realmente ganhou a
+   linha `win.norestart=true`, (c) o `.msi` gerado instala e abre a IDE sem
+   o erro "GetMessage() failed".

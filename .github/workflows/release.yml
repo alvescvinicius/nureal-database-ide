@@ -16,11 +16,25 @@ jobs:
       - name: Checkout do codigo
         uses: actions/checkout@v4
 
-      - name: Configurar JDK 17 (inclui o jpackage)
+      # JDK 25 (nao mais 17): o launcher .exe que o jpackage gera pro Windows
+      # se REINICIA sozinho num segundo processo logo ao abrir, so pra poder
+      # ajustar a variavel PATH antes de carregar a JVM (limitacao do
+      # jli.dll, nao da pra mudar PATH do processo atual) — e enquanto espera
+      # esse segundo processo, roda um loop de mensagens do Windows
+      # (GetMessage()) que pode falhar (ex.: antivirus/EDR interferindo na
+      # criacao do processo suspenso) com exatamente o erro relatado pelo
+      # usuario: "GetMessage() failed", System error 1400 (janela invalida).
+      # A partir do JDK 24 (JDK-8340311) o jpackage passou a ler uma
+      # propriedade "win.norestart=true" no .cfg da app pra PULAR esse
+      # reinicio de vez — usada logo abaixo, na geracao do instalador (ver
+      # "Desativar o reinicio do launcher"). JDK 17 nao le essa propriedade
+      # (silenciosamente ignorada), entao o reinicio arriscado ficava sempre
+      # ligado sem nenhum jeito de desliga-lo.
+      - name: Configurar JDK 25 (inclui o jpackage)
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '25'
           cache: maven
 
       - name: Derivar a versao a partir da tag (remove o 'v')
@@ -50,7 +64,65 @@ jobs:
           New-Item -ItemType Directory -Force -Path target/dist | Out-Null
           Copy-Item target/nureal-database-ide.jar target/dist/
 
-      - name: Gerar o instalador Windows (.msi)
+      - name: Gerar a imagem da aplicacao (app-image)
+        # Passo 1 de 3 do instalador (era so 1 passo antes): gera a "app
+        # image" (a pasta com o .exe launcher + a JVM embutida + o jar) SEM
+        # empacotar em .msi ainda — precisamos dela solta pra poder editar o
+        # .cfg no proximo passo (ver "Desativar o reinicio do launcher")
+        # antes de gerar o instalador de fato.
+        shell: pwsh
+        run: |
+          Import-Module "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1"
+          refreshenv
+          jpackage `
+            --type app-image `
+            --name "Nureal Database IDE" `
+            --app-version "${{ steps.ver.outputs.version }}" `
+            --input target/dist `
+            --main-jar nureal-database-ide.jar `
+            --main-class com.nureal.ide.App `
+            --icon src/main/resources/com/nureal/ide/icon/nureal.ico `
+            --dest target/appimage `
+            --vendor "Nureal"
+
+      - name: Desativar o reinicio do launcher (win.norestart=true)
+        # Passo 2 de 3: injeta "win.norestart=true" na secao [Application] do
+        # .cfg que o jpackage acabou de gerar dentro da app-image — property
+        # que o launcher .exe (JDK 24+, ver comentario no passo de
+        # "Configurar JDK") le pra NUNCA reiniciar a si mesmo, eliminando de
+        # vez o caminho de codigo (loop de GetMessage()) que causava o erro
+        # "GetMessage() failed / System error 1400" relatado pelo usuario. O
+        # jpackage nao tem uma flag de linha de comando pra isto — so da pra
+        # aplicar editando o .cfg gerado, por isso o build vira 3 passos em
+        # vez de 1 (gerar app-image -> editar .cfg -> empacotar .msi a
+        # partir da app-image ja editada).
+        shell: pwsh
+        run: |
+          $cfgPath = "target/appimage/Nureal Database IDE/app/Nureal Database IDE.cfg"
+          if (-not (Test-Path $cfgPath)) {
+            throw "Nao encontrei o .cfg da app-image em: $cfgPath"
+          }
+          $lines = Get-Content -Path $cfgPath
+          $out = New-Object System.Collections.Generic.List[string]
+          $found = $false
+          foreach ($line in $lines) {
+            $out.Add($line)
+            if ($line.Trim() -eq '[Application]') {
+              $out.Add('win.norestart=true')
+              $found = $true
+            }
+          }
+          if (-not $found) {
+            throw "Secao [Application] nao encontrada em: $cfgPath (formato do .cfg pode ter mudado)"
+          }
+          Set-Content -Path $cfgPath -Value $out
+          Write-Host "win.norestart=true injetado em $cfgPath"
+
+      - name: Gerar o instalador Windows (.msi) a partir da app-image
+        # Passo 3 de 3: empacota a app-image (ja com o .cfg editado) no
+        # .msi — usa --app-image em vez de --input/--main-jar/--main-class
+        # (esses sao so pra CRIAR uma app-image do zero, ver passo 1; aqui
+        # so estamos empacotando a que ja existe).
         shell: pwsh
         run: |
           Import-Module "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1"
@@ -59,10 +131,7 @@ jobs:
             --type msi `
             --name "Nureal Database IDE" `
             --app-version "${{ steps.ver.outputs.version }}" `
-            --input target/dist `
-            --main-jar nureal-database-ide.jar `
-            --main-class com.nureal.ide.App `
-            --icon src/main/resources/com/nureal/ide/icon/nureal.ico `
+            --app-image "target/appimage/Nureal Database IDE" `
             --dest target/installer `
             --vendor "Nureal" `
             --win-dir-chooser `
