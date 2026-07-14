@@ -173,6 +173,12 @@ jobs:
   macos-installer:
     runs-on: ${{ matrix.runner }}
     strategy:
+      # fail-fast: false -- sem isto, se o job arm64 falhar o job x64 (Intel)
+      # e cancelado no meio (foi o que aconteceu: "macos-installer (macos-13,
+      # x64, Intel)" foi cancelado so porque o arm64 falhou), escondendo se o
+      # build Intel teria funcionado. Cada arquitetura roda ate o fim,
+      # independente do resultado da outra.
+      fail-fast: false
       matrix:
         include:
           - runner: macos-14
@@ -192,10 +198,28 @@ jobs:
           java-version: '25'
           cache: maven
 
-      - name: Derivar a versao a partir da tag (remove o 'v')
+      - name: Derivar a versao a partir da tag (remove o 'v') e gerar uma variante compativel com o macOS
         id: ver
         shell: bash
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        # "version" e a versao real do projeto (ex.: 0.6.9), usada no pom.xml,
+        # no manifesto do jar e no nome do arquivo .dmg.
+        # "macversion" existe SO por causa de uma exigencia do jpackage no
+        # macOS: --app-version vira o CFBundleVersion do Info.plist, e o
+        # macOS EXIGE que o primeiro numero seja >= 1 ("The first number in
+        # an app-version cannot be zero or negative" -- erro visto no job
+        # macos-installer). Como o projeto ainda esta na faixa 0.x.y, somamos
+        # 1 ao numero major SO para este valor, e SO usamos macversion no
+        # passo "Gerar o instalador macOS (.dmg)" abaixo -- em todo o resto
+        # (pom.xml, manifesto, nome do arquivo) continua a versao real. Efeito
+        # colateral aceitavel: no Finder (Get Info / Sobre) o app vai mostrar
+        # "1.6.9" em vez de "0.6.9"; o instalador e o nome do arquivo mostram
+        # a versao real normalmente.
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          major="${version%%.*}"
+          rest="${version#*.}"
+          echo "macversion=$((major + 1)).$rest" >> "$GITHUB_OUTPUT"
 
       - name: Sincronizar o pom.xml com a versao da tag
         run: mvn -B versions:set -DnewVersion="${{ steps.ver.outputs.version }}" -DgenerateBackupPoms=false
@@ -232,11 +256,14 @@ jobs:
           iconutil -c icns "$ICONSET" -o target/nureal.icns
 
       - name: Gerar o instalador macOS (.dmg)
+        # --app-version usa "macversion" (nao "version"), ver comentario no
+        # passo "Derivar a versao" acima -- macOS rejeita --app-version que
+        # comece com 0.
         run: |
           jpackage \
             --type dmg \
             --name "Nureal Database IDE" \
-            --app-version "${{ steps.ver.outputs.version }}" \
+            --app-version "${{ steps.ver.outputs.macversion }}" \
             --input target/dist \
             --main-jar nureal-database-ide.jar \
             --main-class com.nureal.ide.App \
@@ -315,6 +342,9 @@ jobs:
             --vendor "Nureal"
 
       - name: Gerar o instalador .deb a partir da app-image
+        # A flag e "--linux-deb-maintainer" (nao "--maintainer", que nao
+        # existe no jpackage e derrubava o job com "Invalid Option:
+        # [--maintainer]").
         run: |
           mkdir -p target/installer
           jpackage \
@@ -328,7 +358,7 @@ jobs:
             --linux-menu-group "Development" \
             --linux-app-category "database" \
             --description "IDE para desenvolvedores de banco de dados" \
-            --maintainer "alves.cvinicius@gmail.com"
+            --linux-deb-maintainer "alves.cvinicius@gmail.com"
 
       - name: Montar o AppDir para o .AppImage
         # appimagetool exige uma pasta no formato "AppDir": AppRun (o
