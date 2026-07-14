@@ -11,9 +11,10 @@ permissions:
 
 jobs:
   # ==========================================================================
-  # Windows — .msi (compativel com Windows 10 e superior; jpackage/WiX nao
-  # empacotam nada especifico de versao do Windows, mas o .msi so foi
-  # validado a partir do Windows 10 — versoes anteriores nao sao suportadas).
+  # Windows — .exe (bootstrapper WiX Burn; compativel com Windows 10 e
+  # superior. jpackage/WiX nao empacotam nada especifico de versao do
+  # Windows, mas o instalador so foi validado a partir do Windows 10 —
+  # versoes anteriores nao sao suportadas).
   # ==========================================================================
   windows-installer:
     runs-on: windows-latest
@@ -60,7 +61,7 @@ jobs:
       - name: Compilar e gerar o fat JAR
         run: mvn -B -DskipTests package
 
-      - name: Instalar o WiX Toolset (jpackage usa para gerar o .msi)
+      - name: Instalar o WiX Toolset (jpackage usa para gerar o .exe)
         run: choco install wixtoolset --no-progress -y
 
       - name: Preparar pasta de entrada do jpackage (apenas o fat jar)
@@ -72,9 +73,9 @@ jobs:
       - name: Gerar a imagem da aplicacao (app-image)
         # Passo 1 de 3 do instalador (era so 1 passo antes): gera a "app
         # image" (a pasta com o .exe launcher + a JVM embutida + o jar) SEM
-        # empacotar em .msi ainda — precisamos dela solta pra poder editar o
-        # .cfg no proximo passo (ver "Desativar o reinicio do launcher")
-        # antes de gerar o instalador de fato.
+        # empacotar no instalador .exe ainda — precisamos dela solta pra
+        # poder editar o .cfg no proximo passo (ver "Desativar o reinicio do
+        # launcher") antes de gerar o instalador de fato.
         shell: pwsh
         run: |
           Import-Module "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1"
@@ -99,7 +100,7 @@ jobs:
         # "GetMessage() failed / System error 1400" relatado pelo usuario. O
         # jpackage nao tem uma flag de linha de comando pra isto — so da pra
         # aplicar editando o .cfg gerado, por isso o build vira 3 passos em
-        # vez de 1 (gerar app-image -> editar .cfg -> empacotar .msi a
+        # vez de 1 (gerar app-image -> editar .cfg -> empacotar .exe a
         # partir da app-image ja editada).
         shell: pwsh
         run: |
@@ -123,19 +124,24 @@ jobs:
           Set-Content -Path $cfgPath -Value $out
           Write-Host "win.norestart=true injetado em $cfgPath"
 
-      - name: Gerar o instalador Windows (.msi) a partir da app-image
-        # Passo 3 de 3: empacota a app-image (ja com o .cfg editado) no
-        # .msi — usa --app-image em vez de --input/--main-jar/--main-class
-        # (esses sao so pra CRIAR uma app-image do zero, ver passo 1; aqui
-        # so estamos empacotando a que ja existe). --win-upgrade-uuid fixo
-        # garante que o Windows reconheca instalacoes de versoes anteriores
-        # (upgrade em vez de instalacao lado a lado a cada release).
+      - name: Gerar o instalador Windows (.exe) a partir da app-image
+        # Passo 3 de 3: empacota a app-image (ja com o .cfg editado) num
+        # .exe (bootstrapper WiX Burn, que embute um .msi por baixo) — usa
+        # --app-image em vez de --input/--main-jar/--main-class (esses sao
+        # so pra CRIAR uma app-image do zero, ver passo 1; aqui so estamos
+        # empacotando a que ja existe). --win-upgrade-uuid fixo garante que
+        # o Windows reconheca instalacoes de versoes anteriores (upgrade em
+        # vez de instalacao lado a lado a cada release) mesmo com --type
+        # exe. Trocado de --type msi para --type exe porque o site publica
+        # um unico botao "Baixar" por plataforma apontando direto pro asset
+        # do GitHub Release, e o .exe roda com duplo-clique sem exigir que o
+        # usuario saiba o que fazer com um .msi.
         shell: pwsh
         run: |
           Import-Module "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1"
           refreshenv
           jpackage `
-            --type msi `
+            --type exe `
             --name "Nureal Database IDE" `
             --app-version "${{ steps.ver.outputs.version }}" `
             --app-image "target/appimage/Nureal Database IDE" `
@@ -151,7 +157,7 @@ jobs:
         with:
           name: windows-installer
           path: |
-            target/installer/*.msi
+            target/installer/*.exe
             target/nureal-database-ide.jar
           retention-days: 1
 
@@ -425,18 +431,22 @@ jobs:
           body: |
             Instaladores desta versao:
 
-            - **Windows 10 ou superior**: `.msi`
+            - **Windows 10 ou superior**: `.exe`
             - **macOS (Apple Silicon)**: `.dmg` (arquivo `-arm64.dmg`)
             - **macOS (Intel)**: `.dmg` (arquivo `-x64.dmg`)
             - **Linux**: `.deb` (Debian/Ubuntu) ou `.AppImage` (qualquer distro, sem instalar)
 
+            > Windows: o `.exe` nao e assinado (sem certificado de assinatura de
+            > codigo configurado neste repositorio) — o SmartScreen pode avisar
+            > "O Windows protegeu o computador". Clique em "Mais informacoes" ->
+            > "Executar assim mesmo" para instalar.
             > macOS: o `.dmg` nao e assinado/notarizado. Se o Gatekeeper bloquear a
             > abertura ("app esta danificado" ou "desenvolvedor nao identificado"),
             > clique com o botao direito no app -> Abrir, ou rode
             > `xattr -cr "Nureal Database IDE.app"` no Terminal apos copiar o app
             > para Aplicativos.
           files: |
-            artifacts/windows-installer/*.msi
+            artifacts/windows-installer/*.exe
             artifacts/windows-installer/*.jar
             artifacts/macos-installer-arm64/*.dmg
             artifacts/macos-installer-x64/*.dmg
