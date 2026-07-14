@@ -14,7 +14,7 @@ import java.time.Duration;
 import java.util.function.LongConsumer;
 
 /**
- * Baixa um {@link GithubRelease.Asset} (o instalador .msi, tipicamente) para
+ * Baixa um {@link GithubRelease.Asset} (o instalador .exe, tipicamente) para
  * um arquivo local, reportando progresso em bytes conforme baixa — usado por
  * {@code UpdateInstallDialog} para alimentar a barra de progresso (a mesma
  * ideia de {@code MySqlDumpRunner}, mas para download HTTP em vez de um

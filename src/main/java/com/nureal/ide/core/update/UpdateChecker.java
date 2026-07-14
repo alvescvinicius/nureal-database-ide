@@ -21,7 +21,7 @@ import com.nureal.ide.core.json.JsonParser;
  *
  * Fonte unica do "owner/repo" e {@link #REPO} — ver
  * {@code .git/config} (remote origin), e o mesmo repo usado pelo workflow de
- * release (.github/workflows/release.yml) que publica o instalador .msi.
+ * release (.github/workflows/release.yml) que publica o instalador .exe.
  *
  * Parsing via {@link JsonParser} (o parser JSON minimo que ja existe em
  * {@code core.json}, criado originalmente para o EXPLAIN FORMAT=JSON — ver

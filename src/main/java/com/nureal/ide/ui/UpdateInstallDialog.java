@@ -26,12 +26,12 @@ import com.nureal.ide.core.update.UpdateDownloader;
 import com.nureal.ide.core.update.UpdateInstallLauncher;
 
 /**
- * Baixa o instalador .msi de {@code release} com uma barra de progresso e,
+ * Baixa o instalador .exe de {@code release} com uma barra de progresso e,
  * ao terminar, abre o instalador grafico do Windows e fecha a IDE (ver
  * {@link UpdateInstallLauncher}, javadoc de classe: o instalador so consegue
  * substituir os arquivos em uso depois que este processo encerrar).
  *
- * Se o release nao tiver um asset .msi, ou o sistema operacional atual nao
+ * Se o release nao tiver um asset .exe, ou o sistema operacional atual nao
  * for Windows (ver {@link UpdateInstallLauncher#supportsAutoInstall()}), cai
  * no plano B automaticamente: abre a pagina do release no navegador padrao
  * (sem tentar um download automatico que nao teria como instalar sozinho) e
@@ -47,10 +47,10 @@ final class UpdateInstallDialog {
     }
 
     static void open(Component parent, GithubRelease release) {
-        GithubRelease.Asset asset = release.findMsiAsset();
+        GithubRelease.Asset asset = release.findExeAsset();
         if (asset == null || !UpdateInstallLauncher.supportsAutoInstall()) {
             String reason = asset == null
-                    ? "Este release nao tem um instalador (.msi) anexado."
+                    ? "Este release nao tem um instalador (.exe) anexado."
                     : "A instalacao automatica so esta disponivel no Windows.";
             JOptionPane.showMessageDialog(DialogUtil.owner(parent),
                     reason + " Vou abrir a pagina do release para voce baixar manualmente.",
@@ -189,7 +189,7 @@ final class UpdateInstallDialog {
                             + "O Nureal Database IDE vai fechar agora para liberar os arquivos em uso.",
                     "Baixar e instalar", JOptionPane.INFORMATION_MESSAGE);
             // Pequeno atraso so pra garantir que o JOptionPane ja fechou e o
-            // msiexec ja teve tempo de nascer como processo independente
+            // instalador ja teve tempo de nascer como processo independente
             // antes deste processo encerrar.
             Timer exitTimer = new Timer(600, e -> System.exit(0));
             exitTimer.setRepeats(false);
@@ -204,7 +204,7 @@ final class UpdateInstallDialog {
         }
 
         private static String safeFileName(String name) {
-            return (name == null || name.isBlank()) ? "update.msi" : name.replaceAll("[\\\\/:*?\"<>|]", "_");
+            return (name == null || name.isBlank()) ? "update.exe" : name.replaceAll("[\\\\/:*?\"<>|]", "_");
         }
 
         private static String humanSize(long bytes) {
