@@ -101,7 +101,7 @@ Java instalado):
 
 | Plataforma | Arquivo(s) | Job |
 |---|---|---|
-| Windows 10 ou superior | `.msi` | `windows-installer` |
+| Windows 10 ou superior | `.exe` | `windows-installer` |
 | macOS — Apple Silicon | `.dmg` (sufixo `-arm64`) | `macos-installer` (runner `macos-14`) |
 | macOS — Intel | `.dmg` (sufixo `-x64`) | `macos-installer` (runner `macos-13`) |
 | Linux (qualquer distro) | `.AppImage` | `linux-installer` |
@@ -126,12 +126,15 @@ git push -u origin main
 git tag v0.1.0
 git push origin v0.1.0
 ```
-Isso dispara o workflow. Em alguns minutos, vá em **Releases** no GitHub: o `.msi`,
+Isso dispara o workflow. Em alguns minutos, vá em **Releases** no GitHub: o `.exe`,
 os dois `.dmg`, o `.deb`, o `.AppImage` e o `.jar` portátil estarão lá para download.
 Para uma nova versão, repita com `v0.2.0`, etc.
 
 ### Instalar em outra máquina
-- **Windows**: baixe o `.msi`, dê duplo-clique e instale (Windows 10 ou superior).
+- **Windows**: baixe o `.exe`, dê duplo-clique e instale (Windows 10 ou superior).
+  Como o instalador ainda não é assinado digitalmente, o SmartScreen pode avisar
+  "O Windows protegeu o computador" — clique em *Mais informações* → *Executar
+  assim mesmo*.
 - **macOS**: baixe o `.dmg` da sua arquitetura (`-arm64` para Apple Silicon M1/M2/M3/M4,
   `-x64` para Intel), abra e arraste para Aplicativos. O `.dmg` **não é assinado/
   notarizado** (não há conta Apple Developer configurada neste repositório) — se o
@@ -149,7 +152,7 @@ Precisa de JDK 17+ com `jpackage`.
 mvn -DskipTests package
 mkdir target\dist
 copy target\nureal-database-ide.jar target\dist\
-jpackage --type msi --name "Nureal Database IDE" --app-version 0.1.0 `
+jpackage --type exe --name "Nureal Database IDE" --app-version 0.1.0 `
   --input target\dist --main-jar nureal-database-ide.jar `
   --main-class com.nureal.ide.App --dest target\installer `
   --win-menu --win-shortcut
@@ -191,7 +194,7 @@ atenção:
   pelo nome (resolvido via `PATH`), sem caminho fixo de nenhum SO — funciona em
   qualquer plataforma desde que o MySQL Client Tools esteja instalado.
 - **Atualização automática** (`UpdateInstallLauncher`): hoje só sabe *auto-instalar*
-  no Windows (`msiexec /i arquivo.msi`). Em macOS/Linux, a checagem de nova versão
+  no Windows (baixa e executa o `.exe` diretamente). Em macOS/Linux, a checagem de nova versão
   continua funcionando, mas a IDE cai no "plano B" (abre a página do Release no
   navegador) em vez de instalar sozinha — os novos instaladores `.dmg`/`.deb`/
   `.AppImage` já ficam publicados no Release, só não são baixados/instalados
