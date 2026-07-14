@@ -10,6 +10,11 @@ permissions:
   contents: write   # necessario para criar o Release e anexar arquivos
 
 jobs:
+  # ==========================================================================
+  # Windows — .msi (compativel com Windows 10 e superior; jpackage/WiX nao
+  # empacotam nada especifico de versao do Windows, mas o .msi so foi
+  # validado a partir do Windows 10 — versoes anteriores nao sao suportadas).
+  # ==========================================================================
   windows-installer:
     runs-on: windows-latest
     steps:
@@ -122,7 +127,9 @@ jobs:
         # Passo 3 de 3: empacota a app-image (ja com o .cfg editado) no
         # .msi — usa --app-image em vez de --input/--main-jar/--main-class
         # (esses sao so pra CRIAR uma app-image do zero, ver passo 1; aqui
-        # so estamos empacotando a que ja existe).
+        # so estamos empacotando a que ja existe). --win-upgrade-uuid fixo
+        # garante que o Windows reconheca instalacoes de versoes anteriores
+        # (upgrade em vez de instalacao lado a lado a cada release).
         shell: pwsh
         run: |
           Import-Module "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1"
@@ -136,12 +143,272 @@ jobs:
             --vendor "Nureal" `
             --win-dir-chooser `
             --win-menu `
-            --win-shortcut
+            --win-shortcut `
+            --win-upgrade-uuid "8f14e1c2-6b3a-4b1e-9c2d-1a2b3c4d5e6f"
+
+      - name: Publicar artefatos (Windows)
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: |
+            target/installer/*.msi
+            target/nureal-database-ide.jar
+          retention-days: 1
+
+  # ==========================================================================
+  # macOS — .dmg, um build por arquitetura (Apple Silicon/arm64 e Intel/x64).
+  # macos-14 roda em runners Apple Silicon nativos; macos-13 roda em runners
+  # Intel — nao ha cross-compilation aqui, cada job gera o binario nativo da
+  # sua propria arquitetura (jpackage embute uma JVM da MESMA arquitetura do
+  # runner que o executou).
+  #
+  # IMPORTANTE — assinatura/notarizacao: este workflow gera um .dmg NAO
+  # assinado (nao ha um Apple Developer ID configurado neste repositorio).
+  # O macOS (Gatekeeper) vai bloquear a abertura direta ("app esta
+  # danificado" / "desenvolvedor nao identificado") ate o usuario liberar
+  # manualmente (clique direito -> Abrir, ou "xattr -cr" no .app depois de
+  # extrair o .dmg). Para distribuir sem esse aviso, o proximo passo seria
+  # assinar e notarizar com uma conta Apple Developer Program (paga).
+  # ==========================================================================
+  macos-installer:
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - runner: macos-14
+            arch: arm64
+            label: "Apple Silicon"
+          - runner: macos-13
+            arch: x64
+            label: "Intel"
+    steps:
+      - name: Checkout do codigo
+        uses: actions/checkout@v4
+
+      - name: Configurar JDK 25 (inclui o jpackage)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      - name: Derivar a versao a partir da tag (remove o 'v')
+        id: ver
+        shell: bash
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Sincronizar o pom.xml com a versao da tag
+        run: mvn -B versions:set -DnewVersion="${{ steps.ver.outputs.version }}" -DgenerateBackupPoms=false
+
+      - name: Compilar e gerar o fat JAR
+        run: mvn -B -DskipTests package
+
+      - name: Preparar pasta de entrada do jpackage (apenas o fat jar)
+        run: |
+          mkdir -p target/dist
+          cp target/nureal-database-ide.jar target/dist/
+
+      - name: Gerar o icone .icns a partir do PNG existente
+        # O projeto so tem .ico (Windows) e .svg/.png (UI) — o macOS exige
+        # .icns. Gerado em build-time com as ferramentas que ja vem no
+        # runner (sips/iconutil), a partir do maior PNG disponivel
+        # (nureal-256.png). Fonte com 256x256: os tamanhos @2x acima de 256
+        # ficam com upscale (qualidade menor que um .icns feito a mao a
+        # partir de um PNG maior, mas funcional).
+        run: |
+          ICONSET=target/nureal.iconset
+          mkdir -p "$ICONSET"
+          SRC=src/main/resources/com/nureal/ide/icon/nureal-256.png
+          sips -z 16 16   "$SRC" --out "$ICONSET/icon_16x16.png"
+          sips -z 32 32   "$SRC" --out "$ICONSET/icon_16x16@2x.png"
+          sips -z 32 32   "$SRC" --out "$ICONSET/icon_32x32.png"
+          sips -z 64 64   "$SRC" --out "$ICONSET/icon_32x32@2x.png"
+          sips -z 128 128 "$SRC" --out "$ICONSET/icon_128x128.png"
+          sips -z 256 256 "$SRC" --out "$ICONSET/icon_128x128@2x.png"
+          sips -z 256 256 "$SRC" --out "$ICONSET/icon_256x256.png"
+          cp "$SRC" "$ICONSET/icon_256x256@2x.png"
+          cp "$SRC" "$ICONSET/icon_512x512.png"
+          cp "$SRC" "$ICONSET/icon_512x512@2x.png"
+          iconutil -c icns "$ICONSET" -o target/nureal.icns
+
+      - name: Gerar o instalador macOS (.dmg)
+        run: |
+          jpackage \
+            --type dmg \
+            --name "Nureal Database IDE" \
+            --app-version "${{ steps.ver.outputs.version }}" \
+            --input target/dist \
+            --main-jar nureal-database-ide.jar \
+            --main-class com.nureal.ide.App \
+            --icon target/nureal.icns \
+            --dest target/installer \
+            --vendor "Nureal" \
+            --mac-package-identifier com.nureal.databaseide \
+            --mac-package-name "Nureal IDE"
+
+      - name: Renomear o .dmg incluindo a arquitetura
+        # jpackage gera sempre "Nureal Database IDE-<versao>.dmg", sem
+        # distinguir arquitetura — sem renomear, o job Apple Silicon e o job
+        # Intel gerariam o MESMO nome de arquivo, e o upload do segundo
+        # sobrescreveria o do primeiro no Release.
+        run: |
+          cd target/installer
+          for f in *.dmg; do
+            mv "$f" "Nureal Database IDE-${{ steps.ver.outputs.version }}-${{ matrix.arch }}.dmg"
+          done
+          ls -la
+
+      - name: Publicar artefatos (macOS ${{ matrix.label }})
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-installer-${{ matrix.arch }}
+          path: target/installer/*.dmg
+          retention-days: 1
+
+  # ==========================================================================
+  # Linux — .deb (Debian/Ubuntu) e .AppImage (portavel, roda em qualquer
+  # distro sem instalar nada). Um unico job gera os dois a partir da mesma
+  # app-image, igual ao Windows (app-image -> empacota em cada formato).
+  # ==========================================================================
+  linux-installer:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do codigo
+        uses: actions/checkout@v4
+
+      - name: Configurar JDK 25 (inclui o jpackage)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      - name: Derivar a versao a partir da tag (remove o 'v')
+        id: ver
+        shell: bash
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Sincronizar o pom.xml com a versao da tag
+        run: mvn -B versions:set -DnewVersion="${{ steps.ver.outputs.version }}" -DgenerateBackupPoms=false
+
+      - name: Compilar e gerar o fat JAR
+        run: mvn -B -DskipTests package
+
+      - name: Preparar pasta de entrada do jpackage (apenas o fat jar)
+        run: |
+          mkdir -p target/dist
+          cp target/nureal-database-ide.jar target/dist/
+
+      - name: Gerar a imagem da aplicacao (app-image)
+        # Mesma base para os dois formatos abaixo (.deb e .AppImage) — evita
+        # compilar a app-image duas vezes.
+        run: |
+          jpackage \
+            --type app-image \
+            --name "Nureal Database IDE" \
+            --app-version "${{ steps.ver.outputs.version }}" \
+            --input target/dist \
+            --main-jar nureal-database-ide.jar \
+            --main-class com.nureal.ide.App \
+            --icon src/main/resources/com/nureal/ide/icon/nureal-256.png \
+            --dest target/appimage \
+            --vendor "Nureal"
+
+      - name: Gerar o instalador .deb a partir da app-image
+        run: |
+          mkdir -p target/installer
+          jpackage \
+            --type deb \
+            --name "Nureal Database IDE" \
+            --app-version "${{ steps.ver.outputs.version }}" \
+            --app-image "target/appimage/Nureal Database IDE" \
+            --dest target/installer \
+            --vendor "Nureal" \
+            --linux-shortcut \
+            --linux-menu-group "Development" \
+            --linux-app-category "database" \
+            --description "IDE para desenvolvedores de banco de dados" \
+            --maintainer "alves.cvinicius@gmail.com"
+
+      - name: Montar o AppDir para o .AppImage
+        # appimagetool exige uma pasta no formato "AppDir": AppRun (o
+        # executavel a rodar), um .desktop na raiz e um icone na raiz com o
+        # MESMO nome referenciado em "Icon=" do .desktop. Reaproveita a
+        # mesma app-image gerada acima, so adicionando esses 3 itens por
+        # cima — sem rebuildar nada.
+        run: |
+          APPDIR="target/AppDir"
+          rm -rf "$APPDIR"
+          cp -r "target/appimage/Nureal Database IDE" "$APPDIR"
+          ln -sf "bin/Nureal Database IDE" "$APPDIR/AppRun"
+          cp src/main/resources/com/nureal/ide/icon/nureal-256.png "$APPDIR/nureal.png"
+          cat > "$APPDIR/nureal-database-ide.desktop" << 'EOF'
+          [Desktop Entry]
+          Type=Application
+          Name=Nureal Database IDE
+          Exec=AppRun
+          Icon=nureal
+          Categories=Development;Database;
+          Terminal=false
+          EOF
+
+      - name: Baixar o appimagetool
+        run: |
+          curl -L -o appimagetool "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
+          chmod +x appimagetool
+
+      - name: Gerar o .AppImage
+        # --appimage-extract-and-run: appimagetool e ele mesmo um AppImage,
+        # que normalmente precisa de FUSE para rodar — nem sempre disponivel
+        # no runner. Esta flag extrai e roda sem depender de FUSE.
+        run: |
+          ./appimagetool --appimage-extract-and-run target/AppDir \
+            "target/installer/Nureal Database IDE-${{ steps.ver.outputs.version }}-x86_64.AppImage"
+
+      - name: Publicar artefatos (Linux)
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-installer
+          path: |
+            target/installer/*.deb
+            target/installer/*.AppImage
+          retention-days: 1
+
+  # ==========================================================================
+  # Junta os artefatos dos 3 jobs acima e publica TUDO num unico GitHub
+  # Release (mesma tag) — um job separado, que so roda depois que Windows,
+  # macOS (as 2 arquiteturas) e Linux terminarem com sucesso.
+  # ==========================================================================
+  publish-release:
+    needs: [windows-installer, macos-installer, linux-installer]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Baixar todos os artefatos dos jobs anteriores
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
 
       - name: Publicar no GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
           name: Nureal Database IDE ${{ github.ref_name }}
+          body: |
+            Instaladores desta versao:
+
+            - **Windows 10 ou superior**: `.msi`
+            - **macOS (Apple Silicon)**: `.dmg` (arquivo `-arm64.dmg`)
+            - **macOS (Intel)**: `.dmg` (arquivo `-x64.dmg`)
+            - **Linux**: `.deb` (Debian/Ubuntu) ou `.AppImage` (qualquer distro, sem instalar)
+
+            > macOS: o `.dmg` nao e assinado/notarizado. Se o Gatekeeper bloquear a
+            > abertura ("app esta danificado" ou "desenvolvedor nao identificado"),
+            > clique com o botao direito no app -> Abrir, ou rode
+            > `xattr -cr "Nureal Database IDE.app"` no Terminal apos copiar o app
+            > para Aplicativos.
           files: |
-            target/installer/*.msi
-            target/nureal-database-ide.jar
+            artifacts/windows-installer/*.msi
+            artifacts/windows-installer/*.jar
+            artifacts/macos-installer-arm64/*.dmg
+            artifacts/macos-installer-x64/*.dmg
+            artifacts/linux-installer/*.deb
+            artifacts/linux-installer/*.AppImage

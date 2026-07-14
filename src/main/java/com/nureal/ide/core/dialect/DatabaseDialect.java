@@ -123,6 +123,19 @@ public interface DatabaseDialect {
     String createSchemaStatement(String name);
 
     /**
+     * Comando para APAGAR um esquema (banco) inteiro — DESTRUTIVO e
+     * IRREVERSIVEL: remove todas as tabelas, dados, views, triggers,
+     * procedures/functions e privilegios concedidos sobre esse esquema.
+     * {@code name} ja deve vir validado/limpo pelo chamador (mesmo criterio
+     * de {@link #createSchemaStatement}); o chamador (ver
+     * {@code MainWindow#deleteSchema}) e responsavel por exigir uma
+     * confirmacao forte do usuario (digitar o nome do esquema) ANTES de
+     * chegar aqui — esta interface so monta o SQL, nao decide se e seguro
+     * executar.
+     */
+    String dropSchemaStatement(String name);
+
+    /**
      * Comando para criar uma tabela nova a partir da especificacao coletada
      * pelo {@code DdlAssistantDialog} (com.nureal.ide.ui) — nome da tabela,
      * colunas (tipo, tamanho, nulo, chave primaria, auto increment, default,

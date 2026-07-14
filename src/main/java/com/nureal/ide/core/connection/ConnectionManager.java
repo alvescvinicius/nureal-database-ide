@@ -72,4 +72,27 @@ public class ConnectionManager implements AutoCloseable {
             connection = null;
         }
     }
+
+    /**
+     * Testa se e possivel abrir uma conexao com o perfil informado, sem
+     * afetar a conexao atual desta instancia (nem de nenhuma outra): abre
+     * uma conexao propria, so para validar, e fecha em seguida. Usado pelo
+     * botao "Testar conexao" do formulario de Nova/Editar conexao (ver
+     * com.nureal.ide.ui.ConnectionEditDialog), para o usuario conferir
+     * host/porta/usuario/senha ANTES de salvar, sem precisar fechar o
+     * formulario e conectar de verdade primeiro.
+     * <p>
+     * Timeout curto (5s) para nao travar a UI esperando um host
+     * inalcancavel por muito tempo. Lanca {@link SQLException} com a causa
+     * original em caso de falha (host errado, credencial invalida, porta
+     * fechada, etc.) — o chamador decide como mostrar a mensagem.
+     */
+    public static void testConnection(DatabaseDialect dialect, ConnectionProfile profile) throws SQLException {
+        String url = dialect.buildJdbcUrl(profile);
+        DriverManager.setLoginTimeout(5);
+        try (Connection test = DriverManager.getConnection(url, profile.user(), profile.password())) {
+            // Conexao aberta com sucesso: nada mais a verificar. O
+            // try-with-resources ja fecha antes de devolver.
+        }
+    }
 }

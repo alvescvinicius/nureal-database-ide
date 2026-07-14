@@ -109,6 +109,11 @@ public class MySqlDialect implements DatabaseDialect {
         return "CREATE DATABASE " + quoteIdentifier(name);
     }
 
+    @Override
+    public String dropSchemaStatement(String name) {
+        return "DROP DATABASE " + quoteIdentifier(name);
+    }
+
     /**
      * Monta o CREATE TABLE a partir da especificacao coletada pelo
      * com.nureal.ide.ui.DdlAssistantDialog. Uma unica PRIMARY KEY (composta, se mais de uma

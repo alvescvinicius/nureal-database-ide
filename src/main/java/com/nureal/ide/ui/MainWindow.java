@@ -3007,6 +3007,19 @@ public class MainWindow extends JFrame {
 	 * objetos.
 	 */
 	private void openSchema(String schemaName) {
+		openSchema(schemaName, null);
+	}
+
+	/**
+	 * Igual a {@link #openSchema(String)}, mas roda {@code onOpened} logo
+	 * apos o esquema terminar de abrir com sucesso (ex.: encadear a abertura
+	 * do Diagrama ER pro esquema que acabou de carregar, quando o clique
+	 * direito veio de um item da LISTA de esquemas — ver
+	 * {@link #buildSchemaPickContextMenu} — em vez de um esquema ja aberto,
+	 * onde {@link #openErDiagram()} sozinho ja basta). {@code null} = nao
+	 * encadeia nada (comportamento igual ao de antes).
+	 */
+	private void openSchema(String schemaName, Runnable onOpened) {
 		statusBar.setText(" Abrindo esquema " + schemaName + "...");
 		new SwingWorker<SchemaInfo, Void>() {
 			@Override
@@ -3060,6 +3073,9 @@ public class MainWindow extends JFrame {
 					setConnectedState(schemaName);
 					updateWorkspaceContextBar();
 					statusBar.setText(" Esquema " + schemaName + "  (" + schema.tables().size() + " tabelas)");
+					if (onOpened != null) {
+						onOpened.run();
+					}
 				} catch (Exception ex) {
 					showError("Falha ao abrir o esquema", ex);
 					statusBar.setText(" Erro ao abrir esquema");
@@ -4599,6 +4615,10 @@ public class MainWindow extends JFrame {
 			buildSchemaRootContextMenu().show(objectTree, e.getX(), e.getY());
 			return;
 		}
+		if (obj.type() == NodeType.SCHEMA_PICK) {
+			buildSchemaPickContextMenu(obj.name()).show(objectTree, e.getX(), e.getY());
+			return;
+		}
 		if (obj.type() == NodeType.CATEGORY && "TABLE".equals(obj.kind())) {
 			buildTablesCategoryContextMenu().show(objectTree, e.getX(), e.getY());
 			return;
@@ -4690,6 +4710,42 @@ public class MainWindow extends JFrame {
 		JMenuItem backupRestore = new JMenuItem("Backup e restauracao...");
 		backupRestore.addActionListener(a -> openBackupRestore());
 		menu.add(backupRestore);
+		return menu;
+	}
+
+	/**
+	 * Menu de contexto de um ITEM da LISTA de esquemas (no do tipo
+	 * {@link NodeType#SCHEMA_PICK}, ver {@link #buildSchemaPicker}) —
+	 * diferente de {@link #buildSchemaRootContextMenu}, que e do esquema JA
+	 * ABERTO (raiz da arvore quando ha so um schema/ja navegou pra dentro
+	 * dele). Pedido explicito do usuario: clique direito num esquema da lista
+	 * nao fazia NADA (nenhum dos "if" de {@link #maybeShowObjectContextMenu}
+	 * batia com {@code SCHEMA_PICK}) — precisava pelo menos de abrir, ver o
+	 * diagrama ER e excluir, sem precisar abrir o esquema primeiro so pra
+	 * chegar nessas acoes pelo menu da raiz.
+	 * <p>
+	 * SEM "Editar"/renomear de proposito: o MySQL nao tem um jeito nativo e
+	 * seguro de renomear um banco (o antigo {@code RENAME DATABASE} foi
+	 * removido ha muitas versoes por risco de perda de dados) — oferecer essa
+	 * opcao aqui exigiria simular via CREATE+RENAME TABLE+DROP, arriscado
+	 * demais para entrar sem um pedido explicito nesse sentido.
+	 */
+	private JPopupMenu buildSchemaPickContextMenu(String schemaName) {
+		JPopupMenu menu = new JPopupMenu();
+		JMenuItem open = new JMenuItem("Abrir");
+		open.addActionListener(a -> openSchema(schemaName));
+		menu.add(open);
+		JMenuItem erDiagram = new JMenuItem("Diagrama ER...");
+		// O diagrama le currentSchema.tables() (ver openErDiagram) — que so
+		// existe depois que o esquema foi carregado. Encadeia via o parametro
+		// onOpened de openSchema(String, Runnable) em vez de duplicar a
+		// logica de carregamento aqui.
+		erDiagram.addActionListener(a -> openSchema(schemaName, this::openErDiagram));
+		menu.add(erDiagram);
+		menu.addSeparator();
+		JMenuItem delete = new JMenuItem("Excluir esquema...");
+		delete.addActionListener(a -> deleteSchema(schemaName));
+		menu.add(delete);
 		return menu;
 	}
 
@@ -4822,6 +4878,75 @@ public class MainWindow extends JFrame {
 				} catch (Exception ex) {
 					showError("Falha ao criar esquema", ex);
 					statusBar.setText(" Falha ao criar esquema.");
+				}
+			}
+		}.execute();
+	}
+
+	/**
+	 * Apaga um esquema (banco) inteiro do servidor da conexao ativa — {@code
+	 * DROP DATABASE}, via {@link com.nureal.ide.core.dialect.DatabaseDialect#dropSchemaStatement}.
+	 * Acessivel pelo clique direito num item da LISTA de esquemas (ver
+	 * {@link #buildSchemaPickContextMenu}). DESTRUTIVO e IRREVERSIVEL: apaga
+	 * todas as tabelas/dados/views/triggers/procedures do esquema, sem
+	 * confirmacao de risco padrao ({@link #confirmRiskyStatements}) bastar —
+	 * exige DIGITAR o nome exato do esquema antes de habilitar a exclusao
+	 * (mesmo padrao de confirmacao usado por GitHub/GitLab para apagar um
+	 * repositorio), dificil de disparar sem querer.
+	 */
+	private void deleteSchema(String schemaName) {
+		if (activeWorkspace == null || !activeWorkspace.mgr.isConnected()) {
+			statusBar.setText(" Conecte-se a um servidor antes de excluir um esquema.");
+			return;
+		}
+		String typed = JOptionPane.showInputDialog(this,
+				"Isto apaga TODAS as tabelas, dados, views, triggers e procedures\n"
+						+ "do esquema \"" + schemaName + "\" — SEM VOLTA.\n\n"
+						+ "Para confirmar, digite o nome exato do esquema:",
+				"Excluir esquema \"" + schemaName + "\"", JOptionPane.WARNING_MESSAGE);
+		if (typed == null) {
+			return; // cancelado
+		}
+		if (!typed.equals(schemaName)) {
+			JOptionPane.showMessageDialog(this,
+					"O nome digitado nao confere com \"" + schemaName + "\". Nada foi excluido.",
+					"Excluir esquema", JOptionPane.WARNING_MESSAGE);
+			return;
+		}
+		Conexao ws = activeWorkspace;
+		// Era o esquema ABERTO agora (nao so um item da lista) quando o
+		// clique direito veio da raiz enquanto ainda mostra os itens da
+		// lista logo abaixo (caso raro, mas possivel) — decide ANTES de
+		// disparar o DROP, nao depois, pra nao depender do estado de
+		// currentSchema ja ter mudado por alguma outra acao concorrente.
+		boolean wasOpenSchema = currentSchema != null && schemaName.equals(currentSchema.name());
+		statusBar.setText(" Excluindo esquema \"" + schemaName + "\"...");
+		new SwingWorker<List<String>, Void>() {
+			@Override
+			protected List<String> doInBackground() throws Exception {
+				Connection conn = ws.mgr.getConnection();
+				try (Statement st = conn.createStatement()) {
+					st.executeUpdate(dialect.dropSchemaStatement(schemaName));
+				}
+				return metadataService.listSchemas(conn);
+			}
+
+			@Override
+			protected void done() {
+				try {
+					List<String> schemas = get();
+					ws.schemaList = schemas;
+					statusBar.setText(" Esquema \"" + schemaName + "\" excluido.");
+					if (wasOpenSchema && ws == activeWorkspace) {
+						setCurrentSchema(null);
+					}
+					if (ws == activeWorkspace) {
+						buildSchemaPicker(schemas);
+						updateWorkspaceContextBar();
+					}
+				} catch (Exception ex) {
+					showError("Falha ao excluir o esquema", ex);
+					statusBar.setText(" Falha ao excluir esquema.");
 				}
 			}
 		}.execute();

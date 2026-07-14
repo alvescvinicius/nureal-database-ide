@@ -1,14 +1,18 @@
 # Nureal Database IDE
 
-IDE para desenvolvedores de banco de dados. Desktop (Windows), começando por **MySQL**
-e evoluindo para multi-banco. Foco principal: **autocomplete ultrarrápido** ao editar SQL.
+IDE para desenvolvedores de banco de dados. Desktop, multiplataforma (Windows, macOS e
+Linux — ver [Compatibilidade multiplataforma](#compatibilidade-multiplataforma)),
+começando por **MySQL** e evoluindo para multi-banco. Foco principal: **autocomplete
+ultrarrápido** ao editar SQL.
 
 ## Status: protótipo em evolução (v0.4)
 
 O que já funciona:
 
 - **Gerenciador de conexões persistente**: conexões salvas em arquivo na pasta do
-  usuário, listadas no painel esquerdo. Duplo-clique conecta. Nova/Editar/Excluir.
+  usuário, listadas no painel esquerdo. Duplo-clique conecta. Nova/Editar/Excluir,
+  com botão **"Testar conexão"** no formulário para validar host/porta/usuário/senha
+  antes de salvar (sem precisar sair do formulário e conectar de verdade primeiro)
 - Conexão MySQL com senha opcional (salva cifrada ou solicitada ao conectar)
 - Leitura da estrutura do banco em **uma única consulta** ao `information_schema`
 - Cache de metadados em memória (autocomplete nunca consulta o banco ao digitar)
@@ -90,9 +94,21 @@ mvn exec:java
 
 ## Gerar o instalador e publicar no GitHub (Releases)
 
-O projeto já vem com um workflow do GitHub Actions que, **ao publicar uma tag**,
-compila tudo e gera automaticamente um **instalador Windows (.msi)** que embute o
-Java — quem baixar não precisa ter Java instalado.
+O projeto já vem com um workflow do GitHub Actions (`.github/workflows/release.yml`)
+que, **ao publicar uma tag**, compila tudo e gera automaticamente os instaladores das
+3 plataformas em paralelo, cada um com a Java embutida (quem baixar não precisa ter
+Java instalado):
+
+| Plataforma | Arquivo(s) | Job |
+|---|---|---|
+| Windows 10 ou superior | `.msi` | `windows-installer` |
+| macOS — Apple Silicon | `.dmg` (sufixo `-arm64`) | `macos-installer` (runner `macos-14`) |
+| macOS — Intel | `.dmg` (sufixo `-x64`) | `macos-installer` (runner `macos-13`) |
+| Linux (qualquer distro) | `.AppImage` | `linux-installer` |
+| Linux (Debian/Ubuntu) | `.deb` | `linux-installer` |
+
+Um job final (`publish-release`) espera os 3 anteriores terminarem e publica todos os
+artefatos juntos num único GitHub Release.
 
 ### Primeira vez: subir o projeto para o GitHub
 ```bash
@@ -105,21 +121,30 @@ git remote add origin https://github.com/<seu-usuario>/<seu-repo>.git
 git push -u origin main
 ```
 
-### Publicar uma versão (gera o instalador sozinho)
+### Publicar uma versão (gera todos os instaladores sozinho)
 ```bash
 git tag v0.1.0
 git push origin v0.1.0
 ```
-Isso dispara o workflow `.github/workflows/release.yml`. Em alguns minutos, vá em
-**Releases** no GitHub: o `Nureal Database IDE-0.1.0.msi` (e o `.jar` portátil)
-estarão lá para download. Para uma nova versão, repita com `v0.2.0`, etc.
+Isso dispara o workflow. Em alguns minutos, vá em **Releases** no GitHub: o `.msi`,
+os dois `.dmg`, o `.deb`, o `.AppImage` e o `.jar` portátil estarão lá para download.
+Para uma nova versão, repita com `v0.2.0`, etc.
 
 ### Instalar em outra máquina
-Baixe o `.msi` do Releases, dê duplo-clique e instale. Vai aparecer no Menu
-Iniciar como **Nureal Database IDE** — não precisa de Java na máquina.
+- **Windows**: baixe o `.msi`, dê duplo-clique e instale (Windows 10 ou superior).
+- **macOS**: baixe o `.dmg` da sua arquitetura (`-arm64` para Apple Silicon M1/M2/M3/M4,
+  `-x64` para Intel), abra e arraste para Aplicativos. O `.dmg` **não é assinado/
+  notarizado** (não há conta Apple Developer configurada neste repositório) — se o
+  Gatekeeper bloquear a abertura, clique com o botão direito no app → *Abrir*, ou rode
+  `xattr -cr "Nureal Database IDE.app"` no Terminal.
+- **Linux**: instale o `.deb` (`sudo dpkg -i *.deb` em Debian/Ubuntu) **ou** dê
+  permissão de execução ao `.AppImage` (`chmod +x *.AppImage`) e rode direto, sem
+  instalar nada — funciona em qualquer distro.
 
-### (Opcional) Gerar o instalador localmente, no seu PC Windows
-Precisa de JDK 17 e do [WiX Toolset 3.x](https://github.com/wixtoolset/wix3/releases):
+### (Opcional) Gerar o instalador localmente
+Precisa de JDK 17+ com `jpackage`.
+
+**Windows** (adicionalmente, [WiX Toolset 3.x](https://github.com/wixtoolset/wix3/releases)):
 ```powershell
 mvn -DskipTests package
 mkdir target\dist
@@ -129,6 +154,61 @@ jpackage --type msi --name "Nureal Database IDE" --app-version 0.1.0 `
   --main-class com.nureal.ide.App --dest target\installer `
   --win-menu --win-shortcut
 ```
+
+**macOS**:
+```bash
+mvn -DskipTests package
+mkdir -p target/dist && cp target/nureal-database-ide.jar target/dist/
+jpackage --type dmg --name "Nureal Database IDE" --app-version 0.1.0 \
+  --input target/dist --main-jar nureal-database-ide.jar \
+  --main-class com.nureal.ide.App --dest target/installer
+```
+
+**Linux** (`.deb`; para `.AppImage` ver os passos do workflow, que usa o
+`appimagetool`):
+```bash
+mvn -DskipTests package
+mkdir -p target/dist && cp target/nureal-database-ide.jar target/dist/
+jpackage --type deb --name "Nureal Database IDE" --app-version 0.1.0 \
+  --input target/dist --main-jar nureal-database-ide.jar \
+  --main-class com.nureal.ide.App --dest target/installer \
+  --linux-shortcut
+```
+
+## Compatibilidade multiplataforma
+
+O código já é escrito para rodar em Windows, macOS e Linux sem caminhos condicionais
+por sistema operacional na maior parte da IDE (Swing + JDK puro). Pontos que merecem
+atenção:
+
+- **Persistência de conexões e chave de criptografia** (`ConnectionStore`/`LocalVault`):
+  usa `System.getProperty("user.home")` (funciona nos 3 sistemas) e trata a ausência de
+  permissões POSIX no Windows com um `catch` dedicado — já testado/pensado para os 3.
+- **Fonte da interface**: a lista de fontes preferidas já inclui `Segoe UI` (Windows),
+  `SF Pro Text` (macOS) e `Noto Sans`/`DejaVu Sans`/`Liberation Sans` (Linux), com
+  fallback para a fonte padrão do sistema se nenhuma bater.
+- **Backup/Restore via `mysqldump`/`mysql`** (`MySqlDumpRunner`): chama os binários
+  pelo nome (resolvido via `PATH`), sem caminho fixo de nenhum SO — funciona em
+  qualquer plataforma desde que o MySQL Client Tools esteja instalado.
+- **Atualização automática** (`UpdateInstallLauncher`): hoje só sabe *auto-instalar*
+  no Windows (`msiexec /i arquivo.msi`). Em macOS/Linux, a checagem de nova versão
+  continua funcionando, mas a IDE cai no "plano B" (abre a página do Release no
+  navegador) em vez de instalar sozinha — os novos instaladores `.dmg`/`.deb`/
+  `.AppImage` já ficam publicados no Release, só não são baixados/instalados
+  automaticamente pela própria IDE ainda.
+- **Atalhos de teclado**: todos usam `Ctrl` (ex.: `Ctrl+Enter` para executar,
+  `Ctrl+Shift+F` para formatar). Funciona em macOS (o teclado tem uma tecla Ctrl),
+  mas não segue a convenção nativa do Mac de usar `Cmd` — puramente cosmético, não
+  impede o uso.
+- **Barra de título customizada** (`JFrame.setDefaultLookAndFeelDecorated`, via
+  FlatLaf): suportada nos 3 sistemas pelo FlatLaf, com aparência um pouco menos
+  "nativa" no macOS do que no Windows/Linux (limitação conhecida do FlatLaf, não
+  específica desta IDE).
+
+Nada encontrado que impeça a IDE de abrir/funcionar em macOS ou Linux — o app nunca
+tinha sido empacotado/testado nessas plataformas antes (só existia instalador
+Windows), então vale um teste manual do `.dmg`/`.AppImage`/`.deb` gerados pelo
+workflow antes de anunciar suporte oficial.
 
 ## Requisitos
 
