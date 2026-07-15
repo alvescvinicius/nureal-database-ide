@@ -101,7 +101,7 @@ Java instalado):
 
 | Plataforma | Arquivo(s) | Job |
 |---|---|---|
-| Windows 10 ou superior | `.exe` | `windows-installer` |
+| Windows 10 ou superior | `.exe` (uso comum) e `.msi` (silencioso/TI) | `windows-installer` |
 | macOS — Apple Silicon | `.dmg` (sufixo `-arm64`) | `macos-installer` (runner `macos-14`) |
 | macOS — Intel | `.dmg` (sufixo `-x64`) | `macos-installer` (runner `macos-13`) |
 | Linux (qualquer distro) | `.AppImage` | `linux-installer` |
@@ -127,14 +127,16 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 Isso dispara o workflow. Em alguns minutos, vá em **Releases** no GitHub: o `.exe`,
-os dois `.dmg`, o `.deb`, o `.AppImage` e o `.jar` portátil estarão lá para download.
+o `.msi`, os dois `.dmg`, o `.deb`, o `.AppImage` e o `.jar` portátil estarão lá para
+download.
 Para uma nova versão, repita com `v0.2.0`, etc.
 
 ### Instalar em outra máquina
-- **Windows**: baixe o `.exe`, dê duplo-clique e instale (Windows 10 ou superior).
-  Como o instalador ainda não é assinado digitalmente, o SmartScreen pode avisar
-  "O Windows protegeu o computador" — clique em *Mais informações* → *Executar
-  assim mesmo*.
+- **Windows**: baixe o `.exe` (uso comum: dê duplo-clique e instale, Windows 10 ou
+  superior) **ou** o `.msi` (instalação silenciosa/TI — `msiexec /i arquivo.msi`,
+  Group Policy, SCCM). Como nenhum dos dois é assinado digitalmente, o SmartScreen
+  pode avisar "O Windows protegeu o computador" — clique em *Mais informações* →
+  *Executar assim mesmo*.
 - **macOS**: baixe o `.dmg` da sua arquitetura (`-arm64` para Apple Silicon M1/M2/M3/M4,
   `-x64` para Intel), abra e arraste para Aplicativos. O `.dmg` **não é assinado/
   notarizado** (não há conta Apple Developer configurada neste repositório) — se o

@@ -11,10 +11,11 @@ permissions:
 
 jobs:
   # ==========================================================================
-  # Windows — .exe (bootstrapper WiX Burn; compativel com Windows 10 e
-  # superior. jpackage/WiX nao empacotam nada especifico de versao do
-  # Windows, mas o instalador so foi validado a partir do Windows 10 —
-  # versoes anteriores nao sao suportadas).
+  # Windows — .exe (bootstrapper WiX Burn, uso comum) E .msi (instalacao
+  # silenciosa/TI), os dois gerados a partir da mesma app-image (compativel
+  # com Windows 10 e superior; jpackage/WiX nao empacotam nada especifico de
+  # versao do Windows, mas o instalador so foi validado a partir do Windows
+  # 10 — versoes anteriores nao sao suportadas).
   # ==========================================================================
   windows-installer:
     runs-on: windows-latest
@@ -61,7 +62,7 @@ jobs:
       - name: Compilar e gerar o fat JAR
         run: mvn -B -DskipTests package
 
-      - name: Instalar o WiX Toolset (jpackage usa para gerar o .exe)
+      - name: Instalar o WiX Toolset (jpackage usa para gerar o .exe e o .msi)
         run: choco install wixtoolset --no-progress -y
 
       - name: Preparar pasta de entrada do jpackage (apenas o fat jar)
@@ -71,11 +72,12 @@ jobs:
           Copy-Item target/nureal-database-ide.jar target/dist/
 
       - name: Gerar a imagem da aplicacao (app-image)
-        # Passo 1 de 3 do instalador (era so 1 passo antes): gera a "app
+        # Passo 1 de 4 do instalador (era so 1 passo antes): gera a "app
         # image" (a pasta com o .exe launcher + a JVM embutida + o jar) SEM
-        # empacotar no instalador .exe ainda — precisamos dela solta pra
+        # empacotar em instalador nenhum ainda — precisamos dela solta pra
         # poder editar o .cfg no proximo passo (ver "Desativar o reinicio do
-        # launcher") antes de gerar o instalador de fato.
+        # launcher") antes de gerar os instaladores de fato (.exe e .msi,
+        # ambos a partir desta MESMA app-image).
         shell: pwsh
         run: |
           Import-Module "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1"
@@ -92,16 +94,17 @@ jobs:
             --vendor "Nureal"
 
       - name: Desativar o reinicio do launcher (win.norestart=true)
-        # Passo 2 de 3: injeta "win.norestart=true" na secao [Application] do
+        # Passo 2 de 4: injeta "win.norestart=true" na secao [Application] do
         # .cfg que o jpackage acabou de gerar dentro da app-image — property
         # que o launcher .exe (JDK 24+, ver comentario no passo de
         # "Configurar JDK") le pra NUNCA reiniciar a si mesmo, eliminando de
         # vez o caminho de codigo (loop de GetMessage()) que causava o erro
         # "GetMessage() failed / System error 1400" relatado pelo usuario. O
         # jpackage nao tem uma flag de linha de comando pra isto — so da pra
-        # aplicar editando o .cfg gerado, por isso o build vira 3 passos em
-        # vez de 1 (gerar app-image -> editar .cfg -> empacotar .exe a
-        # partir da app-image ja editada).
+        # aplicar editando o .cfg gerado, por isso o build vira 4 passos em
+        # vez de 1 (gerar app-image -> editar .cfg -> empacotar .exe ->
+        # empacotar .msi, os dois ultimos a partir da mesma app-image ja
+        # editada).
         shell: pwsh
         run: |
           $cfgPath = "target/appimage/Nureal Database IDE/app/Nureal Database IDE.cfg"
@@ -125,17 +128,20 @@ jobs:
           Write-Host "win.norestart=true injetado em $cfgPath"
 
       - name: Gerar o instalador Windows (.exe) a partir da app-image
-        # Passo 3 de 3: empacota a app-image (ja com o .cfg editado) num
+        # Passo 3 de 4: empacota a app-image (ja com o .cfg editado) num
         # .exe (bootstrapper WiX Burn, que embute um .msi por baixo) — usa
         # --app-image em vez de --input/--main-jar/--main-class (esses sao
         # so pra CRIAR uma app-image do zero, ver passo 1; aqui so estamos
         # empacotando a que ja existe). --win-upgrade-uuid fixo garante que
         # o Windows reconheca instalacoes de versoes anteriores (upgrade em
-        # vez de instalacao lado a lado a cada release) mesmo com --type
-        # exe. Trocado de --type msi para --type exe porque o site publica
-        # um unico botao "Baixar" por plataforma apontando direto pro asset
-        # do GitHub Release, e o .exe roda com duplo-clique sem exigir que o
-        # usuario saiba o que fazer com um .msi.
+        # vez de instalacao lado a lado a cada release). Publicamos os DOIS
+        # formatos (.exe aqui, .msi no passo seguinte) a partir da MESMA
+        # app-image (ja com win.norestart=true) — .exe pro uso comum
+        # (duplo-clique, o auto-update embutido na IDE baixa e roda este),
+        # .msi pra instalacao silenciosa/TI (Group Policy, SCCM, msiexec
+        # /quiet). Mesmo --win-upgrade-uuid nos dois pra qualquer um dos
+        # dois reconhecer uma instalacao anterior feita pelo outro como
+        # upgrade, em vez de instalacao lado a lado.
         shell: pwsh
         run: |
           Import-Module "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1"
@@ -152,12 +158,32 @@ jobs:
             --win-shortcut `
             --win-upgrade-uuid "8f14e1c2-6b3a-4b1e-9c2d-1a2b3c4d5e6f"
 
+      - name: Gerar o instalador Windows (.msi) a partir da app-image
+        # Passo 4 de 4: mesma app-image, mesmo --win-upgrade-uuid, so troca
+        # --type pra msi — ver comentario do passo anterior.
+        shell: pwsh
+        run: |
+          Import-Module "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1"
+          refreshenv
+          jpackage `
+            --type msi `
+            --name "Nureal Database IDE" `
+            --app-version "${{ steps.ver.outputs.version }}" `
+            --app-image "target/appimage/Nureal Database IDE" `
+            --dest target/installer `
+            --vendor "Nureal" `
+            --win-dir-chooser `
+            --win-menu `
+            --win-shortcut `
+            --win-upgrade-uuid "8f14e1c2-6b3a-4b1e-9c2d-1a2b3c4d5e6f"
+
       - name: Publicar artefatos (Windows)
         uses: actions/upload-artifact@v4
         with:
           name: windows-installer
           path: |
             target/installer/*.exe
+            target/installer/*.msi
             target/nureal-database-ide.jar
           retention-days: 1
 
@@ -431,15 +457,16 @@ jobs:
           body: |
             Instaladores desta versao:
 
-            - **Windows 10 ou superior**: `.exe`
+            - **Windows 10 ou superior**: `.exe` (recomendado, uso comum) ou `.msi`
+              (instalacao silenciosa/TI — Group Policy, SCCM, `msiexec /quiet`)
             - **macOS (Apple Silicon)**: `.dmg` (arquivo `-arm64.dmg`)
             - **macOS (Intel)**: `.dmg` (arquivo `-x64.dmg`)
             - **Linux**: `.deb` (Debian/Ubuntu) ou `.AppImage` (qualquer distro, sem instalar)
 
-            > Windows: o `.exe` nao e assinado (sem certificado de assinatura de
-            > codigo configurado neste repositorio) — o SmartScreen pode avisar
-            > "O Windows protegeu o computador". Clique em "Mais informacoes" ->
-            > "Executar assim mesmo" para instalar.
+            > Windows: nem o `.exe` nem o `.msi` sao assinados (sem certificado de
+            > assinatura de codigo configurado neste repositorio) — o SmartScreen
+            > pode avisar "O Windows protegeu o computador". Clique em "Mais
+            > informacoes" -> "Executar assim mesmo" para instalar.
             > macOS: o `.dmg` nao e assinado/notarizado. Se o Gatekeeper bloquear a
             > abertura ("app esta danificado" ou "desenvolvedor nao identificado"),
             > clique com o botao direito no app -> Abrir, ou rode
@@ -447,6 +474,7 @@ jobs:
             > para Aplicativos.
           files: |
             artifacts/windows-installer/*.exe
+            artifacts/windows-installer/*.msi
             artifacts/windows-installer/*.jar
             artifacts/macos-installer-arm64/*.dmg
             artifacts/macos-installer-x64/*.dmg
