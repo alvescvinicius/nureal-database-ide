@@ -189,10 +189,18 @@ jobs:
 
   # ==========================================================================
   # macOS — .dmg, um build por arquitetura (Apple Silicon/arm64 e Intel/x64).
-  # macos-14 roda em runners Apple Silicon nativos; macos-13 roda em runners
-  # Intel — nao ha cross-compilation aqui, cada job gera o binario nativo da
-  # sua propria arquitetura (jpackage embute uma JVM da MESMA arquitetura do
-  # runner que o executou).
+  # macos-14 roda em runners Apple Silicon nativos; macos-15-intel roda em
+  # runners Intel — nao ha cross-compilation aqui, cada job gera o binario
+  # nativo da sua propria arquitetura (jpackage embute uma JVM da MESMA
+  # arquitetura do runner que o executou).
+  #
+  # IMPORTANTE — "macos-13" (usado antes aqui) foi DESATIVADO pela GitHub em
+  # 4/dez/2025: um job com "runs-on: macos-13" fica preso pra sempre
+  # "Waiting for a runner to pick up this job" (nunca falha, nunca roda —
+  # so fica carregando), porque esse runner label simplesmente nao existe
+  # mais. "macos-15-intel" e o label atual pra Intel (disponivel ate
+  # ago/2027 — depois disso a GitHub para de oferecer runner x86_64 pra
+  # macOS de vez, so arm64/Apple Silicon).
   #
   # IMPORTANTE — assinatura/notarizacao: este workflow gera um .dmg NAO
   # assinado (nao ha um Apple Developer ID configurado neste repositorio).
@@ -206,17 +214,17 @@ jobs:
     runs-on: ${{ matrix.runner }}
     strategy:
       # fail-fast: false -- sem isto, se o job arm64 falhar o job x64 (Intel)
-      # e cancelado no meio (foi o que aconteceu: "macos-installer (macos-13,
-      # x64, Intel)" foi cancelado so porque o arm64 falhou), escondendo se o
-      # build Intel teria funcionado. Cada arquitetura roda ate o fim,
-      # independente do resultado da outra.
+      # e cancelado no meio (foi o que aconteceu antes: "macos-installer
+      # (macos-13, x64, Intel)" foi cancelado so porque o arm64 falhou),
+      # escondendo se o build Intel teria funcionado. Cada arquitetura roda
+      # ate o fim, independente do resultado da outra.
       fail-fast: false
       matrix:
         include:
           - runner: macos-14
             arch: arm64
             label: "Apple Silicon"
-          - runner: macos-13
+          - runner: macos-15-intel
             arch: x64
             label: "Intel"
     steps:

@@ -34,7 +34,7 @@ final class UpdateBanner extends JPanel {
 
     private final JLabel iconLabel = new JLabel();
     private final JLabel messageLabel = new JLabel();
-    private final JButton installButton = new JButton("Baixar e instalar");
+    private final JButton installButton = new JButton("Baixar");
     private final JButton notesButton = new JButton("Ver notas");
     private final JButton skipButton = new JButton("Ignorar esta versao");
     private final JButton closeButton;

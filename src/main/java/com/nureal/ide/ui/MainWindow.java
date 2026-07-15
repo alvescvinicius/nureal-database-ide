@@ -309,7 +309,7 @@ public class MainWindow extends JFrame {
 	 */
 	private UpdateBanner updateBanner;
 	private final UpdatePreferences updatePreferencesStore = new UpdatePreferences();
-	/** Ultimo release encontrado por {@link #checkForUpdates} — usado pelos botoes da faixa (instalar/ver notas/ignorar). */
+	/** Ultimo release encontrado por {@link #checkForUpdates} — usado pelos botoes da faixa (baixar/ver notas/ignorar). */
 	private GithubRelease latestReleaseFound;
 
 	// ---------- Formatacao de SQL (presets) e fonte do editor ----------
@@ -549,11 +549,30 @@ public class MainWindow extends JFrame {
 		return (msg == null || msg.isBlank()) ? t.getClass().getSimpleName() : msg;
 	}
 
-	/** Botao "Baixar e instalar" da faixa — ver {@link UpdateInstallDialog}. */
+	/**
+	 * Botao "Baixar" da faixa — abre a pagina do Release no navegador padrao
+	 * (a mesma URL do botao "Abrir no GitHub" de {@link ReleaseNotesDialog}).
+	 * A atualizacao e sempre MANUAL: o usuario baixa e roda o instalador da
+	 * sua plataforma sozinho, a partir da pagina — a IDE nao baixa nem
+	 * executa mais nenhum instalador por conta propria (era so no Windows
+	 * antes; agora o comportamento e o MESMO nos 3 sistemas operacionais).
+	 */
 	private void onInstallUpdate() {
-		if (latestReleaseFound != null) {
-			UpdateInstallDialog.open(this, latestReleaseFound);
+		if (latestReleaseFound == null) {
+			return;
 		}
+		String url = latestReleaseFound.htmlUrl();
+		try {
+			if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
+				Desktop.getDesktop().browse(java.net.URI.create(url));
+				return;
+			}
+		} catch (Exception ex) {
+			AppLogger.fine("Nao foi possivel abrir o navegador para a pagina do release: " + ex.getMessage(), ex);
+		}
+		JOptionPane.showMessageDialog(this,
+				"Nao foi possivel abrir o navegador automaticamente. Link: " + url,
+				"Baixar atualizacao", JOptionPane.INFORMATION_MESSAGE);
 	}
 
 	/** Botao "Ver notas" da faixa — ver {@link ReleaseNotesDialog}. */

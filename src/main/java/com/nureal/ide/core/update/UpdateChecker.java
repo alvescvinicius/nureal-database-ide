@@ -6,8 +6,6 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
 
 import com.nureal.ide.core.json.JsonParser;
@@ -21,7 +19,7 @@ import com.nureal.ide.core.json.JsonParser;
  *
  * Fonte unica do "owner/repo" e {@link #REPO} — ver
  * {@code .git/config} (remote origin), e o mesmo repo usado pelo workflow de
- * release (.github/workflows/release.yml) que publica o instalador .exe.
+ * release (.github/workflows/release.yml) que publica os instaladores.
  *
  * Parsing via {@link JsonParser} (o parser JSON minimo que ja existe em
  * {@code core.json}, criado originalmente para o EXPLAIN FORMAT=JSON — ver
@@ -110,30 +108,11 @@ public final class UpdateChecker {
         String htmlUrl = stringField(map, "html_url", "https://github.com/" + REPO + "/releases");
         String body = stringField(map, "body", "");
 
-        List<GithubRelease.Asset> assets = new ArrayList<>();
-        Object assetsRaw = map.get("assets");
-        if (assetsRaw instanceof List<?> assetsList) {
-            for (Object item : assetsList) {
-                if (!(item instanceof Map<?, ?> assetMap)) {
-                    continue;
-                }
-                Map<String, Object> a = (Map<String, Object>) assetMap;
-                assets.add(new GithubRelease.Asset(
-                        stringField(a, "name", ""),
-                        stringField(a, "browser_download_url", ""),
-                        longField(a, "size", 0L)));
-            }
-        }
-        return new GithubRelease(tagName, name, htmlUrl, body, assets);
+        return new GithubRelease(tagName, name, htmlUrl, body);
     }
 
     private static String stringField(Map<String, Object> map, String key, String fallback) {
         Object v = map.get(key);
         return (v instanceof String s) ? s : fallback;
-    }
-
-    private static long longField(Map<String, Object> map, String key, long fallback) {
-        Object v = map.get(key);
-        return (v instanceof Double d) ? d.longValue() : fallback;
     }
 }

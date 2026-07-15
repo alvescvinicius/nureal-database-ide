@@ -687,24 +687,23 @@ só MAJOR.MINOR.PATCH (ignora sufixo de pré-release/build metadata).
 **UI:** `UpdateBanner` — faixa discreta e dispensável no topo da janela
 (NORTH da `MainWindow`, acima de tudo), nunca um diálogo modal bloqueando o
 startup (pedido explícito do usuário). Fundo `GridTheme.HOVER_BACKGROUND` +
-listra verde da marca à esquerda; botões "Baixar e instalar" (primário),
-"Ver notas", "Ignorar esta versão" e fechar (dispensa só na sessão atual,
-sem persistir). Menu Layout (ícone de engrenagem da toolbar) ganhou
-"Verificar atualizações..." para checagem manual a qualquer momento — essa
-SEMPRE mostra algum feedback (banner, "já está atualizado" ou erro),
-diferente da automática (silenciosa em qualquer falha).
+listra verde da marca à esquerda; botões "Baixar" (primário), "Ver notas",
+"Ignorar esta versão" e fechar (dispensa só na sessão atual, sem
+persistir). Menu Layout (ícone de engrenagem da toolbar) ganhou "Verificar
+atualizações..." para checagem manual a qualquer momento — essa SEMPRE
+mostra algum feedback (banner, "já está atualizado" ou erro), diferente da
+automática (silenciosa em qualquer falha).
 
-**Baixar e instalar:** `UpdateInstallDialog` baixa o asset `.msi` do release
-(`UpdateDownloader`, via `java.net.http.HttpClient`, mesmo idioma
-`SwingWorker`/`JProgressBar` já usado por `BackupRestoreDialog`) e, ao
-terminar, dispara `msiexec /i` (não silencioso — o usuário confirma cada
-passo do instalador gráfico do Windows, igual a rodar o `.msi` manualmente)
-e fecha a IDE logo em seguida (`UpdateInstallLauncher`): o instalador só
-consegue substituir os arquivos em uso depois que o processo Java atual
-encerra. Hoje só o Windows tem instalação automática (único artefato que o
-workflow de release publica); qualquer outro SO, ou um release sem `.msi`
-anexado, cai automaticamente no plano B — abre a página do release no
-navegador padrão.
+**Baixar:** a atualização é sempre MANUAL, igual nos 3 sistemas
+operacionais — o botão "Baixar" (`MainWindow#onInstallUpdate`) só abre
+`GithubRelease.htmlUrl()` (a página do Release) no navegador padrão; a IDE
+não baixa nem executa nenhum instalador sozinha. O usuário escolhe e roda o
+arquivo certo pra sua plataforma a partir da página (`.exe`/`.msi` no
+Windows, `.dmg` no macOS, `.deb`/`.AppImage` no Linux). Existiu uma versão
+anterior que baixava o `.msi`/`.exe` e disparava a instalação sozinha
+(`UpdateInstallDialog`/`UpdateDownloader`/`UpdateInstallLauncher`, só no
+Windows) — removida a pedido do usuário em favor deste fluxo mais simples e
+uniforme entre plataformas.
 
 **Preferências:** `UpdatePreferences` (`~/.nureal-ide/update.conf`, mesmo
 formato chave=valor de `UiPreferences`) guarda `autoCheckEnabled` e

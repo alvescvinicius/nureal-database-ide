@@ -103,7 +103,7 @@ Java instalado):
 |---|---|---|
 | Windows 10 ou superior | `.exe` (uso comum) e `.msi` (silencioso/TI) | `windows-installer` |
 | macOS — Apple Silicon | `.dmg` (sufixo `-arm64`) | `macos-installer` (runner `macos-14`) |
-| macOS — Intel | `.dmg` (sufixo `-x64`) | `macos-installer` (runner `macos-13`) |
+| macOS — Intel | `.dmg` (sufixo `-x64`) | `macos-installer` (runner `macos-15-intel`) |
 | Linux (qualquer distro) | `.AppImage` | `linux-installer` |
 | Linux (Debian/Ubuntu) | `.deb` | `linux-installer` |
 
@@ -195,12 +195,12 @@ atenção:
 - **Backup/Restore via `mysqldump`/`mysql`** (`MySqlDumpRunner`): chama os binários
   pelo nome (resolvido via `PATH`), sem caminho fixo de nenhum SO — funciona em
   qualquer plataforma desde que o MySQL Client Tools esteja instalado.
-- **Atualização automática** (`UpdateInstallLauncher`): hoje só sabe *auto-instalar*
-  no Windows (baixa e executa o `.exe` diretamente). Em macOS/Linux, a checagem de nova versão
-  continua funcionando, mas a IDE cai no "plano B" (abre a página do Release no
-  navegador) em vez de instalar sozinha — os novos instaladores `.dmg`/`.deb`/
-  `.AppImage` já ficam publicados no Release, só não são baixados/instalados
-  automaticamente pela própria IDE ainda.
+- **Checagem de atualização** (`UpdateChecker`): consulta o último Release no GitHub e
+  avisa (faixa discreta no topo da janela) quando há versão nova — comportamento
+  **igual nos 3 sistemas**. A instalação em si é sempre manual: o botão "Baixar" só
+  abre a página do Release no navegador; a IDE não baixa nem executa nenhum
+  instalador sozinha (mais simples e sem as particularidades de cada instalador por
+  plataforma).
 - **Atalhos de teclado**: todos usam `Ctrl` (ex.: `Ctrl+Enter` para executar,
   `Ctrl+Shift+F` para formatar). Funciona em macOS (o teclado tem uma tecla Ctrl),
   mas não segue a convenção nativa do Mac de usar `Cmd` — puramente cosmético, não
