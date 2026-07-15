@@ -127,8 +127,9 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 Isso dispara o workflow. Em alguns minutos, vá em **Releases** no GitHub: o `.exe`,
-o `.msi`, os dois `.dmg`, o `.deb`, o `.AppImage` e o `.jar` portátil estarão lá para
-download.
+o `.msi`, os dois `.dmg`, o `.deb` e o `.AppImage` estarão lá para download (o `.jar`
+portátil é gerado só como etapa intermediária do build — não é publicado no Release,
+já que não é um executável/instalador).
 Para uma nova versão, repita com `v0.2.0`, etc.
 
 ### Instalar em outra máquina

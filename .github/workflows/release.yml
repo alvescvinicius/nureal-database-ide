@@ -178,13 +178,16 @@ jobs:
             --win-upgrade-uuid "8f14e1c2-6b3a-4b1e-9c2d-1a2b3c4d5e6f"
 
       - name: Publicar artefatos (Windows)
+        # Apenas os instaladores (.exe/.msi) — o fat jar (target/nureal-database-ide.jar)
+        # NAO entra aqui de proposito: e um arquivo .jar (formato zip por baixo),
+        # nao um executavel, e nao deve aparecer nos Assets do Release (ver
+        # job "publish-release" abaixo, que so publica extensoes de instalador).
         uses: actions/upload-artifact@v4
         with:
           name: windows-installer
           path: |
             target/installer/*.exe
             target/installer/*.msi
-            target/nureal-database-ide.jar
           retention-days: 1
 
   # ==========================================================================
@@ -483,7 +486,6 @@ jobs:
           files: |
             artifacts/windows-installer/*.exe
             artifacts/windows-installer/*.msi
-            artifacts/windows-installer/*.jar
             artifacts/macos-installer-arm64/*.dmg
             artifacts/macos-installer-x64/*.dmg
             artifacts/linux-installer/*.deb
