@@ -12,6 +12,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -139,6 +140,37 @@ class OllamaProviderTest {
             long chunkCount = events.stream().filter(e -> e instanceof AiEvent.Chunk).count();
             assertEquals(2, chunkCount);
         }
+    }
+
+    @Test
+    void streamExtraiToolCallsDoChunkFinal() throws IOException, InterruptedException {
+        String ndjson = String.join("\n",
+                "{\"message\":{\"role\":\"assistant\",\"content\":\"\",\"tool_calls\":[{\"id\":\"call1\","
+                        + "\"function\":{\"name\":\"list_tables\",\"arguments\":{}}}]},\"done\":false}",
+                "{\"message\":{\"role\":\"assistant\",\"content\":\"\"},\"done\":true,\"done_reason\":\"stop\"}")
+                + "\n";
+        String baseUrl = startServer("/api/chat", "application/x-ndjson", ndjson.getBytes(StandardCharsets.UTF_8), 200);
+        OllamaProvider provider = new OllamaProvider(baseUrl, Duration.ofSeconds(5));
+
+        AtomicReference<AiEvent.Completed> completed = new AtomicReference<>();
+        CountDownLatch latch = new CountDownLatch(1);
+        ChatRequest request = new ChatRequest("llama3.1",
+                List.of(new ChatMessage("user", "quais tabelas existem?")), null,
+                List.of(new ToolSpec("list_tables", "lista tabelas", Map.of())));
+
+        provider.stream(request, event -> {
+            if (event instanceof AiEvent.Completed c) {
+                completed.set(c);
+                latch.countDown();
+            }
+        });
+
+        assertTrue(latch.await(5, TimeUnit.SECONDS), "esperava AiEvent.Completed dentro do timeout");
+        ChatResponse response = completed.get().response();
+        assertTrue(response.hasToolCalls());
+        assertEquals(1, response.toolCalls().size());
+        assertEquals("list_tables", response.toolCalls().get(0).name());
+        assertEquals("call1", response.toolCalls().get(0).id());
     }
 
     @Test

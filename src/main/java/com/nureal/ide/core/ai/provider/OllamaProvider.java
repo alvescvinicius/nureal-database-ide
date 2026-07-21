@@ -151,6 +151,7 @@ public final class OllamaProvider implements LLMProvider {
                 return;
             }
             StringBuilder fullContent = new StringBuilder();
+            List<ToolCall> lastToolCalls = List.of();
             try (Stream<String> lines = response.body()) {
                 for (String line : (Iterable<String>) lines::iterator) {
                     if (cancelled.get()) {
@@ -175,17 +176,25 @@ public final class OllamaProvider implements LLMProvider {
                         onEvent.accept(new AiEvent.Failed(requestId, new ProviderException.UnexpectedResponse(errorMsg)));
                         return;
                     }
-                    if (chunk.get("message") instanceof Map<?, ?> message
-                            && message.get("content") instanceof String delta && !delta.isEmpty()) {
-                        fullContent.append(delta);
-                        onEvent.accept(new AiEvent.Chunk(requestId, delta));
+                    if (chunk.get("message") instanceof Map<?, ?> message) {
+                        if (message.get("content") instanceof String delta && !delta.isEmpty()) {
+                            fullContent.append(delta);
+                            onEvent.accept(new AiEvent.Chunk(requestId, delta));
+                        }
+                        // Ollama pode trazer tool_calls num chunk intermediario ou so no
+                        // chunk final (done=true) — guardamos o ultimo visto, o que
+                        // cobre os dois casos sem assumir qual deles o servidor usa.
+                        List<ToolCall> calls = extractToolCalls(message);
+                        if (!calls.isEmpty()) {
+                            lastToolCalls = calls;
+                        }
                     }
                     if (Boolean.TRUE.equals(chunk.get("done"))) {
                         ChatMessage finalMessage = new ChatMessage(ChatMessage.ROLE_ASSISTANT, fullContent.toString());
                         String finishReason = chunk.get("done_reason") instanceof String r ? r : "stop";
                         ChatUsage usage = extractUsage(chunk);
                         onEvent.accept(new AiEvent.Completed(requestId,
-                                new ChatResponse(finalMessage, finishReason, usage, List.of())));
+                                new ChatResponse(finalMessage, finishReason, usage, lastToolCalls)));
                         return;
                     }
                 }
