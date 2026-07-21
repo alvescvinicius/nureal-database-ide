@@ -1,0 +1,9 @@
+# Event System
+
+Eventos:
+ConversationStarted
+MessageSent
+ResponseStarted
+ResponseChunkReceived
+ResponseCompleted
+ConversationClosed
