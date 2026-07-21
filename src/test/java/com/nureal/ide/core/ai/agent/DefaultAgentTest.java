@@ -29,6 +29,7 @@ import com.nureal.ide.core.ai.provider.ChatResponse;
 import com.nureal.ide.core.ai.provider.ChatUsage;
 import com.nureal.ide.core.ai.provider.LLMProvider;
 import com.nureal.ide.core.ai.provider.ProviderException;
+import com.nureal.ide.core.ai.provider.ProviderType;
 import com.nureal.ide.core.ai.provider.ToolCall;
 import com.nureal.ide.core.ai.tool.Tool;
 import com.nureal.ide.core.ai.tool.ToolExecutor;
@@ -59,7 +60,7 @@ class DefaultAgentTest {
     }
 
     private static AiPreferences.State prefs() {
-        return new AiPreferences.State("http://localhost:11434", "llama3.1", 0.2, 60, true);
+        return new AiPreferences.State(ProviderType.OLLAMA, "http://localhost:11434", "llama3.1", 0.2, 60, true);
     }
 
     @Test
@@ -154,7 +155,7 @@ class DefaultAgentTest {
     void semModeloConfiguradoFalhaImediatamente() {
         FakeProvider provider = new FakeProvider();
         DefaultAgent agent = new DefaultAgent(provider, () -> AgentContext.EMPTY, new ToolExecutor(List.of()),
-                historyStore, () -> new AiPreferences.State("http://localhost:11434", "", 0.2, 60, true));
+                historyStore, () -> new AiPreferences.State(ProviderType.OLLAMA, "http://localhost:11434", "", 0.2, 60, true));
 
         List<AiEvent> events = new ArrayList<>();
         agent.chat("conv4", "oi", events::add);

@@ -6,15 +6,19 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
+import java.util.Locale;
+
+import com.nureal.ide.core.ai.provider.ProviderType;
 
 /**
  * Persiste a configuracao do modulo de IA em
  *   ~/.nureal-ide/ai.conf
  *
  * Mesmo formato chave=valor das outras preferencias do projeto (ver
- * {@code UiPreferences}). Por ora so o Ollama e suportado (ver
- * {@code docs/004-Non-Goals.md}), entao nao ha campo de "provider" ainda —
- * so base URL, modelo e parametros de chat.
+ * {@code UiPreferences}). Suporta multiplos providers (ver {@link ProviderType}) —
+ * {@code baseUrl} so tem efeito quando {@code provider=OLLAMA} (os outros usam
+ * endpoints fixos, configurados em cada {@code LLMProvider}); a API key de cada
+ * provider em nuvem fica em {@link AiCredentialsStore}, nunca aqui.
  */
 public class AiPreferences {
 
@@ -24,6 +28,7 @@ public class AiPreferences {
     public static final String DEFAULT_BASE_URL = "http://localhost:11434";
     public static final double DEFAULT_TEMPERATURE = 0.2;
     public static final int DEFAULT_TIMEOUT_SECONDS = 60;
+    public static final ProviderType DEFAULT_PROVIDER = ProviderType.OLLAMA;
 
     private final Path file;
 
@@ -40,11 +45,12 @@ public class AiPreferences {
     }
 
     /** Estado imutavel da configuracao de IA. {@code model} vazio = nenhum escolhido ainda. */
-    public record State(String baseUrl, String model, double temperature, int timeoutSeconds,
-                         boolean streamingEnabled) {
+    public record State(ProviderType provider, String baseUrl, String model, double temperature,
+                         int timeoutSeconds, boolean streamingEnabled) {
 
         public static State defaults() {
-            return new State(DEFAULT_BASE_URL, "", DEFAULT_TEMPERATURE, DEFAULT_TIMEOUT_SECONDS, true);
+            return new State(DEFAULT_PROVIDER, DEFAULT_BASE_URL, "", DEFAULT_TEMPERATURE, DEFAULT_TIMEOUT_SECONDS,
+                    true);
         }
     }
 
@@ -53,6 +59,7 @@ public class AiPreferences {
         if (!Files.exists(file)) {
             return State.defaults();
         }
+        ProviderType provider = DEFAULT_PROVIDER;
         String baseUrl = DEFAULT_BASE_URL;
         String model = "";
         double temperature = DEFAULT_TEMPERATURE;
@@ -72,6 +79,7 @@ public class AiPreferences {
             String key = line.substring(0, eq).trim();
             String value = line.substring(eq + 1).trim();
             switch (key) {
+                case "provider" -> provider = parseProvider(value);
                 case "baseUrl" -> baseUrl = value.isEmpty() ? DEFAULT_BASE_URL : value;
                 case "model" -> model = value;
                 case "temperature" -> temperature = parseTemperature(value);
@@ -82,7 +90,7 @@ public class AiPreferences {
                 }
             }
         }
-        return new State(baseUrl, model, temperature, timeoutSeconds, streamingEnabled);
+        return new State(provider, baseUrl, model, temperature, timeoutSeconds, streamingEnabled);
     }
 
     /** Grava a configuracao, criando a pasta se necessario. */
@@ -92,13 +100,22 @@ public class AiPreferences {
             Files.createDirectories(parent);
         }
         StringBuilder sb = new StringBuilder();
-        sb.append("# Nureal Database IDE - configuracao de IA (Ollama)\n\n");
+        sb.append("# Nureal Database IDE - configuracao de IA\n\n");
+        sb.append("provider=").append(state.provider().name()).append('\n');
         sb.append("baseUrl=").append(state.baseUrl()).append('\n');
         sb.append("model=").append(state.model()).append('\n');
         sb.append("temperature=").append(state.temperature()).append('\n');
         sb.append("timeoutSeconds=").append(state.timeoutSeconds()).append('\n');
         sb.append("streamingEnabled=").append(state.streamingEnabled()).append('\n');
         Files.write(file, sb.toString().getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static ProviderType parseProvider(String s) {
+        try {
+            return ProviderType.valueOf(s.trim().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            return DEFAULT_PROVIDER;
+        }
     }
 
     private static double parseTemperature(String s) {

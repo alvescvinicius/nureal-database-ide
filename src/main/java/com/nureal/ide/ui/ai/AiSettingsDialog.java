@@ -122,7 +122,10 @@ public final class AiSettingsDialog {
         }
 
         String model = modelCombo.getEditor().getItem() == null ? "" : modelCombo.getEditor().getItem().toString().strip();
+        // TODO(P8): combo de provider — por ora mantem o provider ja salvo (ou Ollama,
+        // o padrao) intacto; este dialogo ainda so edita os campos do Ollama.
         AiPreferences.State newState = new AiPreferences.State(
+                current.provider(),
                 baseUrlField.getText().isBlank() ? AiPreferences.DEFAULT_BASE_URL : baseUrlField.getText().strip(),
                 model,
                 (double) temperatureSpinner.getValue(),
