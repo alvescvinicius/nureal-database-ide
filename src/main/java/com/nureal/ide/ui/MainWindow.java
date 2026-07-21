@@ -31,12 +31,14 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.Vector;
@@ -2580,7 +2582,11 @@ public class MainWindow extends JFrame {
 				() -> currentSchema,
 				() -> currentSchema != null ? currentSchema.name() : null,
 				this::activeConnectionLabelForAi,
-				this::currentEditorSqlForAi);
+				this::databaseProductNameForAi,
+				this::databaseVersionForAi,
+				this::currentEditorSqlForAi,
+				this::hasEditorSelectionForAi,
+				this::lastExecutionForAi);
 		ToolExecutor toolExecutor = new ToolExecutor(
 				List.of(new ListTablesTool(accessor), new DescribeTableTool(accessor)));
 		ContextProvider contextProvider = new DefaultContextProvider(accessor);
@@ -2614,6 +2620,53 @@ public class MainWindow extends JFrame {
 			return selected;
 		}
 		return editor.textArea().getText();
+	}
+
+	private boolean hasEditorSelectionForAi() {
+		SqlEditorPane editor = currentEditor();
+		if (editor == null) {
+			return false;
+		}
+		String selected = editor.textArea().getSelectedText();
+		return selected != null && !selected.isBlank();
+	}
+
+	/** Nome/versao do banco conectado (ex.: "MySQL"/"8.4.0") — usado pra resolver o Database Specialist. */
+	private String databaseProductNameForAi() {
+		ConnectionManager mgr = connectionManager();
+		if (mgr == null || !mgr.isConnected()) {
+			return null;
+		}
+		try {
+			return mgr.getConnection().getMetaData().getDatabaseProductName();
+		} catch (SQLException e) {
+			return null;
+		}
+	}
+
+	private String databaseVersionForAi() {
+		ConnectionManager mgr = connectionManager();
+		if (mgr == null || !mgr.isConnected()) {
+			return null;
+		}
+		try {
+			return mgr.getConnection().getMetaData().getDatabaseProductVersion();
+		} catch (SQLException e) {
+			return null;
+		}
+	}
+
+	/** Ultima execucao registrada (ExecutionHistoryStore) da conexao ativa, pro ExecutionContext de IA. */
+	private Optional<ExecutionHistoryStore.Entry> lastExecutionForAi() {
+		String connectionName = currentConnectionLabel();
+		try {
+			return historyStore.loadAll().stream()
+					.filter(e -> java.util.Objects.equals(e.connectionName(), connectionName))
+					.max(Comparator.comparingLong(ExecutionHistoryStore.Entry::executedAt));
+		} catch (IOException e) {
+			AppLogger.warning("Falha ao carregar historico de execucao para o contexto de IA", e);
+			return Optional.empty();
+		}
 	}
 
 	/**

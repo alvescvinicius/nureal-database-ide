@@ -13,7 +13,11 @@ import java.util.function.Supplier;
 
 import com.nureal.ide.core.ai.config.AiPreferences;
 import com.nureal.ide.core.ai.context.AgentContext;
+import com.nureal.ide.core.ai.context.ConnectionContext;
 import com.nureal.ide.core.ai.context.ContextProvider;
+import com.nureal.ide.core.ai.context.EditorContext;
+import com.nureal.ide.core.ai.context.ExecutionContext;
+import com.nureal.ide.core.ai.context.MetadataContext;
 import com.nureal.ide.core.ai.history.ChatHistoryStore;
 import com.nureal.ide.core.ai.provider.AiEvent;
 import com.nureal.ide.core.ai.provider.ChatMessage;
@@ -152,20 +156,52 @@ public final class DefaultAgent implements Agent {
         turn.onEvent.accept(event);
     }
 
+    // TODO(P7): extrair pra core.ai.prompt.PromptComposer e acrescentar o
+    // fragmento do Database Specialist resolvido a partir de
+    // context.connection().databaseProductName().
     private String buildSystemPrompt(AgentContext context) {
         StringBuilder sb = new StringBuilder();
         sb.append("Voce e o assistente de IA integrado a Nureal Database IDE, uma IDE para bancos MySQL. ");
         sb.append("Responda em portugues do Brasil, de forma direta e tecnica. ");
         sb.append("Quando precisar de informacoes reais do banco conectado (tabelas, colunas, indices, chaves ");
         sb.append("estrangeiras), use as tools disponiveis em vez de adivinhar.");
-        if (context.connectionLabel() != null) {
-            sb.append("\n\nConexao ativa: ").append(context.connectionLabel());
+
+        ConnectionContext connection = context.connection();
+        if (connection.label() != null) {
+            sb.append("\n\nConexao ativa: ").append(connection.label());
         }
-        if (context.activeSchema() != null) {
-            sb.append("\nSchema ativo: ").append(context.activeSchema());
+        if (connection.databaseProductName() != null) {
+            sb.append("\nBanco: ").append(connection.databaseProductName());
+            if (connection.databaseVersion() != null) {
+                sb.append(' ').append(connection.databaseVersion());
+            }
         }
-        if (context.currentEditorSql() != null && !context.currentEditorSql().isBlank()) {
-            sb.append("\n\nSQL atual no editor:\n").append(context.currentEditorSql());
+        if (connection.schema() != null) {
+            sb.append("\nSchema ativo: ").append(connection.schema());
+        }
+
+        MetadataContext metadata = context.metadata();
+        if (metadata.tableCount() > 0) {
+            sb.append("\nSchema tem ").append(metadata.tableCount()).append(" tabela(s)");
+            if (metadata.viewCount() > 0) {
+                sb.append(" e ").append(metadata.viewCount()).append(" view(s)");
+            }
+            sb.append('.');
+        }
+
+        EditorContext editor = context.editor();
+        if (editor.sql() != null && !editor.sql().isBlank()) {
+            sb.append("\n\n").append(editor.hasSelection() ? "SQL selecionado no editor:" : "SQL atual no editor:")
+                    .append('\n').append(editor.sql());
+        }
+
+        ExecutionContext execution = context.execution();
+        if (execution.lastSql() != null) {
+            sb.append("\n\nUltima execucao (").append(execution.lastSuccess() ? "sucesso" : "erro").append("): ")
+                    .append(execution.lastSql());
+            if (!execution.lastSuccess() && execution.lastErrorMessage() != null) {
+                sb.append("\nErro: ").append(execution.lastErrorMessage());
+            }
         }
         return sb.toString();
     }

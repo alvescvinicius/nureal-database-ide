@@ -1,9 +1,11 @@
 package com.nureal.ide.ui.ai;
 
+import java.util.Optional;
 import java.util.function.Supplier;
 
 import com.nureal.ide.core.ai.context.IdeStateAccessor;
 import com.nureal.ide.core.connection.ConnectionManager;
+import com.nureal.ide.core.history.ExecutionHistoryStore;
 import com.nureal.ide.core.metadata.MetadataService;
 import com.nureal.ide.core.metadata.model.SchemaInfo;
 
@@ -22,17 +24,26 @@ public final class IdeContextAccessor implements IdeStateAccessor {
     private final Supplier<SchemaInfo> cachedSchema;
     private final Supplier<String> activeSchemaName;
     private final Supplier<String> connectionLabel;
+    private final Supplier<String> databaseProductName;
+    private final Supplier<String> databaseVersion;
     private final Supplier<String> currentEditorSql;
+    private final Supplier<Boolean> hasEditorSelection;
+    private final Supplier<Optional<ExecutionHistoryStore.Entry>> lastExecution;
 
     public IdeContextAccessor(Supplier<ConnectionManager> connectionManager, Supplier<MetadataService> metadataService,
             Supplier<SchemaInfo> cachedSchema, Supplier<String> activeSchemaName, Supplier<String> connectionLabel,
-            Supplier<String> currentEditorSql) {
+            Supplier<String> databaseProductName, Supplier<String> databaseVersion, Supplier<String> currentEditorSql,
+            Supplier<Boolean> hasEditorSelection, Supplier<Optional<ExecutionHistoryStore.Entry>> lastExecution) {
         this.connectionManager = connectionManager;
         this.metadataService = metadataService;
         this.cachedSchema = cachedSchema;
         this.activeSchemaName = activeSchemaName;
         this.connectionLabel = connectionLabel;
+        this.databaseProductName = databaseProductName;
+        this.databaseVersion = databaseVersion;
         this.currentEditorSql = currentEditorSql;
+        this.hasEditorSelection = hasEditorSelection;
+        this.lastExecution = lastExecution;
     }
 
     @Override
@@ -61,7 +72,27 @@ public final class IdeContextAccessor implements IdeStateAccessor {
     }
 
     @Override
+    public String databaseProductName() {
+        return databaseProductName.get();
+    }
+
+    @Override
+    public String databaseVersion() {
+        return databaseVersion.get();
+    }
+
+    @Override
     public String currentEditorSql() {
         return currentEditorSql.get();
+    }
+
+    @Override
+    public boolean hasEditorSelection() {
+        return Boolean.TRUE.equals(hasEditorSelection.get());
+    }
+
+    @Override
+    public Optional<ExecutionHistoryStore.Entry> lastExecution() {
+        return lastExecution.get();
     }
 }
