@@ -1,5 +1,6 @@
 package com.nureal.ide.ui.components;
 
+import java.awt.Color;
 import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.event.MouseAdapter;
@@ -46,7 +47,7 @@ public final class NIconRail extends JPanel {
     }
 
     public NIconRail addItem(String id, IconType icon, String label) {
-        RailItem item = new RailItem(id, icon, label);
+        RailItem item = new RailItem(id, icon, label, true, null);
         items.add(item);
         add(item);
         if (selectedId == null) {
@@ -56,10 +57,27 @@ public final class NIconRail extends JPanel {
         return this;
     }
 
+    /**
+     * Item PLACEHOLDER: aparece no rail (icone+rotulo esmaecidos) mas nao
+     * pode ser selecionado — pra funcionalidade que ainda nao existe (ex.:
+     * Favoritos/Configuracoes, SPEC-0007), sem fingir que ja funciona.
+     * {@code tooltip} deve explicar isso ("Em breve" etc.).
+     */
+    public NIconRail addDisabledItem(IconType icon, String label, String tooltip) {
+        add(new RailItem(null, icon, label, false, tooltip));
+        return this;
+    }
+
     /** Chamado com o {@code id} do item toda vez que a selecao muda (por clique, nunca programaticamente sozinho). */
     public NIconRail onSelect(Consumer<String> listener) {
         this.onSelect = listener;
         return this;
+    }
+
+    /** Cor esmaecida (alpha reduzido) pra itens PLACEHOLDER (ver {@link #addDisabledItem}) — mesmo tom mudo, so mais apagado. */
+    private static Color dimmedColor() {
+        Color c = NTheme.mutedColor();
+        return new Color(c.getRed(), c.getGreen(), c.getBlue(), 110);
     }
 
     public void select(String id) {
@@ -78,19 +96,24 @@ public final class NIconRail extends JPanel {
         private static final long serialVersionUID = 1L;
 
         private final String id;
+        private final boolean enabled;
         private boolean selected;
 
-        RailItem(String id, IconType icon, String label) {
+        RailItem(String id, IconType icon, String label, boolean enabled, String tooltip) {
             this.id = id;
+            this.enabled = enabled;
             setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
             setBorder(BorderFactory.createEmptyBorder(NTheme.SPACE_SM, NTheme.SPACE_XS, NTheme.SPACE_SM, NTheme.SPACE_XS));
             setAlignmentX(CENTER_ALIGNMENT);
-            setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            setCursor(Cursor.getPredefinedCursor(enabled ? Cursor.HAND_CURSOR : Cursor.DEFAULT_CURSOR));
+            if (!enabled) {
+                setToolTipText(tooltip);
+            }
 
             JLabel iconLabel = new JLabel();
             iconLabel.setHorizontalAlignment(SwingConstants.CENTER);
             iconLabel.setAlignmentX(CENTER_ALIGNMENT);
-            Buttons.bindThemedIcon(iconLabel, icon, ICON_SIZE, NTheme::mutedColor);
+            Buttons.bindThemedIcon(iconLabel, icon, ICON_SIZE, enabled ? NTheme::mutedColor : NIconRail::dimmedColor);
 
             JLabel textLabel = new JLabel(label);
             textLabel.setHorizontalAlignment(SwingConstants.CENTER);
@@ -99,8 +122,9 @@ public final class NIconRail extends JPanel {
             // Mesmo motivo de Buttons#bindThemedIcon: GridTheme.MUTED_TEXT e um
             // campo MUTAVEL (troca em MainWindow#toggleTheme) -- sem reagir ao
             // evento "UI", o texto ficaria preso na cor do tema anterior.
-            textLabel.setForeground(NTheme.mutedColor());
-            textLabel.addPropertyChangeListener("UI", e -> textLabel.setForeground(NTheme.mutedColor()));
+            textLabel.setForeground(enabled ? NTheme.mutedColor() : dimmedColor());
+            textLabel.addPropertyChangeListener("UI",
+                    e -> textLabel.setForeground(enabled ? NTheme.mutedColor() : dimmedColor()));
 
             add(iconLabel);
             add(textLabel);
@@ -129,7 +153,9 @@ public final class NIconRail extends JPanel {
             addMouseListener(new MouseAdapter() {
                 @Override
                 public void mouseClicked(MouseEvent e) {
-                    select(id);
+                    if (enabled) {
+                        select(id);
+                    }
                 }
             });
         }

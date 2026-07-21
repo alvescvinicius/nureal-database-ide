@@ -123,7 +123,7 @@ import com.nureal.ide.ui.ai.ChatWindow;
 import com.nureal.ide.ui.ai.IdeContextAccessor;
 import com.nureal.ide.ui.components.NButton;
 import com.nureal.ide.ui.components.NIconRail;
-import com.nureal.ide.ui.components.NStatusBar;
+import com.nureal.ide.ui.components.NToast;
 
 /**
  * Janela principal no estilo de uma IDE moderna (FlatLaf): top bar com acao de
@@ -186,7 +186,6 @@ public class MainWindow extends JFrame {
 	private JComponent resultsArea;
 	private JComponent editorAreaPanel;
 	private JComponent toolbarBar;
-	private JComponent footerBar;
 	private JButton resultsOrientationButton;
 	private int sidebarLoc = 248;
 	private int resultsLoc = -1;
@@ -216,9 +215,17 @@ public class MainWindow extends JFrame {
 	private static final String CARD_HISTORY = "history";
 	/** Esquema selecionado na conexao ativa — so escrever via {@link #setCurrentSchema}. */
 	private SchemaInfo currentSchema;
-	private JLabel statusBar;
-	private JLabel connStatusLabel;
-	private JProgressBar connProgress;
+	/**
+	 * Modelo de mensagens transitorias — nunca fica visivel em layout nenhum
+	 * (SPEC-0007: barra inferior eliminada). {@link com.nureal.ide.ui.components.NToast}
+	 * escuta este JLabel (evento "text", ja disparado sozinho por
+	 * {@code JLabel#setText}) e mostra a mensagem numa bolha flutuante que
+	 * some sozinha — nenhum dos ~80 lugares que chamam
+	 * {@code statusBar.setText(" mensagem")} precisou mudar.
+	 */
+	private final JLabel statusBar = new JLabel(" Pronto");
+	/** Card fixo "Conexao Ativa" da sidebar (SPEC-0007) — unico lugar mostrando nome/host/engine/status. */
+	private ConnectionStatusCard connectionCard;
 	private JButton runButton;
 	private JButton saveQueryButton;
 	private JButton themeButton;
@@ -226,16 +233,6 @@ public class MainWindow extends JFrame {
 	private JPanel executingCard;
 	/** Nome da conexao em processo de conectar agora (ver {@link #setConnectingState}), ou null. */
 	private String connectingWorkspaceName;
-	/**
-	 * Cor do dot/texto de {@link #connStatusLabel} no estado atual (des/
-	 * conectado/conectando) — guardada para poder ser REAVALIADA em
-	 * {@link #toggleTheme()} (ver {@link #applyConnStatusColor}). Sem isto, o
-	 * mesmo bug sistemico dos botoes-so-de-icone (ver
-	 * {@code Buttons#bindThemedIcon}) tambem valia aqui: alternar o tema SEM
-	 * mudar de conexao deixava o dot com a cor GridTheme do tema anterior ate
-	 * o proximo evento de conexao.
-	 */
-	private java.util.function.Supplier<Color> connStatusColorSupplier = () -> GridTheme.COLOR_LOGIC_FALSE;
 	private SwingWorker<List<QueryResult>, Void> runWorker;
 	private volatile Statement runningStatement;
 
@@ -726,8 +723,13 @@ public class MainWindow extends JFrame {
 		mainSplit.setBorder(BorderFactory.createEmptyBorder());
 		add(mainSplit, BorderLayout.CENTER);
 
-		footerBar = buildFooter();
-		add(footerBar, BorderLayout.SOUTH);
+		// SPEC-0007 "Sidebar Workspace": barra inferior eliminada — todo
+		// espaco que ela ocupava volta pro editor/grid. Status (statusBar)
+		// virou notificacao flutuante (ver NToast); conexao/host/engine
+		// (antigo connStatusLabel do rodape) mudou pro ConnectionStatusCard
+		// fixo da sidebar (ver buildLeftSide), sem duplicar em lugar nenhum.
+		setDisconnectedState();
+		NToast.attach(this, statusBar);
 
 		applyDensityToPanels();
 	}
@@ -1492,10 +1494,6 @@ public class MainWindow extends JFrame {
 			int h = compactMode ? 8 : 12;
 			toolbarBar.setBorder(BorderFactory.createEmptyBorder(v, h, v, h));
 		}
-		if (footerBar != null) {
-			int v = compactMode ? 3 : 5;
-			footerBar.setBorder(BorderFactory.createEmptyBorder(v, 12, v, 12));
-		}
 		revalidate();
 		repaint();
 	}
@@ -1532,90 +1530,47 @@ public class MainWindow extends JFrame {
 		}
 	}
 
-	private JComponent buildFooter() {
-		connStatusLabel = new JLabel();
-		connStatusLabel.setIconTextGap(6);
-		connStatusLabel.setFont(connStatusLabel.getFont().deriveFont(Font.BOLD));
-
-		statusBar = new JLabel(" Pronto");
-		Typography.tertiary(statusBar);
-
-		connProgress = new JProgressBar();
-		connProgress.setIndeterminate(true);
-		connProgress.setPreferredSize(new Dimension(120, 6));
-		connProgress.setVisible(false);
-
-		JLabel brand = new JLabel("Nureal");
-		brand.setFont(brand.getFont().deriveFont(Font.BOLD));
-		brand.setForeground(ACCENT);
-
-		NStatusBar footer = new NStatusBar()
-				.addLeft(connStatusLabel)
-				.addLeft(statusBar)
-				.addRight(connProgress)
-				.addRight(brand);
-
-		setDisconnectedState();
-		return footer;
-	}
-
-	// ---------- Estado da conexao (rodape) ----------
-
-	/**
-	 * Aplica a MESMA cor ao dot e ao texto de {@link #connStatusLabel}, e
-	 * guarda o supplier em {@link #connStatusColorSupplier} para que
-	 * {@link #toggleTheme()} possa reavaliar (o valor concreto do supplier
-	 * pode mudar de tema pra tema, ex.: {@code GridTheme.COLOR_LOGIC_FALSE}).
-	 */
-	private void applyConnStatusColor(java.util.function.Supplier<Color> colorSupplier) {
-		connStatusColorSupplier = colorSupplier;
-		Color color = colorSupplier.get();
-		connStatusLabel.setIcon(Icons.get(IconType.STATUS_DOT, 10, color));
-		connStatusLabel.setForeground(color);
-	}
+	// ---------- Estado da conexao (ConnectionStatusCard fixo da sidebar, SPEC-0007) ----------
 
 	private void setDisconnectedState() {
-		// Mesmo vermelho do texto logo abaixo (GridTheme.COLOR_LOGIC_FALSE) —
-		// antes o dot usava um literal PROPRIO (0xDC2626), um vermelho
-		// LIGEIRAMENTE diferente do texto ao lado dele, mesma familia de
-		// inconsistencia que a revisao visual pede pra eliminar ("reutilizar
-		// sempre as mesmas cores"). GridTheme.COLOR_LOGIC_FALSE tambem e
-		// reativo ao tema, nao um literal proprio (0xB91C1C era vermelho
-		// ESCURO demais pra ler sobre fundo escuro, baixo contraste no modo
-		// escuro do rodape) — ver applyConnStatusColor.
-		applyConnStatusColor(() -> GridTheme.COLOR_LOGIC_FALSE);
-		connStatusLabel.setText("Desconectado");
-		connProgress.setVisible(false);
+		connectionCard.showDisconnected();
 		connectingWorkspaceName = null;
 		updateWorkspaceContextBar();
 	}
 
 	private void setConnectingState(String name) {
-		// Mesmo ambar do texto logo abaixo (GridTheme.HEADER_HIGHLIGHT_BORDER)
-		// — antes o dot usava um literal PROPRIO (0xF59E0B), diferente do tom
-		// usado pelo texto ao lado. GridTheme.HEADER_HIGHLIGHT_BORDER: mesmo
-		// ambar usado no destaque de coluna da grade, ja calibrado pra
-		// funcionar em claro E escuro (valor unico nos dois temas) — em vez
-		// do literal 0xB45309, marrom-escuro que sumia sobre fundo escuro.
-		applyConnStatusColor(() -> GridTheme.HEADER_HIGHLIGHT_BORDER);
-		connStatusLabel.setText("Conectando a " + name + "...");
-		connProgress.setVisible(true);
+		connectionCard.showConnecting(name);
 		connectingWorkspaceName = name;
 		updateWorkspaceContextBar();
 	}
 
 	private void setConnectedState(String label) {
-		// Inconsistencia encontrada na revisao: o dot usava ACCENT (verde da
-		// MARCA, fixo) enquanto o texto ao lado usava GridTheme.COLOR_LOGIC_TRUE
-		// (verde reativo ao tema) — os dois estados irmaos (desconectado/
-		// conectando, acima) sempre usaram a MESMA cor pro dot e pro texto;
-		// unificado aqui tambem, no verde reativo (mesmo booleano "verdadeiro"
-		// da grade — 0x047857 no claro tambem sumia sobre fundo escuro).
-		applyConnStatusColor(() -> GridTheme.COLOR_LOGIC_TRUE);
-		connStatusLabel.setText("Conectado: " + label);
-		connProgress.setVisible(false);
+		connectionCard.showConnected(label, activeWorkspaceHostLabel(), activeWorkspaceEngineLabel());
 		connectingWorkspaceName = null;
 		updateWorkspaceContextBar();
+	}
+
+	/** {@code usuario@host} da conexao ativa (ver exemplo da SPEC-0007), ou {@code null} sem profile. */
+	private String activeWorkspaceHostLabel() {
+		if (activeWorkspace == null || activeWorkspace.profile == null) {
+			return null;
+		}
+		return activeWorkspace.profile.user() + "@" + activeWorkspace.profile.host();
+	}
+
+	/** {@code "MySQL 8.0"} (produto + versao major.minor) da conexao ativa, ou {@code null} sem metadados disponiveis. */
+	private String activeWorkspaceEngineLabel() {
+		String product = databaseProductNameForAi();
+		if (product == null) {
+			return null;
+		}
+		String version = databaseVersionForAi();
+		if (version == null) {
+			return product;
+		}
+		String[] parts = version.split("\\.");
+		String shortVersion = parts.length >= 2 ? parts[0] + "." + parts[1] : version;
+		return product + " " + shortVersion;
 	}
 
 	// ---------- Barra de contexto do workspace (conexao/banco/esquema ativos) ----------
@@ -1731,16 +1686,54 @@ public class MainWindow extends JFrame {
 		leftContent.add(savedQueriesPanel, CARD_QUERIES);
 		leftContent.add(historyPanel, CARD_HISTORY);
 
+		// Favoritos/Configuracoes (SPEC-0007): itens PLACEHOLDER — a
+		// funcionalidade ainda nao existe no app (sem "favoritar" query
+		// salva, sem tela de configuracoes unificada), entao aparecem
+		// desabilitados em vez de fingir que funcionam.
 		leftIconRail = new NIconRail()
 				.addItem(CARD_CONNECTIONS, IconType.CONNECTION, "Conexoes")
 				.addItem(CARD_OBJECTS, IconType.DATABASE, "Objetos")
 				.addItem(CARD_QUERIES, IconType.SAVE, "Consultas")
 				.addItem(CARD_HISTORY, IconType.HISTORY, "Historico")
-				.onSelect(this::showLeftCard);
+				.onSelect(this::showLeftCard)
+				.addDisabledItem(IconType.FAVORITE, "Favoritos", "Favoritos — em breve")
+				.addDisabledItem(IconType.SETTINGS, "Config.", "Configuracoes — em breve");
+
+		// Logo compacto no topo da coluna de conteudo (SPEC-0007: Sidebar =
+		// Logo + Navigation Rail + Active Connection Card + Workspace) — o
+		// texto "Nureal" que antes vivia no canto direito da barra inferior
+		// (removida) migrou pra ca, nao foi descartado.
+		JLabel logoIcon = new JLabel(new javax.swing.ImageIcon(Icons.brandImage(18)));
+		JLabel logoText = new JLabel("Nureal");
+		logoText.setFont(logoText.getFont().deriveFont(Font.BOLD, 13f));
+		logoText.setForeground(ACCENT);
+		JPanel logoRow = new JPanel(new FlowLayout(FlowLayout.LEFT, Spacing.SM, 0));
+		logoRow.setOpaque(false);
+		logoRow.add(logoIcon);
+		logoRow.add(logoText);
+
+		// Active Connection Card: SEMPRE visivel, qualquer que seja a secao
+		// selecionada no rail (unico lugar do app mostrando conexao/host/
+		// engine/status — ver ConnectionStatusCard).
+		connectionCard = new ConnectionStatusCard();
+		JPanel cardRow = new JPanel(new BorderLayout());
+		cardRow.setOpaque(false);
+		cardRow.setBorder(BorderFactory.createEmptyBorder(Spacing.SM, 0, Spacing.SM, 0));
+		cardRow.add(connectionCard, BorderLayout.CENTER);
+
+		JPanel topStack = new JPanel(new BorderLayout());
+		topStack.setOpaque(false);
+		topStack.add(logoRow, BorderLayout.NORTH);
+		topStack.add(cardRow, BorderLayout.SOUTH);
+
+		JPanel contentColumn = new JPanel(new BorderLayout());
+		contentColumn.setBorder(BorderFactory.createEmptyBorder(Spacing.SM, Spacing.SM, 0, 0));
+		contentColumn.add(topStack, BorderLayout.NORTH);
+		contentColumn.add(leftContent, BorderLayout.CENTER);
 
 		JPanel container = new JPanel(new BorderLayout());
 		container.add(leftIconRail, BorderLayout.WEST);
-		container.add(leftContent, BorderLayout.CENTER);
+		container.add(contentColumn, BorderLayout.CENTER);
 		container.setPreferredSize(new Dimension(280, 100));
 		return container;
 	}
@@ -2876,11 +2869,11 @@ public class MainWindow extends JFrame {
 		FlatLaf.updateUI();
 		themeButton
 				.setIcon(dark ? Icons.get(IconType.THEME_LIGHT, 16, GridTheme.MUTED_TEXT) : Icons.get(IconType.THEME_DARK, 16, GridTheme.MUTED_TEXT));
-		// connStatusLabel (dot + texto do rodape) nao e um componente PADRAO
-		// do FlatLaf, entao FlatLaf.updateUI() nao o alcanca — sem isto, o dot
-		// ficava com a cor GridTheme do tema anterior ate a proxima mudanca
-		// de estado de conexao (ver applyConnStatusColor).
-		applyConnStatusColor(connStatusColorSupplier);
+		// ConnectionStatusCard nao e um componente PADRAO do FlatLaf, entao
+		// FlatLaf.updateUI() nao o alcanca — sem isto, o dot/status ficavam
+		// com a cor GridTheme do tema anterior ate a proxima mudanca de
+		// estado de conexao.
+		connectionCard.refreshTheme();
 		styleRunButton();
 		// Mesmo motivo: UpdateBanner tem setBackground/setBorder proprios
 		// (ver seu javadoc), fora do alcance do FlatLaf.updateUI().
