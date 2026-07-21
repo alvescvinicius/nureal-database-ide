@@ -305,6 +305,20 @@ final class Icons {
         m.put(IconType.PRIMARY_KEY, (g2, s) -> circle(g2, s * 0.5, s * 0.5, s * 0.26, true));
         m.put(IconType.FOREIGN_KEY, (g2, s) -> circle(g2, s * 0.5, s * 0.5, s * 0.26, false));
 
+        // ---------- IA / chat ----------
+        // Balao de fala: retangulo arredondado + "rabinho" solido apontando
+        // pra baixo-esquerda — mesma composicao "forma base + detalhe solido
+        // pequeno" ja usada em VIEW/DATABASE, sem desenhar nada realista.
+        m.put(IconType.CHAT, (g2, s) -> {
+            roundedRect(g2, s * 0.16, s * 0.20, s * 0.68, s * 0.48, IconTheme.cornerRadius(s), false);
+            Path2D tail = new Path2D.Double();
+            tail.moveTo(s * 0.30, s * 0.68);
+            tail.lineTo(s * 0.26, s * 0.82);
+            tail.lineTo(s * 0.42, s * 0.68);
+            tail.closePath();
+            g2.fill(tail);
+        });
+
         // ---------- Dados / IO ----------
         m.put(IconType.EXPORT, (g2, s) -> arrow(g2, s * 0.5, s * 0.5, s * 0.56, Dir.DOWN));
 

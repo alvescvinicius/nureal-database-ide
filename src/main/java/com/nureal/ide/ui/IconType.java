@@ -64,6 +64,9 @@ enum IconType {
     ERROR(IconRole.NEGATIVE),
     REFRESH(IconRole.NEUTRAL),
 
+    // IA / chat
+    CHAT(IconRole.NEUTRAL),
+
     // Conexao
     CONNECTION(IconRole.POSITIVE),
     DISCONNECT(IconRole.NEGATIVE),

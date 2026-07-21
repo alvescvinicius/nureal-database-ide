@@ -22,6 +22,7 @@ import java.awt.event.WindowEvent;
 import java.io.File;
 import java.nio.file.Path;
 import java.io.IOException;
+import java.time.Duration;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -129,6 +130,20 @@ import com.nureal.ide.core.update.AppVersion;
 import com.nureal.ide.core.update.GithubRelease;
 import com.nureal.ide.core.update.UpdateChecker;
 import com.nureal.ide.core.update.UpdatePreferences;
+import com.nureal.ide.core.ai.agent.Agent;
+import com.nureal.ide.core.ai.agent.DefaultAgent;
+import com.nureal.ide.core.ai.config.AiPreferences;
+import com.nureal.ide.core.ai.context.ContextProvider;
+import com.nureal.ide.core.ai.context.DefaultContextProvider;
+import com.nureal.ide.core.ai.context.IdeStateAccessor;
+import com.nureal.ide.core.ai.history.ChatHistoryStore;
+import com.nureal.ide.core.ai.provider.OllamaProvider;
+import com.nureal.ide.core.ai.tool.DescribeTableTool;
+import com.nureal.ide.core.ai.tool.ListTablesTool;
+import com.nureal.ide.core.ai.tool.ToolExecutor;
+import com.nureal.ide.ui.ai.AiSettingsDialog;
+import com.nureal.ide.ui.ai.ChatWindow;
+import com.nureal.ide.ui.ai.IdeContextAccessor;
 
 /**
  * Janela principal no estilo de uma IDE moderna (FlatLaf): top bar com acao de
@@ -933,6 +948,13 @@ public class MainWindow extends JFrame {
 		themeButton.setToolTipText("Alternar tema claro/escuro");
 		themeButton.addActionListener(e -> toggleTheme());
 
+		// Chat com IA (Ollama local) — janela nao-modal propria (ver
+		// com.nureal.ide.ui.ai.ChatWindow), mesma linguagem visual discreta
+		// dos outros icones do grupo da direita.
+		JButton chatButton = Buttons.iconButton(IconType.CHAT, 16, () -> GridTheme.MUTED_TEXT);
+		chatButton.setToolTipText("Chat com IA (Ollama local)");
+		chatButton.addActionListener(e -> openAiChat());
+
 		// Adiciona os botões da direita sequencialmente
 		gbc.insets = new Insets(0, Spacing.XS, 0, Spacing.XS); // Pequeno espaço entre os ícones
 
@@ -944,6 +966,8 @@ public class MainWindow extends JFrame {
 		mainBar.add(layoutButton, gbc);
 		gbc.gridx = 11;
 		mainBar.add(themeButton, gbc);
+		gbc.gridx = 12;
+		mainBar.add(chatButton, gbc);
 
 		toolbarBar = mainBar;
 		// initWorkspaces() ja rodou (ver buildEditorArea) quando chegamos aqui,
@@ -2517,6 +2541,79 @@ public class MainWindow extends JFrame {
 	private SqlEditorPane currentEditor() {
 		Component c = editorTabs.getSelectedComponent();
 		return (c instanceof SqlEditorPane sep) ? sep : null;
+	}
+
+	// ---------- Chat de IA (Ollama local) ----------
+	// Ver com.nureal.ide.ui.ai.ChatWindow/ChatController/DefaultAgent. Toda a
+	// logica de IA fica em core.ai (Swing-free); aqui so montamos o grafo de
+	// objetos (Provider/ToolExecutor/ContextProvider/Agent) a partir dos
+	// servicos que o MainWindow ja tem, via IdeContextAccessor.
+
+	/** Uma unica conversa persistente para o MVP — sem seletor de conversas ainda. */
+	private static final String AI_CONVERSATION_ID = "default";
+
+	private void openAiChat() {
+		AiPreferences aiPreferences = new AiPreferences();
+		ChatHistoryStore chatHistoryStore = new ChatHistoryStore();
+		Agent agent = buildAiAgent(aiPreferences, chatHistoryStore);
+		ChatWindow.open(this, agent, chatHistoryStore, AI_CONVERSATION_ID,
+				() -> openAiSettings(aiPreferences));
+	}
+
+	private void openAiSettings(AiPreferences aiPreferences) {
+		AiSettingsDialog.open(this, aiPreferences,
+				() -> ChatWindow.updateAgent(buildAiAgent(aiPreferences, new ChatHistoryStore())));
+	}
+
+	private Agent buildAiAgent(AiPreferences aiPreferences, ChatHistoryStore chatHistoryStore) {
+		AiPreferences.State prefs;
+		try {
+			prefs = aiPreferences.load();
+		} catch (IOException e) {
+			AppLogger.warning("Falha ao carregar configuracao de IA", e);
+			prefs = AiPreferences.State.defaults();
+		}
+		OllamaProvider provider = new OllamaProvider(prefs.baseUrl(), Duration.ofSeconds(prefs.timeoutSeconds()));
+		IdeStateAccessor accessor = new IdeContextAccessor(
+				this::connectionManager,
+				() -> metadataService,
+				() -> currentSchema,
+				() -> currentSchema != null ? currentSchema.name() : null,
+				this::activeConnectionLabelForAi,
+				this::currentEditorSqlForAi);
+		ToolExecutor toolExecutor = new ToolExecutor(
+				List.of(new ListTablesTool(accessor), new DescribeTableTool(accessor)));
+		ContextProvider contextProvider = new DefaultContextProvider(accessor);
+		return new DefaultAgent(provider, contextProvider, toolExecutor, chatHistoryStore, () -> {
+			try {
+				return aiPreferences.load();
+			} catch (IOException e) {
+				AppLogger.warning("Falha ao carregar configuracao de IA", e);
+				return AiPreferences.State.defaults();
+			}
+		});
+	}
+
+	/** Rotulo da conexao ativa SEM senha (ver ConnectionProfile — nunca usar toString() nele). */
+	private String activeConnectionLabelForAi() {
+		ConnectionManager mgr = connectionManager();
+		if (mgr == null || !mgr.isConnected() || mgr.profile() == null) {
+			return null;
+		}
+		ConnectionProfile p = mgr.profile();
+		return p.host() + ":" + p.port() + "/" + p.schema() + " (" + p.user() + ")";
+	}
+
+	private String currentEditorSqlForAi() {
+		SqlEditorPane editor = currentEditor();
+		if (editor == null) {
+			return null;
+		}
+		String selected = editor.textArea().getSelectedText();
+		if (selected != null && !selected.isBlank()) {
+			return selected;
+		}
+		return editor.textArea().getText();
 	}
 
 	/**
