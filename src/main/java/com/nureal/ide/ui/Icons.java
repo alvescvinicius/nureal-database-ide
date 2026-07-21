@@ -151,6 +151,7 @@ final class Icons {
         m.put(IconType.CHEVRON_RIGHT, "chevron_right.svg");
         m.put(IconType.THEME_LIGHT, "theme_light.svg");
         m.put(IconType.THEME_DARK, "theme_dark.svg");
+        m.put(IconType.CHAT, "chat.svg");
         return m;
     }
 

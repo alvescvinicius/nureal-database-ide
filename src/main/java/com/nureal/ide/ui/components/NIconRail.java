@@ -78,6 +78,7 @@ public final class NIconRail extends JPanel {
         private static final long serialVersionUID = 1L;
 
         private final String id;
+        private boolean selected;
 
         RailItem(String id, IconType icon, String label) {
             this.id = id;
@@ -104,6 +105,17 @@ public final class NIconRail extends JPanel {
             add(iconLabel);
             add(textLabel);
 
+            // Fundo do item SELECIONADO tambem precisa reagir a troca de tema
+            // (mesmo raciocinio do icone/texto acima): sem isto, o item
+            // marcado como ativo ficava com o destaque preso na cor de
+            // superficie do tema ANTERIOR apos um toggleTheme() (bug visto
+            // na revisao visual).
+            addPropertyChangeListener("UI", e -> {
+                if (selected) {
+                    setBackground(NTheme.surfaceBackground());
+                }
+            });
+
             // Preferred/maximum SO calculados depois de adicionar icone+rotulo
             // (senao capturam o tamanho de um painel ainda vazio) — altura
             // maxima = altura preferida trava o item no BoxLayout.Y_AXIS,
@@ -123,6 +135,7 @@ public final class NIconRail extends JPanel {
         }
 
         void setSelected(boolean selected) {
+            this.selected = selected;
             setOpaque(selected);
             setBackground(selected ? NTheme.surfaceBackground() : null);
             repaint();
