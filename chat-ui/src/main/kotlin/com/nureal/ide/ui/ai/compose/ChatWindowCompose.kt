@@ -2,6 +2,7 @@ package com.nureal.ide.ui.ai.compose
 
 import androidx.compose.ui.awt.ComposeWindow
 import com.nureal.ide.core.ai.agent.Agent
+import com.nureal.ide.core.ai.context.ContextProvider
 import com.nureal.ide.core.ai.history.ChatHistoryStore
 import com.nureal.ide.core.log.AppLogger
 import com.nureal.ide.core.ui.ChatWindowPreferences
@@ -37,6 +38,7 @@ class ComposeChatWindow private constructor(
     conversationId: String,
     onOpenSettings: Runnable,
     actions: ChatActions,
+    contextProvider: ContextProvider,
 ) {
     private val window = ComposeWindow(owner.graphicsConfiguration)
     private val session = ChatSession(agent, historyStore, conversationId)
@@ -46,7 +48,7 @@ class ComposeChatWindow private constructor(
     init {
         window.title = "Chat com IA"
         window.setContent {
-            ChatScreen(session, actions) { onOpenSettings.run() }
+            ChatScreen(session, actions, contextProvider) { onOpenSettings.run() }
         }
         window.bounds = loadBoundsOrDefault(owner)
 
@@ -113,6 +115,7 @@ class ComposeChatWindow private constructor(
             conversationId: String,
             onOpenSettings: Runnable,
             actions: ChatActions,
+            contextProvider: ContextProvider,
         ) {
             val existing = instance
             if (existing != null) {
@@ -120,7 +123,8 @@ class ComposeChatWindow private constructor(
                 existing.show()
                 return
             }
-            val created = ComposeChatWindow(owner, agent, historyStore, conversationId, onOpenSettings, actions)
+            val created = ComposeChatWindow(owner, agent, historyStore, conversationId, onOpenSettings, actions,
+                    contextProvider)
             instance = created
             created.show()
         }

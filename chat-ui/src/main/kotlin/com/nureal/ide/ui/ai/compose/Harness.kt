@@ -2,6 +2,9 @@ package com.nureal.ide.ui.ai.compose
 
 import androidx.compose.ui.awt.ComposeWindow
 import com.nureal.ide.core.ai.agent.Agent
+import com.nureal.ide.core.ai.context.AgentContext
+import com.nureal.ide.core.ai.context.ConnectionContext
+import com.nureal.ide.core.ai.context.ContextProvider
 import com.nureal.ide.core.ai.history.ChatHistoryStore
 import com.nureal.ide.core.ai.provider.AiEvent
 import com.nureal.ide.core.ai.provider.ChatMessage
@@ -76,6 +79,35 @@ private class FakeAgent : Agent {
 }
 
 /**
+ * ContextProvider fake que TROCA de conexao/schema sozinho apos alguns
+ * segundos -- valida que o painel de contexto (polling, ver
+ * [rememberAgentContext]) reage a uma "troca de schema" sem precisar
+ * reabrir o chat, exatamente o requisito de nao ficar bugado.
+ */
+private class FakeContextProvider : ContextProvider {
+    @Volatile
+    private var swapped = false
+
+    init {
+        Thread {
+            Thread.sleep(4000)
+            swapped = true
+        }.start()
+    }
+
+    override fun collect(): AgentContext {
+        val connection = if (!swapped) {
+            ConnectionContext("Nureal - [Local] - atual", "MySQL", "8.4.3", "production_db")
+        } else {
+            ConnectionContext("Nureal - [Producao]", "MySQL", "8.0.35", "analytics_db")
+        }
+        return AgentContext(connection, com.nureal.ide.core.ai.context.MetadataContext.EMPTY,
+                com.nureal.ide.core.ai.context.EditorContext.EMPTY,
+                com.nureal.ide.core.ai.context.ExecutionContext.EMPTY)
+    }
+}
+
+/**
  * So pra rodar via `./gradlew run` e validar o port sem MainWindow nem
  * provider real: constroi [ChatSession]/[ChatScreen] direto (sem passar por
  * [ComposeChatWindow], ja validado separadamente) e dispara uma mensagem
@@ -92,13 +124,14 @@ fun main() {
         { sql -> println("[Explicar] $sql") },
     )
     val session = ChatSession(FakeAgent(), historyStore, "harness")
+    val contextProvider = FakeContextProvider()
 
     SwingUtilities.invokeLater {
         val window = ComposeWindow()
         window.title = "Chat com IA (harness)"
         window.setSize(480, 760)
         window.setContent {
-            ChatScreen(session, actions) { println("[Configuracoes]") }
+            ChatScreen(session, actions, contextProvider) { println("[Configuracoes]") }
         }
         window.isVisible = true
     }
