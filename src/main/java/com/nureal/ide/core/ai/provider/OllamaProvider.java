@@ -3,7 +3,6 @@ package com.nureal.ide.core.ai.provider;
 import java.io.IOException;
 import java.net.ConnectException;
 import java.net.URI;
-import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.HttpTimeoutException;
@@ -14,10 +13,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
@@ -26,8 +21,8 @@ import com.nureal.ide.core.json.JsonParser;
 import com.nureal.ide.core.json.JsonWriter;
 
 /**
- * Implementacao inicial de {@link LLMProvider} para o Ollama local (ver
- * {@code docs/023-OllamaProvider.md}). Usa {@code java.net.http.HttpClient}
+ * Implementacao de {@link LLMProvider} para o Ollama (local ou remoto, apontado via
+ * Base URL — ver {@code docs/023-OllamaProvider.md}). Usa {@code java.net.http.HttpClient}
  * (JDK 17, sem dependencia nova) contra:
  *
  * <pre>
@@ -37,30 +32,25 @@ import com.nureal.ide.core.json.JsonWriter;
  *
  * {@code stream()} le a resposta como NDJSON (um objeto JSON por linha, com
  * {@code "done":false} ate a ultima, que traz {@code "done":true} e as
- * estatisticas finais) via {@code HttpResponse.BodyHandlers.ofLines()}.
+ * estatisticas finais) via {@code HttpResponse.BodyHandlers.ofLines()} — diferente dos
+ * outros providers (SSE), por isso nao usa {@link SseUtil}.
  */
-public final class OllamaProvider implements LLMProvider {
+public final class OllamaProvider extends AbstractStreamingProvider {
 
     private final String baseUrl;
-    private final Duration timeout;
-    private final HttpClient httpClient;
-    private final ExecutorService streamExecutor = Executors.newCachedThreadPool(r -> {
-        Thread t = new Thread(r, "ollama-stream");
-        t.setDaemon(true);
-        return t;
-    });
-    private final Map<String, AtomicBoolean> inFlight = new ConcurrentHashMap<>();
 
     public OllamaProvider(String baseUrl, Duration timeout) {
+        super(timeout);
         this.baseUrl = stripTrailingSlash(baseUrl);
-        this.timeout = timeout;
-        this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(timeout)
-                .build();
     }
 
     private static String stripTrailingSlash(String url) {
         return url.endsWith("/") ? url.substring(0, url.length() - 1) : url;
+    }
+
+    @Override
+    protected String providerName() {
+        return "Ollama";
     }
 
     @Override
@@ -120,24 +110,7 @@ public final class OllamaProvider implements LLMProvider {
     }
 
     @Override
-    public String stream(ChatRequest request, Consumer<AiEvent> onEvent) {
-        String requestId = UUID.randomUUID().toString();
-        AtomicBoolean cancelled = new AtomicBoolean(false);
-        inFlight.put(requestId, cancelled);
-        streamExecutor.submit(() -> runStream(requestId, request, onEvent, cancelled));
-        return requestId;
-    }
-
-    @Override
-    public void cancel(String requestId) {
-        AtomicBoolean flag = inFlight.get(requestId);
-        if (flag != null) {
-            flag.set(true);
-        }
-    }
-
-    private void runStream(String requestId, ChatRequest request, Consumer<AiEvent> onEvent, AtomicBoolean cancelled) {
-        onEvent.accept(new AiEvent.Started(requestId));
+    protected void doStream(String requestId, ChatRequest request, Consumer<AiEvent> onEvent, AtomicBoolean cancelled) {
         try {
             String json = JsonWriter.write(buildRequestBody(request, true));
             HttpRequest httpRequest = HttpRequest.newBuilder(URI.create(baseUrl + "/api/chat"))
@@ -215,8 +188,6 @@ public final class OllamaProvider implements LLMProvider {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             onEvent.accept(new AiEvent.Cancelled(requestId));
-        } finally {
-            inFlight.remove(requestId);
         }
     }
 

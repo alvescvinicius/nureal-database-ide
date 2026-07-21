@@ -17,7 +17,7 @@ public abstract class ProviderException extends RuntimeException {
         super(message, cause);
     }
 
-    /** Nao foi possivel abrir conexao com o provider (ex.: Ollama nao esta rodando). */
+    /** Nao foi possivel abrir conexao com o provider (ex.: Ollama nao esta rodando, ou sem internet pra um provider em nuvem). */
     public static final class ConnectionError extends ProviderException {
         private static final long serialVersionUID = 1L;
 
@@ -35,11 +35,20 @@ public abstract class ProviderException extends RuntimeException {
         }
     }
 
-    /** O modelo pedido nao existe/nao esta instalado no Ollama. */
+    /** O modelo pedido nao existe (nao instalado no Ollama, ou nome invalido/sem acesso no provider em nuvem). */
     public static final class InvalidModel extends ProviderException {
         private static final long serialVersionUID = 1L;
 
         public InvalidModel(String message) {
+            super(message);
+        }
+    }
+
+    /** Nenhuma API key configurada pra este provider (ver Configuracoes de IA). */
+    public static final class MissingCredential extends ProviderException {
+        private static final long serialVersionUID = 1L;
+
+        public MissingCredential(String message) {
             super(message);
         }
     }
