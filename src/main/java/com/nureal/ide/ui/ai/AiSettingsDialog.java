@@ -46,7 +46,19 @@ public final class AiSettingsDialog {
             current = AiPreferences.State.defaults();
         }
 
-        JTextField baseUrlField = new JTextField(current.baseUrl());
+        JCheckBox embeddedCheckbox = new JCheckBox("Usar o Ollama embutido da IDE (recomendado)");
+        embeddedCheckbox.setSelected(current.embeddedMode());
+
+        JTextField baseUrlField = new JTextField(current.embeddedMode() ? AiPreferences.DEFAULT_BASE_URL : current.baseUrl());
+        baseUrlField.setEnabled(!current.embeddedMode());
+        embeddedCheckbox.addActionListener(e -> {
+            boolean embedded = embeddedCheckbox.isSelected();
+            baseUrlField.setEnabled(!embedded);
+            if (embedded) {
+                baseUrlField.setText(AiPreferences.DEFAULT_BASE_URL);
+            }
+        });
+
         JComboBox<String> modelCombo = new JComboBox<>();
         modelCombo.setEditable(true);
         if (!current.model().isBlank()) {
@@ -98,7 +110,8 @@ public final class AiSettingsDialog {
         modelRow.add(refreshButton, BorderLayout.EAST);
 
         JPanel form = new JPanel(new GridLayout(0, 1, 4, 4));
-        form.add(new JLabel("Base URL do Ollama:"));
+        form.add(embeddedCheckbox);
+        form.add(new JLabel("Base URL do Ollama (só usada com o embutido desligado):"));
         form.add(baseUrlField);
         form.add(new JLabel("Modelo:"));
         form.add(modelRow);
@@ -112,7 +125,7 @@ public final class AiSettingsDialog {
         JPanel panel = new JPanel(new BorderLayout(0, 8));
         panel.setBorder(BorderFactory.createEmptyBorder(4, 4, 4, 4));
         panel.add(form, BorderLayout.CENTER);
-        panel.setPreferredSize(new Dimension(440, 320));
+        panel.setPreferredSize(new Dimension(440, 350));
 
         int result = JOptionPane.showConfirmDialog(owner, panel, "Configuracao de IA (Ollama)",
                 JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
@@ -126,7 +139,8 @@ public final class AiSettingsDialog {
                 model,
                 (double) temperatureSpinner.getValue(),
                 (int) timeoutSpinner.getValue(),
-                streamingCheckbox.isSelected());
+                streamingCheckbox.isSelected(),
+                embeddedCheckbox.isSelected());
         try {
             preferences.save(newState);
             onSaved.run();

@@ -138,6 +138,8 @@ import com.nureal.ide.core.ai.context.DefaultContextProvider;
 import com.nureal.ide.core.ai.context.IdeStateAccessor;
 import com.nureal.ide.core.ai.history.ChatHistoryStore;
 import com.nureal.ide.core.ai.provider.OllamaProvider;
+import com.nureal.ide.core.ai.runtime.OllamaBootstrapper;
+import com.nureal.ide.core.ai.runtime.OllamaRuntimeManager;
 import com.nureal.ide.core.ai.tool.DescribeTableTool;
 import com.nureal.ide.core.ai.tool.ListTablesTool;
 import com.nureal.ide.core.ai.tool.ToolExecutor;
@@ -359,6 +361,10 @@ public class MainWindow extends JFrame {
 				}
 				saveSession();
 				closeAllConnections();
+				// So derruba o processo se FOI a propria IDE quem o subiu
+				// (ver javadoc de ollamaRuntimeManager) — nunca mexe num
+				// Ollama externo que o usuario ja tinha rodando sozinho.
+				ollamaRuntimeManager.stopIfOwned();
 			}
 		});
 	}
@@ -2552,17 +2558,91 @@ public class MainWindow extends JFrame {
 	/** Uma unica conversa persistente para o MVP — sem seletor de conversas ainda. */
 	private static final String AI_CONVERSATION_ID = "default";
 
+	/**
+	 * Unica instancia por janela (nao uma por chamada de {@link #openAiChat()}):
+	 * rastreia se FOI ELA quem subiu o processo do Ollama embutido, pra
+	 * {@code windowClosing} poder derruba-lo ao fechar a IDE sem nunca mexer
+	 * num Ollama externo que o usuario ja tinha rodando por conta propria.
+	 */
+	private final OllamaRuntimeManager ollamaRuntimeManager = new OllamaRuntimeManager();
+
 	private void openAiChat() {
 		AiPreferences aiPreferences = new AiPreferences();
 		ChatHistoryStore chatHistoryStore = new ChatHistoryStore();
 		Agent agent = buildAiAgent(aiPreferences, chatHistoryStore);
 		ChatWindow.open(this, agent, chatHistoryStore, AI_CONVERSATION_ID,
 				() -> openAiSettings(aiPreferences));
+		ensureEmbeddedOllamaIfNeeded(aiPreferences, chatHistoryStore);
 	}
 
 	private void openAiSettings(AiPreferences aiPreferences) {
-		AiSettingsDialog.open(this, aiPreferences,
-				() -> ChatWindow.updateAgent(buildAiAgent(aiPreferences, new ChatHistoryStore())));
+		AiSettingsDialog.open(this, aiPreferences, () -> {
+			ChatWindow.updateAgent(buildAiAgent(aiPreferences, new ChatHistoryStore()));
+			ensureEmbeddedOllamaIfNeeded(aiPreferences, new ChatHistoryStore());
+		});
+	}
+
+	/**
+	 * Se o modo embutido estiver ligado, garante o Ollama local rodando (e
+	 * baixa o modelo padrao no 1o uso, se necessario) numa thread de
+	 * background — nunca trava a IDE nem a EDT. Progresso aparece na janela
+	 * de chat (se estiver aberta) via {@link ChatWindow#updateStatus}.
+	 */
+	private void ensureEmbeddedOllamaIfNeeded(AiPreferences aiPreferences, ChatHistoryStore chatHistoryStore) {
+		AiPreferences.State prefs;
+		try {
+			prefs = aiPreferences.load();
+		} catch (IOException e) {
+			AppLogger.warning("Falha ao carregar configuracao de IA", e);
+			return;
+		}
+		if (!prefs.embeddedMode()) {
+			return;
+		}
+		OllamaBootstrapper bootstrapper = new OllamaBootstrapper(ollamaRuntimeManager);
+		new SwingWorker<String, String>() {
+			@Override
+			protected String doInBackground() {
+				return bootstrapper.ensureReady(prefs, this::publish);
+			}
+
+			@Override
+			protected void process(List<String> chunks) {
+				if (!chunks.isEmpty()) {
+					ChatWindow.updateStatus(chunks.get(chunks.size() - 1));
+				}
+			}
+
+			@Override
+			protected void done() {
+				try {
+					String pulledModel = get();
+					if (pulledModel == null) {
+						return;
+					}
+					AiPreferences.State updated = new AiPreferences.State(prefs.baseUrl(), pulledModel,
+							prefs.temperature(), prefs.timeoutSeconds(), prefs.streamingEnabled(), prefs.embeddedMode());
+					aiPreferences.save(updated);
+					ChatWindow.updateAgent(buildAiAgent(aiPreferences, chatHistoryStore));
+				} catch (Exception e) {
+					AppLogger.warning("Falha ao iniciar o Ollama embutido", e);
+					ChatWindow.updateStatus("Não foi possível iniciar o Ollama embutido: " + rootCauseMessage(e));
+				}
+			}
+		}.execute();
+	}
+
+	/**
+	 * {@code get()} do SwingWorker embrulha em {@code ExecutionException} o
+	 * que {@code doInBackground()} lancou — so desembrulha UM nivel pra usar
+	 * a mensagem amigavel de {@code ProviderException}/{@code
+	 * OllamaStartException} (mesmo motivo do {@code AiSettingsDialog.rootMessage}).
+	 */
+	private static String rootCauseMessage(Throwable t) {
+		Throwable cause = (t instanceof java.util.concurrent.ExecutionException && t.getCause() != null)
+				? t.getCause() : t;
+		String msg = cause.getMessage();
+		return msg == null ? cause.getClass().getSimpleName() : msg;
 	}
 
 	private Agent buildAiAgent(AiPreferences aiPreferences, ChatHistoryStore chatHistoryStore) {
