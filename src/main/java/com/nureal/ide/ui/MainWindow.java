@@ -5,6 +5,7 @@ import java.awt.CardLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Desktop;
+import java.awt.Window;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
@@ -22,6 +23,7 @@ import java.awt.event.WindowEvent;
 import java.io.File;
 import java.nio.file.Path;
 import java.io.IOException;
+import java.lang.reflect.Method;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -2562,8 +2564,53 @@ public class MainWindow extends JFrame {
 		ChatHistoryStore chatHistoryStore = new ChatHistoryStore();
 		Agent agent = buildAiAgent(aiPreferences, aiCredentials, chatHistoryStore);
 		ChatActions actions = new ChatActions(this::runSqlFromChat, this::currentSqlFormatter, sql -> { });
-		ChatWindow.open(this, agent, chatHistoryStore, AI_CONVERSATION_ID,
-				() -> openAiSettings(aiPreferences, aiCredentials), actions);
+		Runnable onOpenSettings = () -> openAiSettings(aiPreferences, aiCredentials);
+		if (!openComposeChatWindow(agent, chatHistoryStore, actions, onOpenSettings)) {
+			ChatWindow.open(this, agent, chatHistoryStore, AI_CONVERSATION_ID, onOpenSettings, actions);
+		}
+	}
+
+	/**
+	 * Tenta abrir o chat via o port em Kotlin+Compose Desktop (ver
+	 * {@code chat-ui/}, modulo Gradle SEPARADO do build Maven principal —
+	 * so pra nao empurrar Compose/Skiko como dependencia obrigatoria de
+	 * quem builda so com "mvn package"). So via reflection: a classe
+	 * {@code ComposeChatWindow} so existe no classpath quando o uber-jar
+	 * de {@code chat-ui/} (gerado por "gradlew packageUberJarForCurrentOS")
+	 * for adicionado manualmente (dev: exec-maven-plugin com
+	 * additionalClasspathElements; instalador: ainda nao empacotado junto).
+	 * {@code ClassNotFoundException} e o caso NORMAL/esperado (Compose
+	 * indisponivel) — cai pro {@link ChatWindow} Swing de sempre, sem log
+	 * nenhum; qualquer OUTRA falha de reflection e logada, mas tambem cai
+	 * pro Swing (nunca deixa o usuario sem chat nenhum).
+	 */
+	private boolean openComposeChatWindow(Agent agent, ChatHistoryStore historyStore, ChatActions actions,
+			Runnable onOpenSettings) {
+		try {
+			Class<?> composeChatWindow = Class.forName("com.nureal.ide.ui.ai.compose.ComposeChatWindow");
+			Method open = composeChatWindow.getMethod("open", Window.class, Agent.class, ChatHistoryStore.class,
+					String.class, Runnable.class, ChatActions.class);
+			open.invoke(null, this, agent, historyStore, AI_CONVERSATION_ID, onOpenSettings, actions);
+			return true;
+		} catch (ClassNotFoundException e) {
+			return false;
+		} catch (ReflectiveOperationException e) {
+			AppLogger.warning("Falha ao abrir o chat via Compose (chat-ui/) -- usando o Swing", e);
+			return false;
+		}
+	}
+
+	/** Espelho de {@link #openComposeChatWindow} pra {@code ComposeChatWindow.updateAgent} — ver {@link #openAiSettings}. */
+	private void updateComposeChatAgent(Agent agent) {
+		try {
+			Class<?> composeChatWindow = Class.forName("com.nureal.ide.ui.ai.compose.ComposeChatWindow");
+			Method updateAgent = composeChatWindow.getMethod("updateAgent", Agent.class);
+			updateAgent.invoke(null, agent);
+		} catch (ClassNotFoundException e) {
+			// Compose indisponivel neste classpath -- nada a fazer, o Swing ja foi atualizado em openAiSettings.
+		} catch (ReflectiveOperationException e) {
+			AppLogger.warning("Falha ao atualizar o agent do chat via Compose (chat-ui/)", e);
+		}
 	}
 
 	/**
@@ -2579,8 +2626,11 @@ public class MainWindow extends JFrame {
 	}
 
 	private void openAiSettings(AiPreferences aiPreferences, AiCredentialsStore aiCredentials) {
-		AiSettingsDialog.open(this, aiPreferences, aiCredentials,
-				() -> ChatWindow.updateAgent(buildAiAgent(aiPreferences, aiCredentials, new ChatHistoryStore())));
+		AiSettingsDialog.open(this, aiPreferences, aiCredentials, () -> {
+			Agent updated = buildAiAgent(aiPreferences, aiCredentials, new ChatHistoryStore());
+			ChatWindow.updateAgent(updated);
+			updateComposeChatAgent(updated);
+		});
 	}
 
 	private Agent buildAiAgent(AiPreferences aiPreferences, AiCredentialsStore aiCredentials,
