@@ -33,4 +33,19 @@ public interface LLMProvider {
 
     /** Cancela uma requisicao em andamento (streaming ou nao). Sem efeito se ja tiver terminado. */
     void cancel(String requestId);
+
+    /**
+     * Abre uma {@link ConversationSession} pra um turno de conversa: {@code seed}
+     * traz o modelo/temperatura/tools e o historico ja acumulado (mensagem de
+     * sistema + turnos anteriores, SEM a mensagem do usuario — essa entra via
+     * {@link ConversationSession#send}). Implementacao padrao delega pro fluxo
+     * generico baseado em {@link #stream}/{@link ChatMessage} (correto pro
+     * formato OpenAI-compativel, usado por OpenAI/OpenRouter/Ollama); Claude e
+     * Gemini sobrescrevem com sessoes que guardam seu proprio historico nativo,
+     * evitando o Agent (ou o formato generico de {@link ChatMessage}) precisar
+     * conhecer {@code tool_use}/{@code tool_call_id}/{@code functionCall} etc.
+     */
+    default ConversationSession createSession(ChatRequest seed, Consumer<AiEvent> onEvent) {
+        return new GenericSession(this, seed, onEvent);
+    }
 }

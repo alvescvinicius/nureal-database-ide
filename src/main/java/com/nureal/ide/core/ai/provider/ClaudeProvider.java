@@ -115,8 +115,69 @@ public final class ClaudeProvider extends AbstractStreamingProvider {
 
     @Override
     protected void doStream(String requestId, ChatRequest request, Consumer<AiEvent> onEvent, AtomicBoolean cancelled) {
+        doStreamNative(requestId, buildRequestBody(request, true), onEvent, cancelled);
+    }
+
+    @Override
+    public ConversationSession createSession(ChatRequest seed, Consumer<AiEvent> onEvent) {
+        return new ClaudeSession(this, seed, onEvent);
+    }
+
+    /**
+     * Dispara uma rodada com um corpo de requisicao JA no formato nativo da
+     * Claude (usado por {@link ClaudeSession}, que mantem seu proprio
+     * historico de content blocks entre rodadas em vez de reconstruir a
+     * partir de {@link ChatMessage} a cada chamada). Reusa o mesmo
+     * executor/cancelamento de {@link #stream}, via
+     * {@link AbstractStreamingProvider#submitStreamTask}.
+     */
+    String streamNative(Map<String, Object> nativeBody, Consumer<AiEvent> onEvent) {
+        return submitStreamTask(onEvent, (requestId, ev, cancelled) -> doStreamNative(requestId, nativeBody, ev, cancelled));
+    }
+
+    /** Monta o corpo de requisicao da Claude a partir de mensagens JA no formato nativo (ver {@link #streamNative}). */
+    Map<String, Object> nativeRequestBody(String model, Double temperature, String systemPrompt,
+            List<Map<String, Object>> nativeMessages, List<ToolSpec> tools) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("model", model);
+        body.put("max_tokens", DEFAULT_MAX_TOKENS);
+        if (systemPrompt != null) {
+            body.put("system", systemPrompt);
+        }
+        body.put("messages", nativeMessages);
+        body.put("stream", true);
+        if (temperature != null) {
+            body.put("temperature", temperature);
+        }
+        if (!tools.isEmpty()) {
+            List<Map<String, Object>> claudeTools = new ArrayList<>();
+            for (ToolSpec tool : tools) {
+                Map<String, Object> t = new LinkedHashMap<>();
+                t.put("name", tool.name());
+                t.put("description", tool.description());
+                t.put("input_schema", tool.parametersSchema());
+                claudeTools.add(t);
+            }
+            body.put("tools", claudeTools);
+        }
+        return body;
+    }
+
+    /**
+     * Converte uma mensagem generica pro bloco nativo (ver {@link #toClaudeMessage}) —
+     * usado por {@link ClaudeSession} tanto pro historico previo (carregado do
+     * disco, sempre {@code user}/{@code assistant} puro) quanto pra montar a
+     * mensagem {@code tool_result} de uma rodada (via um {@link ChatMessage}
+     * transiente de role {@link ChatMessage#ROLE_TOOL}).
+     */
+    Map<String, Object> toNativeMessage(ChatMessage m) {
+        return toClaudeMessage(m);
+    }
+
+    private void doStreamNative(String requestId, Map<String, Object> requestBody, Consumer<AiEvent> onEvent,
+            AtomicBoolean cancelled) {
         try {
-            String json = JsonWriter.write(buildRequestBody(request, true));
+            String json = JsonWriter.write(requestBody);
             HttpRequest httpRequest = baseRequest("/v1/messages")
                     .timeout(timeout)
                     .header("Content-Type", "application/json")

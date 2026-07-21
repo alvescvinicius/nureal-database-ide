@@ -114,10 +114,63 @@ public final class GeminiProvider extends AbstractStreamingProvider {
 
     @Override
     protected void doStream(String requestId, ChatRequest request, Consumer<AiEvent> onEvent, AtomicBoolean cancelled) {
+        doStreamNative(requestId, request.model(), buildRequestBody(request), onEvent, cancelled);
+    }
+
+    @Override
+    public ConversationSession createSession(ChatRequest seed, Consumer<AiEvent> onEvent) {
+        return new GeminiSession(this, seed, onEvent);
+    }
+
+    /**
+     * Dispara uma rodada com um corpo de requisicao JA no formato nativo do
+     * Gemini (usado por {@link GeminiSession}, que mantem seu proprio
+     * historico de {@code contents} entre rodadas em vez de reconstruir a
+     * partir de {@link ChatMessage} a cada chamada). Reusa o mesmo
+     * executor/cancelamento de {@link #stream}, via
+     * {@link AbstractStreamingProvider#submitStreamTask}.
+     */
+    String streamNative(String model, Map<String, Object> nativeBody, Consumer<AiEvent> onEvent) {
+        return submitStreamTask(onEvent,
+                (requestId, ev, cancelled) -> doStreamNative(requestId, model, nativeBody, ev, cancelled));
+    }
+
+    /** Monta o corpo de requisicao do Gemini a partir de {@code contents} JA no formato nativo (ver {@link #streamNative}). */
+    Map<String, Object> nativeRequestBody(String systemPrompt, List<Map<String, Object>> nativeContents,
+            Double temperature, List<ToolSpec> tools) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        if (systemPrompt != null) {
+            body.put("systemInstruction", Map.of("parts", List.of(Map.of("text", systemPrompt))));
+        }
+        body.put("contents", nativeContents);
+        if (temperature != null) {
+            body.put("generationConfig", Map.of("temperature", temperature));
+        }
+        if (!tools.isEmpty()) {
+            List<Map<String, Object>> functionDeclarations = new ArrayList<>();
+            for (ToolSpec tool : tools) {
+                Map<String, Object> fn = new LinkedHashMap<>();
+                fn.put("name", tool.name());
+                fn.put("description", tool.description());
+                fn.put("parameters", tool.parametersSchema());
+                functionDeclarations.add(fn);
+            }
+            body.put("tools", List.of(Map.of("functionDeclarations", functionDeclarations)));
+        }
+        return body;
+    }
+
+    /** Converte uma mensagem generica pro {@code content} nativo (ver {@link #toGeminiContent}) — usado por {@link GeminiSession}. */
+    Map<String, Object> toNativeContent(ChatMessage m) {
+        return toGeminiContent(m);
+    }
+
+    private void doStreamNative(String requestId, String model, Map<String, Object> requestBody,
+            Consumer<AiEvent> onEvent, AtomicBoolean cancelled) {
         try {
-            String json = JsonWriter.write(buildRequestBody(request));
+            String json = JsonWriter.write(requestBody);
             HttpRequest httpRequest = baseRequest(
-                    "/v1beta/models/" + request.model() + ":streamGenerateContent?alt=sse")
+                    "/v1beta/models/" + model + ":streamGenerateContent?alt=sse")
                     .timeout(timeout)
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8))

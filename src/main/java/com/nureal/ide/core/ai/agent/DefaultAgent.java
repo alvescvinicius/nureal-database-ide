@@ -7,7 +7,6 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
@@ -19,6 +18,9 @@ import com.nureal.ide.core.ai.prompt.PromptComposer;
 import com.nureal.ide.core.ai.provider.AiEvent;
 import com.nureal.ide.core.ai.provider.ChatMessage;
 import com.nureal.ide.core.ai.provider.ChatRequest;
+import com.nureal.ide.core.ai.provider.ChatResponse;
+import com.nureal.ide.core.ai.provider.ChatUsage;
+import com.nureal.ide.core.ai.provider.ConversationSession;
 import com.nureal.ide.core.ai.provider.LLMProvider;
 import com.nureal.ide.core.ai.provider.ProviderException;
 import com.nureal.ide.core.ai.provider.ToolCall;
@@ -29,17 +31,18 @@ import com.nureal.ide.core.ai.tool.ToolResult;
 import com.nureal.ide.core.log.AppLogger;
 
 /**
- * Implementacao unica de {@link Agent} do MVP. Sempre usa
- * {@link LLMProvider#stream}, mesmo nas rodadas em que o modelo pode optar
- * por chamar uma tool: o Ollama traz {@code tool_calls} no ultimo chunk
- * (ver {@code OllamaProvider#runStream}) tanto quanto na resposta nao
- * streamed, entao nao ha motivo para um caminho separado sem streaming so
- * para o turno de decisao — evita gerar a resposta duas vezes e mantem a UX
- * de streaming mesmo quando uma tool acaba sendo usada.
+ * Implementacao unica de {@link Agent} do MVP. Fala com o provider sempre
+ * atraves de uma {@link ConversationSession} (ver {@link LLMProvider#createSession}):
+ * o Agent so reage a {@link AiEvent.ToolCallsRequested} (executa a tool e
+ * devolve o resultado via {@link ConversationSession#submitToolResult}) e a
+ * {@link AiEvent.Completed} (resposta final) — nunca constroi {@link ChatMessage}
+ * de tool-calling nem conhece {@code tool_use}/{@code tool_call_id}/
+ * {@code functionCall} de nenhum provider especifico; cada
+ * {@link ConversationSession} cuida disso sozinha.
  */
 public final class DefaultAgent implements Agent {
 
-    /** Rodadas modelo->tool->modelo permitidas antes de aceitar a resposta como final, mesmo com tool_calls pendente. */
+    /** Rodadas modelo->tool->modelo permitidas antes de aceitar a resposta como final, mesmo com tool pendente. */
     private static final int MAX_TOOL_ROUNDS = 3;
 
     private final LLMProvider provider;
@@ -71,10 +74,9 @@ public final class DefaultAgent implements Agent {
         }
 
         AgentContext context = contextProvider.collect();
-        List<ChatMessage> messages = new ArrayList<>();
-        messages.add(new ChatMessage(ChatMessage.ROLE_SYSTEM, PromptComposer.compose(context)));
-        messages.addAll(loadHistoryMessages(conversationId));
-        messages.add(new ChatMessage(ChatMessage.ROLE_USER, userMessage));
+        List<ChatMessage> seedMessages = new ArrayList<>();
+        seedMessages.add(new ChatMessage(ChatMessage.ROLE_SYSTEM, PromptComposer.compose(context)));
+        seedMessages.addAll(loadHistoryMessages(conversationId));
 
         saveHistory(conversationId, userMessage, ChatMessage.ROLE_USER);
 
@@ -82,9 +84,11 @@ public final class DefaultAgent implements Agent {
                 .map(t -> new ToolSpec(t.getName(), t.getDescription(), t.getParametersSchema()))
                 .toList();
 
-        Turn turn = new Turn(turnId, conversationId, onEvent, prefs, context, toolSpecs, messages);
+        ChatRequest seed = new ChatRequest(prefs.model(), seedMessages, prefs.temperature(), toolSpecs);
+        Turn turn = new Turn(turnId, conversationId, onEvent, context);
+        turn.session = provider.createSession(seed, event -> handleEvent(turn, event));
         activeTurns.put(turnId, turn);
-        startRound(turn);
+        turn.session.send(userMessage);
         return turnId;
     }
 
@@ -95,50 +99,39 @@ public final class DefaultAgent implements Agent {
             return;
         }
         turn.cancelled.set(true);
-        String activeProviderRequestId = turn.activeProviderRequestId.get();
-        if (activeProviderRequestId != null) {
-            provider.cancel(activeProviderRequestId);
+        if (turn.session != null) {
+            turn.session.cancel();
         }
-    }
-
-    private void startRound(Turn turn) {
-        if (turn.cancelled.get()) {
-            turn.onEvent.accept(new AiEvent.Cancelled(turn.turnId));
-            activeTurns.remove(turn.turnId);
-            return;
-        }
-        ChatRequest request = new ChatRequest(turn.prefs.model(), List.copyOf(turn.messages),
-                turn.prefs.temperature(), turn.toolSpecs);
-        String providerRequestId = provider.stream(request, event -> handleEvent(turn, event));
-        turn.activeProviderRequestId.set(providerRequestId);
     }
 
     /**
      * Eventos de cada rodada chegam sempre na thread de streaming daquela
-     * rodada (ver {@code OllamaProvider}); {@code turn.messages}/{@code
-     * turn.round} so sao mutados aqui, e a proxima rodada e disparada via
-     * {@code ExecutorService.submit} (dentro de {@link #startRound}), que
-     * garante happens-before para a thread da rodada seguinte — por isso
-     * nao precisam ser {@code volatile}/sincronizados mesmo trocando de
-     * thread a cada rodada de tool-calling.
+     * rodada (ver {@code AbstractStreamingProvider}); {@code turn.round} so e
+     * mutado aqui, e a proxima rodada e disparada pela propria
+     * {@link ConversationSession} via {@code ExecutorService.submit}, que
+     * garante happens-before para a thread da rodada seguinte — por isso nao
+     * precisa ser {@code volatile}/sincronizado mesmo trocando de thread a
+     * cada rodada de tool-calling.
      */
     private void handleEvent(Turn turn, AiEvent event) {
         if (turn.cancelled.get() && !(event instanceof AiEvent.Cancelled)) {
             return;
         }
-        if (event instanceof AiEvent.Completed completed
-                && completed.response().hasToolCalls()
-                && turn.round < MAX_TOOL_ROUNDS - 1) {
+        if (event instanceof AiEvent.ToolCallsRequested requested) {
+            if (turn.round >= MAX_TOOL_ROUNDS - 1) {
+                // Limite de rodadas atingido: aceita o texto que veio junto do
+                // pedido de tool (se houver) como resposta final, sem executar
+                // mais nenhuma tool — mesmo fallback que o fluxo antigo tinha.
+                finalizeWithSyntheticText(turn, requested.requestId(), requested.accompanyingText());
+                return;
+            }
             turn.round++;
-            turn.messages.add(new ChatMessage(ChatMessage.ROLE_ASSISTANT, completed.response().message().content(),
-                    null, completed.response().toolCalls()));
-            for (ToolCall call : completed.response().toolCalls()) {
+            for (ToolCall call : requested.calls()) {
                 ToolResult result = toolExecutor.execute(new ToolRequest(call.name(), call.arguments(),
                         turn.conversationId, call.id(), turn.context));
                 String toolContent = result.success() ? result.content() : ("Erro: " + result.error());
-                turn.messages.add(new ChatMessage(ChatMessage.ROLE_TOOL, toolContent, call.id()));
+                turn.session.submitToolResult(call.id(), toolContent);
             }
-            startRound(turn);
             return;
         }
         if (event instanceof AiEvent.Completed completed) {
@@ -147,10 +140,24 @@ public final class DefaultAgent implements Agent {
                 saveHistory(turn.conversationId, finalContent, ChatMessage.ROLE_ASSISTANT);
             }
             activeTurns.remove(turn.turnId);
-        } else if (event instanceof AiEvent.Failed || event instanceof AiEvent.Cancelled) {
+            turn.onEvent.accept(event);
+            return;
+        }
+        if (event instanceof AiEvent.Failed || event instanceof AiEvent.Cancelled) {
             activeTurns.remove(turn.turnId);
         }
         turn.onEvent.accept(event);
+    }
+
+    /** So usado no fallback de limite de rodadas (ver acima) — sem {@link ChatUsage} real disponivel ali. */
+    private void finalizeWithSyntheticText(Turn turn, String requestId, String finalContent) {
+        if (!finalContent.isBlank()) {
+            saveHistory(turn.conversationId, finalContent, ChatMessage.ROLE_ASSISTANT);
+        }
+        activeTurns.remove(turn.turnId);
+        turn.onEvent.accept(new AiEvent.Completed(requestId,
+                new ChatResponse(new ChatMessage(ChatMessage.ROLE_ASSISTANT, finalContent), "stop", ChatUsage.EMPTY,
+                        List.of())));
     }
 
     private List<ChatMessage> loadHistoryMessages(String conversationId) {
@@ -186,23 +193,17 @@ public final class DefaultAgent implements Agent {
         final String turnId;
         final String conversationId;
         final Consumer<AiEvent> onEvent;
-        final AiPreferences.State prefs;
         final AgentContext context;
-        final List<ToolSpec> toolSpecs;
-        final List<ChatMessage> messages;
-        final AtomicReference<String> activeProviderRequestId = new AtomicReference<>();
         final AtomicBoolean cancelled = new AtomicBoolean(false);
+        /** Atribuida logo apos a construcao, antes de qualquer evento poder chegar (ver {@link #chat}). */
+        ConversationSession session;
         int round = 0;
 
-        Turn(String turnId, String conversationId, Consumer<AiEvent> onEvent, AiPreferences.State prefs,
-                AgentContext context, List<ToolSpec> toolSpecs, List<ChatMessage> messages) {
+        Turn(String turnId, String conversationId, Consumer<AiEvent> onEvent, AgentContext context) {
             this.turnId = turnId;
             this.conversationId = conversationId;
             this.onEvent = onEvent;
-            this.prefs = prefs;
             this.context = context;
-            this.toolSpecs = toolSpecs;
-            this.messages = messages;
         }
     }
 }

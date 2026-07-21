@@ -138,6 +138,47 @@ class DefaultAgentTest {
     }
 
     @Test
+    void limiteDeRodadasDeToolInterrompeSemTravar() throws IOException {
+        FakeProvider provider = new FakeProvider();
+        provider.enqueueToolCallResponse("call1", "echo_tool", Map.of("value", "1"));
+        provider.enqueueToolCallResponse("call2", "echo_tool", Map.of("value", "2"));
+        provider.enqueueToolCallResponse("call3", "echo_tool", Map.of("value", "3"));
+
+        Tool echoTool = new Tool() {
+            @Override
+            public String getName() {
+                return "echo_tool";
+            }
+
+            @Override
+            public String getDescription() {
+                return "ecoa o valor recebido";
+            }
+
+            @Override
+            public Map<String, Object> getParametersSchema() {
+                return Map.of();
+            }
+
+            @Override
+            public ToolResult execute(ToolRequest request) {
+                return ToolResult.ok("valor=" + request.arguments().get("value"), null, 1);
+            }
+        };
+
+        DefaultAgent agent = new DefaultAgent(provider, () -> AgentContext.EMPTY,
+                new ToolExecutor(List.of(echoTool)), historyStore, DefaultAgentTest::prefs);
+
+        List<AiEvent> events = new ArrayList<>();
+        agent.chat("conv5", "repete pra sempre", events::add);
+
+        AiEvent last = events.get(events.size() - 1);
+        assertInstanceOf(AiEvent.Completed.class, last, "deve encerrar o turno mesmo sem o modelo parar de pedir tools");
+        assertEquals(3, provider.requestsSent.size(),
+                "para no limite de rodadas (3), sem disparar uma 4a chamada ao provider");
+    }
+
+    @Test
     void cancelPropagaParaOProviderDaRequisicaoAtiva() {
         FakeProvider provider = new FakeProvider();
         provider.blockUntilCancelled = true;

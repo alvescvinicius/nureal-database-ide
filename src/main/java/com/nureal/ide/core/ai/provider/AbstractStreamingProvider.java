@@ -43,13 +43,33 @@ abstract class AbstractStreamingProvider implements LLMProvider {
 
     @Override
     public final String stream(ChatRequest request, Consumer<AiEvent> onEvent) {
+        return submitStreamTask(onEvent, (requestId, ev, cancelled) -> doStream(requestId, request, ev, cancelled));
+    }
+
+    @Override
+    public final void cancel(String requestId) {
+        AtomicBoolean flag = inFlight.get(requestId);
+        if (flag != null) {
+            flag.set(true);
+        }
+    }
+
+    /**
+     * Reusa o mesmo executor/mapa de cancelamento/evento {@link AiEvent.Started}
+     * de {@link #stream} pra qualquer outra chamada assincrona de um provider —
+     * usado por {@link ConversationSession}s (ex.: {@code ClaudeSession},
+     * {@code GeminiSession}) que precisam disparar rodadas de tool-calling
+     * adicionais fora do fluxo normal de {@link #stream(ChatRequest, Consumer)},
+     * sem duplicar esse boilerplate.
+     */
+    protected final String submitStreamTask(Consumer<AiEvent> onEvent, StreamTask task) {
         String requestId = UUID.randomUUID().toString();
         AtomicBoolean cancelled = new AtomicBoolean(false);
         inFlight.put(requestId, cancelled);
         streamExecutor.submit(() -> {
             onEvent.accept(new AiEvent.Started(requestId));
             try {
-                doStream(requestId, request, onEvent, cancelled);
+                task.run(requestId, onEvent, cancelled);
             } catch (RuntimeException unexpected) {
                 onEvent.accept(new AiEvent.Failed(requestId, new ProviderException.UnexpectedResponse(
                         "Erro inesperado ao conversar com " + providerName() + ": " + unexpected.getMessage(),
@@ -59,14 +79,6 @@ abstract class AbstractStreamingProvider implements LLMProvider {
             }
         });
         return requestId;
-    }
-
-    @Override
-    public final void cancel(String requestId) {
-        AtomicBoolean flag = inFlight.get(requestId);
-        if (flag != null) {
-            flag.set(true);
-        }
     }
 
     /** Nome amigavel do provider, usado em mensagens de erro genericas (ex.: "Claude", "OpenAI"). */
@@ -80,4 +92,10 @@ abstract class AbstractStreamingProvider implements LLMProvider {
      */
     protected abstract void doStream(String requestId, ChatRequest request, Consumer<AiEvent> onEvent,
             AtomicBoolean cancelled);
+
+    /** Uma chamada assincrona submetida via {@link #submitStreamTask}. */
+    @FunctionalInterface
+    protected interface StreamTask {
+        void run(String requestId, Consumer<AiEvent> onEvent, AtomicBoolean cancelled);
+    }
 }
