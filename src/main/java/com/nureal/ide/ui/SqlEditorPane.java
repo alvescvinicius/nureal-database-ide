@@ -163,9 +163,10 @@ public class SqlEditorPane extends JPanel {
      * reconhecido no editor (secao 8.3 do pedido "Navegacao Inteligente e
      * Interativa") — {@code kind} e "TABLE"/"VIEW"/"PROCEDURE"/"FUNCTION"/
      * "TRIGGER" (mesmos valores usados pela arvore de objetos, ver
-     * {@code MainWindow.ObjNode#kind()}); {@code table} vem preenchido so
-     * para TABLE/VIEW, {@code null} para os demais. {@code MainWindow}
-     * decide o que fazer (abrir a tela de propriedades, no caso).
+     * {@code ObjectExplorerController.ObjNode#kind()}); {@code table} vem
+     * preenchido so para TABLE/VIEW, {@code null} para os demais.
+     * {@code ObjectExplorerController} decide o que fazer (abrir a tela de
+     * propriedades, no caso).
      */
     @FunctionalInterface
     interface ObjectOpenHandler {

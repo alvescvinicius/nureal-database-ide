@@ -94,10 +94,10 @@ final class ObjectTreeCellRenderer extends DefaultTreeCellRenderer {
         setFont(tree.getFont());
 
         DefaultMutableTreeNode node = (value instanceof DefaultMutableTreeNode n) ? n : null;
-        MainWindow.ObjNode obj = (node != null && node.getUserObject() instanceof MainWindow.ObjNode o) ? o : null;
-        boolean isSchema = obj != null && obj.type() == MainWindow.NodeType.SCHEMA;
+        ObjectExplorerController.ObjNode obj = (node != null && node.getUserObject() instanceof ObjectExplorerController.ObjNode o) ? o : null;
+        boolean isSchema = obj != null && obj.type() == ObjectExplorerController.NodeType.SCHEMA;
         if (obj != null) {
-            boolean emptyCategory = obj.type() == MainWindow.NodeType.CATEGORY && node.getChildCount() == 0;
+            boolean emptyCategory = obj.type() == ObjectExplorerController.NodeType.CATEGORY && node.getChildCount() == 0;
             style(obj, emptyCategory, expanded);
         }
         paintSwitchArrow = isSchema;
@@ -170,7 +170,7 @@ final class ObjectTreeCellRenderer extends DefaultTreeCellRenderer {
         return null;
     }
 
-    private void style(MainWindow.ObjNode obj, boolean emptyCategory, boolean expanded) {
+    private void style(ObjectExplorerController.ObjNode obj, boolean emptyCategory, boolean expanded) {
         switch (obj.type()) {
             case SCHEMA -> {
                 setIcon(ConnectionsPanel.statusDot(MainWindow.ACCENT));
