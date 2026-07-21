@@ -50,6 +50,14 @@ O que já funciona:
   sem WHERE, DROP, TRUNCATE, ALTER/CREATE/RENAME)
 - **Exportação dos resultados para Excel** (.xlsx, via Apache POI/SXSSF)
 - Browser de objetos (árvore de tabelas/colunas)
+- **Chat com IA local (Ollama)**: janela não-modal (ícone de balão de fala na barra de
+  ferramentas) com streaming, histórico persistente por conversa e tool-calling (a IA
+  pode listar tabelas/descrever colunas do banco conectado). O Ollama vem **embutido no
+  instalador** — a IDE sobe/derruba o processo sozinha e baixa um modelo padrão no
+  primeiro uso (precisa de internet nesse momento; depois funciona 100% offline). Quem
+  preferir usar um Ollama próprio (outra máquina, GPU dedicada) pode desligar o modo
+  embutido nas configurações de IA (⚙ dentro da janela do chat) e apontar para qualquer
+  Base URL externa.
 
 ## Onde as conexões são salvas
 
@@ -97,7 +105,10 @@ mvn exec:java
 O projeto já vem com um workflow do GitHub Actions (`.github/workflows/release.yml`)
 que, **ao publicar uma tag**, compila tudo e gera automaticamente os instaladores das
 3 plataformas em paralelo, cada um com a Java embutida (quem baixar não precisa ter
-Java instalado):
+Java instalado) **e o servidor do Ollama embutido** (chat de IA funciona sem instalar
+nada separado — só o modelo é baixado depois, no primeiro uso do chat). A versão do
+Ollama empacotada é fixada em `OLLAMA_VERSION` no topo do workflow (não "latest"), pelo
+mesmo motivo de todo o resto do projeto usar versões travadas.
 
 | Plataforma | Arquivo(s) | Job |
 |---|---|---|
@@ -149,6 +160,15 @@ Para uma nova versão, repita com `v0.2.0`, etc.
 
 ### (Opcional) Gerar o instalador localmente
 Precisa de JDK 17+ com `jpackage`.
+
+> Os comandos abaixo NÃO baixam o binário do Ollama (só o workflow do GitHub Actions
+> faz isso automaticamente) — o instalador gerado localmente funciona normalmente, só
+> não terá o Ollama embutido (o chat de IA vai pedir pra apontar pra um Ollama externo
+> nas configurações). Para embutir também localmente, baixe o binário certo da sua
+> plataforma em https://github.com/ollama/ollama/releases e coloque em
+> `target/dist/ollama-bin/ollama` (`ollama.exe` no Windows) **antes** de rodar o
+> `jpackage` abaixo — mesmo caminho que o workflow usa (ver
+> `core.ai.runtime.OllamaBinaryLocator`).
 
 **Windows** (adicionalmente, [WiX Toolset 3.x](https://github.com/wixtoolset/wix3/releases)):
 ```powershell
@@ -202,6 +222,14 @@ atenção:
   abre a página do Release no navegador; a IDE não baixa nem executa nenhum
   instalador sozinha (mais simples e sem as particularidades de cada instalador por
   plataforma).
+- **Ollama embutido** (`core.ai.runtime.OllamaRuntimeManager`/`OllamaBinaryLocator`):
+  única exceção ao ponto acima — a IDE sobe/derruba sozinha o processo do servidor
+  Ollama (`ollama serve`), localizado via `jpackage.app-path` (layout diferente por SO:
+  macOS sobe um nível extra até `Contents/app/`, Windows/Linux vão direto pra `app/`).
+  Nunca derruba um Ollama externo que a própria IDE não iniciou. Sem o binário embutido
+  (build local sem o passo de download, ou plataforma/arquitetura sem bundle), cai pro
+  fallback de `PATH` — mesmo padrão do `MySqlDumpRunner` — desde que o usuário tenha o
+  Ollama instalado por conta própria.
 - **Atalhos de teclado**: todos usam `Ctrl` (ex.: `Ctrl+Enter` para executar,
   `Ctrl+Shift+F` para formatar). Funciona em macOS (o teclado tem uma tecla Ctrl),
   mas não segue a convenção nativa do Mac de usar `Cmd` — puramente cosmético, não
