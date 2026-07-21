@@ -27,15 +27,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.nureal.ide.core.ai.context.ContextProvider
 import com.nureal.ide.ui.ai.ChatActions
 
 /** Equivalente Compose de `ChatPanel.java` + parte de `ChatController.java` (so o que e puramente visual). */
 @Composable
-fun ChatScreen(session: ChatSession, actions: ChatActions, contextProvider: ContextProvider, onOpenSettings: () -> Unit) {
+fun ChatScreen(session: ChatSession, actions: ChatActions, onOpenSettings: () -> Unit) {
     var input by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
-    val agentContext = rememberAgentContext(contextProvider)
 
     LaunchedEffect(session.entries.size) {
         if (session.entries.isNotEmpty()) {
@@ -47,8 +45,6 @@ fun ChatScreen(session: ChatSession, actions: ChatActions, contextProvider: Cont
         Row(modifier = Modifier.fillMaxWidth().padding(6.dp), horizontalArrangement = Arrangement.End) {
             IconButton(onClick = onOpenSettings) { Text("⚙") }
         }
-
-        ContextHeader(agentContext)
 
         LazyColumn(
             state = listState,

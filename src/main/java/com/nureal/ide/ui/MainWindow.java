@@ -2565,7 +2565,7 @@ public class MainWindow extends JFrame {
 		Agent agent = buildAiAgent(aiPreferences, aiCredentials, chatHistoryStore);
 		ChatActions actions = new ChatActions(this::runSqlFromChat, this::currentSqlFormatter, sql -> { });
 		Runnable onOpenSettings = () -> openAiSettings(aiPreferences, aiCredentials);
-		if (!openComposeChatWindow(agent, chatHistoryStore, actions, onOpenSettings, buildAiContextProvider())) {
+		if (!openComposeChatWindow(agent, chatHistoryStore, actions, onOpenSettings)) {
 			ChatWindow.open(this, agent, chatHistoryStore, AI_CONVERSATION_ID, onOpenSettings, actions);
 		}
 	}
@@ -2585,12 +2585,12 @@ public class MainWindow extends JFrame {
 	 * pro Swing (nunca deixa o usuario sem chat nenhum).
 	 */
 	private boolean openComposeChatWindow(Agent agent, ChatHistoryStore historyStore, ChatActions actions,
-			Runnable onOpenSettings, ContextProvider contextProvider) {
+			Runnable onOpenSettings) {
 		try {
 			Class<?> composeChatWindow = Class.forName("com.nureal.ide.ui.ai.compose.ComposeChatWindow");
 			Method open = composeChatWindow.getMethod("open", Window.class, Agent.class, ChatHistoryStore.class,
-					String.class, Runnable.class, ChatActions.class, ContextProvider.class);
-			open.invoke(null, this, agent, historyStore, AI_CONVERSATION_ID, onOpenSettings, actions, contextProvider);
+					String.class, Runnable.class, ChatActions.class);
+			open.invoke(null, this, agent, historyStore, AI_CONVERSATION_ID, onOpenSettings, actions);
 			return true;
 		} catch (ClassNotFoundException e) {
 			return false;
@@ -2643,7 +2643,17 @@ public class MainWindow extends JFrame {
 			prefs = AiPreferences.State.defaults();
 		}
 		LLMProvider provider = LLMProviderFactory.create(prefs, aiCredentials);
-		IdeStateAccessor accessor = buildIdeStateAccessor();
+		IdeStateAccessor accessor = new IdeContextAccessor(
+				this::connectionManager,
+				() -> metadataService,
+				() -> currentSchema,
+				() -> currentSchema != null ? currentSchema.name() : null,
+				this::activeConnectionLabelForAi,
+				this::databaseProductNameForAi,
+				this::databaseVersionForAi,
+				this::currentEditorSqlForAi,
+				this::hasEditorSelectionForAi,
+				this::lastExecutionForAi);
 		ToolExecutor toolExecutor = new ToolExecutor(
 				List.of(new ListTablesTool(accessor), new DescribeTableTool(accessor)));
 		ContextProvider contextProvider = new DefaultContextProvider(accessor);
@@ -2655,32 +2665,6 @@ public class MainWindow extends JFrame {
 				return AiPreferences.State.defaults();
 			}
 		});
-	}
-
-	private IdeStateAccessor buildIdeStateAccessor() {
-		return new IdeContextAccessor(
-				this::connectionManager,
-				() -> metadataService,
-				() -> currentSchema,
-				() -> currentSchema != null ? currentSchema.name() : null,
-				this::activeConnectionLabelForAi,
-				this::databaseProductNameForAi,
-				this::databaseVersionForAi,
-				this::currentEditorSqlForAi,
-				this::hasEditorSelectionForAi,
-				this::lastExecutionForAi);
-	}
-
-	/**
-	 * Reconstroi o MESMO {@link ContextProvider} que {@link #buildAiAgent}
-	 * ja monta internamente pro Agent, so que exposto — usado pelo painel de
-	 * contexto do chat Compose (Conexao/Banco/Sistema/Especialista), que
-	 * precisa ler o estado da IDE de forma continua (polling leve, sem
-	 * round-trip ao banco — ver {@code DefaultContextProvider}), independente
-	 * de quando o usuario manda uma mensagem.
-	 */
-	private ContextProvider buildAiContextProvider() {
-		return new DefaultContextProvider(buildIdeStateAccessor());
 	}
 
 	/** Rotulo da conexao ativa SEM senha (ver ConnectionProfile — nunca usar toString() nele). */
