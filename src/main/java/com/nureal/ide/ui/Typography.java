@@ -75,7 +75,7 @@ public final class Typography {
      * uma tentativa antiga. Reunir tudo aqui elimina os dois problemas de
      * uma vez: a duplicacao E a divergencia entre os 4 cabecalhos.
      */
-    static JLabel sectionHeader(String text) {
+    public static JLabel sectionHeader(String text) {
         JLabel label = new JLabel(text);
         label.setFont(label.getFont().deriveFont(11f));
         primary(label);
