@@ -39,25 +39,25 @@ import javax.swing.JLabel;
  * (SqlEditorPane, ResultGrid, dialogos com JRootPane customizado) ja cuidam
  * disso sozinhos.
  */
-final class Typography {
+public final class Typography {
 
     private Typography() {
     }
 
     /** Titulos, cabecalhos de painel, nome de conexao/tabela, botoes principais. */
-    static void primary(JComponent c) {
+    public static void primary(JComponent c) {
         c.setFont(c.getFont().deriveFont(Font.BOLD));
         c.setForeground(GridTheme.HEADER_FOREGROUND);
     }
 
     /** Conteudo normal (listas/arvores/grade/editor/menus) — peso Regular, tom levemente suavizado. */
-    static void secondary(JComponent c) {
+    public static void secondary(JComponent c) {
         c.setFont(c.getFont().deriveFont(Font.PLAIN));
         c.setForeground(GridTheme.COLOR_TEXTUAL);
     }
 
     /** Informacao auxiliar/descricao/status/placeholder — a cor mais discreta da paleta. */
-    static void tertiary(JComponent c) {
+    public static void tertiary(JComponent c) {
         c.setFont(c.getFont().deriveFont(Font.PLAIN));
         c.setForeground(GridTheme.MUTED_TEXT);
     }

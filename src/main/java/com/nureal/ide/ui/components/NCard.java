@@ -1,7 +1,6 @@
 package com.nureal.ide.ui.components;
 
 import java.awt.Color;
-import java.awt.Font;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
@@ -12,6 +11,8 @@ import javax.swing.BoxLayout;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
+
+import com.nureal.ide.ui.Typography;
 
 /**
  * Superficie base do Nureal Design System (NDS): painel com cantos
@@ -45,15 +46,20 @@ public final class NCard extends JPanel {
     public NCard(NAccent accent, String header) {
         setOpaque(false);
         setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
-        setBorder(BorderFactory.createEmptyBorder(7, 10, 7, 10));
+        setBorder(BorderFactory.createEmptyBorder(NTheme.SPACE_SM, NTheme.SPACE_SM, NTheme.SPACE_SM, NTheme.SPACE_SM));
         setAlignmentX(LEFT_ALIGNMENT);
         if (header != null && !header.isBlank()) {
             JLabel headerLabel = new JLabel(header);
-            headerLabel.setFont(headerLabel.getFont().deriveFont(Font.BOLD, 11f));
+            // Typography.primary() da o PESO (Bold) — a cor semantica do card
+            // (info/aviso/erro/sql/tool) sobrescreve a cor generica de cabecalho
+            // que Typography aplicaria, sao dois eixos independentes (peso
+            // hierarquico vs. tinta semantica), ver javadoc de Typography.
+            Typography.primary(headerLabel);
+            headerLabel.setFont(headerLabel.getFont().deriveFont(11f));
             headerLabel.setForeground(NTheme.accentColor(accent));
             headerLabel.setAlignmentX(LEFT_ALIGNMENT);
             add(headerLabel);
-            add(Box.createVerticalStrut(3));
+            add(Box.createVerticalStrut(NTheme.SPACE_XS));
         }
     }
 

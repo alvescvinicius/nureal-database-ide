@@ -30,15 +30,15 @@ package com.nureal.ide.ui;
  *       destaque.</li>
  * </ul>
  */
-final class Spacing {
+public final class Spacing {
 
     private Spacing() {
     }
 
-    static final int XS = 4;
-    static final int SM = 8;
-    static final int MD = 12;
-    static final int LG = 16;
-    static final int XL = 24;
-    static final int XXL = 32;
+    public static final int XS = 4;
+    public static final int SM = 8;
+    public static final int MD = 12;
+    public static final int LG = 16;
+    public static final int XL = 24;
+    public static final int XXL = 32;
 }

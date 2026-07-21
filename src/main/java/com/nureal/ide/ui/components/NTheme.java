@@ -4,24 +4,32 @@ import java.awt.Color;
 
 import javax.swing.UIManager;
 
+import com.formdev.flatlaf.FlatLaf;
+import com.nureal.ide.ui.GridTheme;
+import com.nureal.ide.ui.Spacing;
+
 /**
- * Design tokens do Nureal Design System — cor/espacamento canonicos, sempre
- * derivados do tema FlatLaf ATUAL (nunca RGB fixo de um unico tema), pra
- * qualquer componente {@code N*} nao reinventar sua propria paleta. Extraido
- * de {@code MessageRenderer} (era privado la, so pro chat) — primeiro passo
- * do Nureal Design System (NDS): formalizar o que ja funcionava num lugar
- * unico, reutilizavel por qualquer tela.
+ * Ponte do Nureal Design System (NDS) com a paleta/escala JA EXISTENTE do
+ * app ({@link Spacing}, {@link GridTheme}) — NUNCA reinventa valores
+ * proprios. Antes desta revisao, esta classe tinha sua PROPRIA escala de
+ * espacamento e paleta de cor (descoberto durante a construcao dos
+ * primeiros componentes N*: o app ja tinha {@code Spacing}/{@code Typography}/
+ * {@code GridTheme} de uma rodada de refinamento visual anterior, com
+ * valores DIFERENTES dos que este arquivo inventou) — exatamente o tipo de
+ * "dois estilos para o mesmo componente" que o NDS existe pra eliminar.
+ * Corrigido: {@code ui.components} agora consome {@link Spacing}/
+ * {@link GridTheme} diretamente (pacote FILHO consumindo o pai, nunca o
+ * contrario), unica fonte de verdade pra qualquer tela, nova ou antiga.
  */
 public final class NTheme {
 
-    /** Escala unica de espacamento (px) — nenhum componente deve usar valor arbitrario fora daqui. */
-    public static final int SPACE_XS = 4;
-    public static final int SPACE_SM = 8;
-    public static final int SPACE_MD = 12;
-    public static final int SPACE_LG = 16;
-    public static final int SPACE_XL = 20;
-    public static final int SPACE_XXL = 24;
-    public static final int SPACE_XXXL = 32;
+    /** Escala unica de espacamento — ver {@link Spacing} (fonte unica, nao duplicada aqui). */
+    public static final int SPACE_XS = Spacing.XS;
+    public static final int SPACE_SM = Spacing.SM;
+    public static final int SPACE_MD = Spacing.MD;
+    public static final int SPACE_LG = Spacing.LG;
+    public static final int SPACE_XL = Spacing.XL;
+    public static final int SPACE_XXL = Spacing.XXL;
 
     /** Raio padrao dos cantos arredondados de superficies (cards, chips etc.). */
     public static final int CARD_ARC = 10;
@@ -30,20 +38,18 @@ public final class NTheme {
     }
 
     public static boolean isDark() {
-        Color background = UIManager.getColor("Panel.background");
-        return background != null
-                && (background.getRed() * 0.299 + background.getGreen() * 0.587 + background.getBlue() * 0.114) < 128;
+        return FlatLaf.isLafDark();
     }
 
-    /** Cor de destaque (cabecalho/borda) por tipo — sempre par claro/escuro, nunca uma cor fixa unica. */
+    /** Cor de destaque (cabecalho/borda) por tipo — ver {@link GridTheme}, campos {@code ACCENT_*}. */
     public static Color accentColor(NAccent accent) {
         return switch (accent) {
-            case ERROR -> themed(new Color(0xE5484D), new Color(0xF87171));
-            case WARNING -> themed(new Color(0xB38600), new Color(0xF5C842));
-            case INFO -> themed(new Color(0x2563EB), new Color(0x60A5FA));
-            case SQL -> themed(new Color(0x0F766E), new Color(0x2DD4BF));
-            case TOOL -> themed(new Color(0x7C3AED), new Color(0xA78BFA));
-            case NEUTRAL -> mutedColor();
+            case ERROR -> GridTheme.ACCENT_ERROR;
+            case WARNING -> GridTheme.ACCENT_WARNING;
+            case INFO -> GridTheme.ACCENT_INFO;
+            case SQL -> GridTheme.ACCENT_SQL;
+            case TOOL -> GridTheme.ACCENT_TOOL;
+            case NEUTRAL -> GridTheme.MUTED_TEXT;
         };
     }
 
@@ -53,7 +59,12 @@ public final class NTheme {
         return new Color(base.getRed(), base.getGreen(), base.getBlue(), 40);
     }
 
-    /** Fundo de uma superficie elevada (card/chip): {@code Panel.background} do tema atual, um pouco mais clara/escura. */
+    /**
+     * Fundo de uma superficie elevada (card/chip): {@code Panel.background} do
+     * tema atual, um pouco mais clara (escuro) ou mais escura (claro). Sem
+     * equivalente em {@link GridTheme} (que e sobre grade/editor, nao sobre
+     * cards genericos) — unica cor genuinamente nova do NDS.
+     */
     public static Color surfaceBackground() {
         Color base = UIManager.getColor("Panel.background");
         if (base == null) {
@@ -63,13 +74,9 @@ public final class NTheme {
         return new Color(clamp(base.getRed() + delta), clamp(base.getGreen() + delta), clamp(base.getBlue() + delta));
     }
 
+    /** Cor de texto discreta — ver {@link GridTheme#MUTED_TEXT} (fonte unica, nao duplicada aqui). */
     public static Color mutedColor() {
-        Color c = UIManager.getColor("Label.disabledForeground");
-        return c != null ? c : Color.GRAY;
-    }
-
-    private static Color themed(Color light, Color dark) {
-        return isDark() ? dark : light;
+        return GridTheme.MUTED_TEXT;
     }
 
     private static int clamp(int v) {

@@ -51,7 +51,7 @@ import java.awt.Color;
  * sem duplicar logica: mudar a cor de exibicao de dados aqui em
  * {@link #colorFor(SqlTypeKind)} NUNCA afeta o editor, e vice-versa.
  */
-final class GridTheme {
+public final class GridTheme {
 
     private GridTheme() {
     }
@@ -184,7 +184,18 @@ final class GridTheme {
     static Color GUTTER_FOREGROUND;
 
     // ---------- Texto auxiliar (labels de metadados, filtro, etc.) ----------
-    static Color MUTED_TEXT;
+    public static Color MUTED_TEXT;
+
+    // ---------- Destaque semantico de card/painel (Nureal Design System — NCard/ui.components) ----------
+    // Categorias que nem a grade nem o editor precisavam antes do NDS (cards
+    // do chat de IA: dica/aviso/erro/SQL/tool) — publico porque ui.components
+    // (pacote FILHO, nunca o contrario) consome direto, mesma fonte unica de
+    // verdade que o resto da paleta.
+    public static Color ACCENT_INFO;
+    public static Color ACCENT_WARNING;
+    public static Color ACCENT_ERROR;
+    public static Color ACCENT_SQL;
+    public static Color ACCENT_TOOL;
 
     // Tema ESCURO agora e o padrao do app (ver App#main) — a paleta inicial
     // da grade precisa combinar, senao a primeira janela pintaria com cores
@@ -276,6 +287,12 @@ final class GridTheme {
             GUTTER_FOREGROUND = new Color(0x8B, 0x95, 0xA1);
 
             MUTED_TEXT = new Color(0x9A, 0xA3, 0xAF);
+
+            ACCENT_INFO = new Color(0x60, 0xA5, 0xFA);
+            ACCENT_WARNING = new Color(0xF5, 0xC8, 0x42);
+            ACCENT_ERROR = new Color(0xF8, 0x71, 0x71);
+            ACCENT_SQL = new Color(0x2D, 0xD4, 0xBF);
+            ACCENT_TOOL = new Color(0xA7, 0x8B, 0xFA);
         } else {
             // ---- Sistema semantico de cores por tipo de dado (tema claro) ----
             COLOR_KEYWORD = new Color(0x15, 0x65, 0xC0); // azul institucional
@@ -342,6 +359,12 @@ final class GridTheme {
             GUTTER_FOREGROUND = new Color(0x9A, 0xA3, 0xAF);
 
             MUTED_TEXT = new Color(0x6B, 0x72, 0x80);
+
+            ACCENT_INFO = new Color(0x25, 0x63, 0xEB);
+            ACCENT_WARNING = new Color(0xB3, 0x86, 0x00);
+            ACCENT_ERROR = new Color(0xE5, 0x48, 0x4D);
+            ACCENT_SQL = new Color(0x0F, 0x76, 0x6E);
+            ACCENT_TOOL = new Color(0x7C, 0x3A, 0xED);
         }
     }
 
