@@ -64,4 +64,16 @@ public final class ChatWindow {
             instance.controller.updateAgent(agent);
         }
     }
+
+    /**
+     * Chamado por {@code MainWindow#toggleTheme} — os cards do chat (ver
+     * {@code MessageRenderer}) tem cores proprias presas no tema de quando
+     * foram renderizados, e esta janela e um SINGLETON que pode ficar aberta
+     * atravessando uma troca de tema. Sem efeito se a janela nao estiver aberta.
+     */
+    public static void refreshTheme() {
+        if (instance != null) {
+            instance.controller.refreshTheme();
+        }
+    }
 }

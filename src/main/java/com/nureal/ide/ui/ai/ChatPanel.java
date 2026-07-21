@@ -136,6 +136,12 @@ final class ChatPanel extends JPanel {
         onSend.accept(text);
     }
 
+    /** Esvazia a lista de mensagens renderizadas — ver {@code ChatController#refreshTheme}. */
+    void clearMessages() {
+        messagesContainer.removeAll();
+        revalidateAndScrollToBottom();
+    }
+
     /** Mensagem final (usuario, ou historico ja carregado) — sempre renderizada de uma vez. */
     void addMessage(String role, String content) {
         messagesContainer.add(MessageRenderer.render(role, content, actions));

@@ -1666,7 +1666,7 @@ public class SqlEditorPane extends JPanel {
      * sao dialogos fechados/reabertos a cada vez, nunca deixados abertos
      * atravessando um {@code MainWindow#toggleTheme()}.
      */
-    static void styleAsReadOnlySql(RSyntaxTextArea area) {
+    public static void styleAsReadOnlySql(RSyntaxTextArea area) {
         area.setEditable(false);
         area.setCodeFoldingEnabled(false);
         area.setSyntaxEditingStyle(SyntaxConstants.SYNTAX_STYLE_SQL);

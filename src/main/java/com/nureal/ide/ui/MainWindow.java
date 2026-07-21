@@ -3040,6 +3040,12 @@ public class MainWindow extends JFrame {
 		// paleta nova imediatamente, sem esperar a proxima consulta.
 		showResultsForActiveEditor();
 		styleExecutingOverlay();
+		// Mesmo motivo: os cards do chat de IA (MessageRenderer) tem cores de
+		// RSyntaxTextArea/fundo proprias, presas no tema de quando cada
+		// mensagem foi renderizada — sem isto, o chat (janela singleton que
+		// pode ficar aberta atravessando um toggle) mantinha cards do tema
+		// antigo ate a proxima mensagem.
+		ChatWindow.refreshTheme();
 	}
 
 	// ---------- Acoes ----------

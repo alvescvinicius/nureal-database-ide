@@ -50,6 +50,17 @@ final class ChatController {
         this.agent = agent;
     }
 
+    /**
+     * Re-renderiza o historico com as cores do tema ATUAL — chamado apos
+     * {@code MainWindow#toggleTheme}. So afeta mensagens ja concluidas (o
+     * historico persistido); uma resposta em streaming no meio de uma troca
+     * de tema fica com a bolha "ao vivo" (sem cor propria) ate terminar.
+     */
+    void refreshTheme() {
+        panel.clearMessages();
+        loadHistory();
+    }
+
     private void loadHistory() {
         try {
             historyStore.find(conversationId).ifPresent(conversation -> {
