@@ -79,7 +79,7 @@ class ComposeChatWindow private constructor(
         window.requestFocus()
     }
 
-    private fun applyAgent(newAgent: Agent) {
+    private fun updateAgent(newAgent: Agent) {
         session.updateAgent(newAgent)
     }
 
@@ -116,19 +116,13 @@ class ComposeChatWindow private constructor(
         ) {
             val existing = instance
             if (existing != null) {
-                existing.applyAgent(agent)
+                existing.updateAgent(agent)
                 existing.show()
                 return
             }
             val created = ComposeChatWindow(owner, agent, historyStore, conversationId, onOpenSettings, actions)
             instance = created
             created.show()
-        }
-
-        /** Espelha `ChatWindow.updateAgent` (Swing) — chamado por MainWindow apos salvar as configuracoes de IA. */
-        @JvmStatic
-        fun updateAgent(agent: Agent) {
-            instance?.applyAgent(agent)
         }
     }
 }
