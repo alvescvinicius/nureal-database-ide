@@ -39,6 +39,15 @@ final class ChatController {
         this.agent = agent;
     }
 
+    /**
+     * Status de sistema fora do fluxo de uma resposta do Agent (ex.:
+     * "Iniciando o Ollama local...", progresso de download do modelo
+     * padrao) — so texto, nao mexe no estado de "enviando" do input.
+     */
+    void showSystemStatus(String text) {
+        panel.setStatus(text);
+    }
+
     private void loadHistory() {
         try {
             historyStore.find(conversationId).ifPresent(conversation -> {

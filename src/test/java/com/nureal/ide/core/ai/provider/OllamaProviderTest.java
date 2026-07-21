@@ -174,6 +174,37 @@ class OllamaProviderTest {
     }
 
     @Test
+    void pullModelEntregaProgressoEEventoCompletedNoSucesso() throws IOException, InterruptedException {
+        String ndjson = String.join("\n",
+                "{\"status\":\"pulling manifest\"}",
+                "{\"status\":\"downloading sha256:abc\",\"completed\":50,\"total\":100}",
+                "{\"status\":\"success\"}") + "\n";
+        String baseUrl = startServer("/api/pull", "application/x-ndjson", ndjson.getBytes(StandardCharsets.UTF_8), 200);
+        OllamaProvider provider = new OllamaProvider(baseUrl, Duration.ofSeconds(5));
+
+        List<PullEvent> events = new ArrayList<>();
+        CountDownLatch latch = new CountDownLatch(1);
+        provider.pullModel("llama3.2:3b", event -> {
+            synchronized (events) {
+                events.add(event);
+            }
+            if (event instanceof PullEvent.Completed || event instanceof PullEvent.Failed) {
+                latch.countDown();
+            }
+        });
+
+        assertTrue(latch.await(5, TimeUnit.SECONDS), "esperava evento terminal dentro do timeout");
+        synchronized (events) {
+            assertInstanceOf(PullEvent.Completed.class, events.get(events.size() - 1));
+            PullEvent.Progress downloadEvent = events.stream()
+                    .filter(e -> e instanceof PullEvent.Progress p && p.status().startsWith("downloading"))
+                    .map(e -> (PullEvent.Progress) e)
+                    .findFirst().orElseThrow();
+            assertEquals(50, downloadEvent.percent());
+        }
+    }
+
+    @Test
     void streamComEndpointInexistenteFalhaComConnectionError() throws InterruptedException {
         OllamaProvider provider = new OllamaProvider("http://127.0.0.1:1", Duration.ofSeconds(2));
         AtomicReference<AiEvent> terminal = new AtomicReference<>();

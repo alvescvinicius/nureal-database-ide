@@ -24,6 +24,8 @@ public class AiPreferences {
     public static final String DEFAULT_BASE_URL = "http://localhost:11434";
     public static final double DEFAULT_TEMPERATURE = 0.2;
     public static final int DEFAULT_TIMEOUT_SECONDS = 60;
+    /** Baixado automaticamente no 1o uso do Ollama embutido, se nenhum modelo estiver instalado/configurado. */
+    public static final String DEFAULT_MODEL = "llama3.2:3b";
 
     private final Path file;
 
