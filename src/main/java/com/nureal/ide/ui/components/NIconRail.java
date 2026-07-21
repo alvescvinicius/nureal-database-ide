@@ -84,8 +84,6 @@ public final class NIconRail extends JPanel {
             setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
             setBorder(BorderFactory.createEmptyBorder(NTheme.SPACE_SM, NTheme.SPACE_XS, NTheme.SPACE_SM, NTheme.SPACE_XS));
             setAlignmentX(CENTER_ALIGNMENT);
-            setMaximumSize(new Dimension(ITEM_WIDTH, Integer.MAX_VALUE));
-            setPreferredSize(new Dimension(ITEM_WIDTH, getPreferredSize().height));
             setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 
             JLabel iconLabel = new JLabel();
@@ -105,6 +103,16 @@ public final class NIconRail extends JPanel {
 
             add(iconLabel);
             add(textLabel);
+
+            // Preferred/maximum SO calculados depois de adicionar icone+rotulo
+            // (senao capturam o tamanho de um painel ainda vazio) — altura
+            // maxima = altura preferida trava o item no BoxLayout.Y_AXIS,
+            // senao ele "esticava" pra dividir igualmente todo o espaco
+            // vertical sobrando do rail entre os 4 itens (bug visual: icones
+            // espalhados pela janela inteira em vez de empilhados no topo).
+            Dimension pref = new Dimension(ITEM_WIDTH, getPreferredSize().height);
+            setPreferredSize(pref);
+            setMaximumSize(pref);
 
             addMouseListener(new MouseAdapter() {
                 @Override
