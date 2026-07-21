@@ -945,22 +945,28 @@ public class MainWindow extends JFrame {
 		chatButton.setToolTipText("Chat com IA (Ollama local)");
 		chatButton.addActionListener(e -> openAiChat());
 
-		// Adiciona os botões da direita sequencialmente
-		gbc.gridx = 7;
-		// Respiro maior (LG) antes do primeiro icone do grupo — sozinho, sem
-		// linha divisoria, ja marca visualmente onde o grupo comeca.
-		gbc.insets = new Insets(0, Spacing.LG, 0, Spacing.XS);
-		mainBar.add(toggleSidebar, gbc);
+		// Os 5 icones da direita vao num UNICO painel FlowLayout, em vez de 5
+		// celulas separadas do GridBagLayout de mainBar — GridBagLayout pode
+		// comprimir celulas de peso zero abaixo do tamanho preferido quando a
+		// janela fica estreita demais pra caber tudo (nenhum componente aqui
+		// tem folga entre minimo/preferido pra doar, entao a compressao caia
+		// nos icones-so, deixando-os "esmagados"/desalinhados ao redimensionar
+		// a janela — bug relatado pelo usuario). FlowLayout nunca redimensiona
+		// os filhos: ou desenha todos no tamanho preferido, ou faz overflow —
+		// nunca os espreme.
+		JPanel rightIcons = new JPanel(new FlowLayout(FlowLayout.LEFT, Spacing.XS, 0));
+		rightIcons.setOpaque(false);
+		rightIcons.add(toggleSidebar);
+		rightIcons.add(toggleResults);
+		rightIcons.add(layoutButton);
+		rightIcons.add(themeButton);
+		rightIcons.add(chatButton);
 
-		gbc.insets = new Insets(0, Spacing.XS, 0, Spacing.XS); // Pequeno espaço entre os ícones
-		gbc.gridx = 8;
-		mainBar.add(toggleResults, gbc);
-		gbc.gridx = 9;
-		mainBar.add(layoutButton, gbc);
-		gbc.gridx = 10;
-		mainBar.add(themeButton, gbc);
-		gbc.gridx = 11;
-		mainBar.add(chatButton, gbc);
+		gbc.gridx = 7;
+		// Respiro maior (LG) antes do grupo — sozinho, sem linha divisoria, ja
+		// marca visualmente onde ele comeca.
+		gbc.insets = new Insets(0, Spacing.LG, 0, 0);
+		mainBar.add(rightIcons, gbc);
 
 		toolbarBar = mainBar;
 		// initWorkspaces() ja rodou (ver buildEditorArea) quando chegamos aqui,
