@@ -24,10 +24,28 @@ kotlin {
 dependencies {
     implementation(compose.desktop.currentOs)
     implementation(compose.material)
+
+    // Classes do app principal (core.ai.*, ChatWindowPreferences, SqlEditorPane,
+    // SqlFormatter etc.) — o jar "original" (thin, sem shading) que "mvn package"
+    // gera ao lado do fat jar. PRECISA rodar "mvn package" no modulo raiz antes
+    // de buildar este modulo (ou depois de qualquer mudanca no codigo Java que
+    // este modulo reusa) — as duas builds nao estao encadeadas automaticamente.
+    implementation(files("../target/original-nureal-database-ide.jar"))
+
+    // So o que os TIPOS reusados acima expoem nas suas assinaturas (RSyntaxTextArea
+    // no styleAsReadOnlySql, FlatLaf.isLafDark()) — mesmas versoes do pom.xml.
+    // "autocomplete" e necessaria mesmo sem usar autocomplete aqui: carregar a
+    // classe SqlEditorPane (so pra chamar o static styleAsReadOnlySql) exige
+    // resolver CompletionProvider, que aparece no construtor dela.
+    implementation("com.fifesoft:rsyntaxtextarea:3.5.1")
+    implementation("com.fifesoft:autocomplete:3.3.1")
+    implementation("com.formdev:flatlaf:3.5.4")
 }
 
 compose.desktop {
     application {
-        mainClass = "com.nureal.ide.chatui.SmokeTestKt"
+        // Harness descartavel (Agent fake, sem MainWindow/provider real) so
+        // pra validar o port visualmente via "./gradlew run" — ver Harness.kt.
+        mainClass = "com.nureal.ide.ui.ai.compose.HarnessKt"
     }
 }
