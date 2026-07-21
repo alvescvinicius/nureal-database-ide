@@ -16,7 +16,7 @@ enum IconRole { NEUTRAL, POSITIVE, WARNING, NEGATIVE }
  * metodo de desenho especifico (como o antigo {@code Icons.play()}); sempre
  * pede o CONCEITO: {@code Icons.get(IconType.RUN)}.
  */
-enum IconType {
+public enum IconType {
 
     // Acoes de arquivo/edicao genericas
     NEW(IconRole.NEUTRAL),

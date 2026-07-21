@@ -24,20 +24,20 @@ import com.formdev.flatlaf.FlatClientProperties;
  * continua o botao "Executar" verde da barra de ferramentas principal
  * (estilo proprio, ver {@code MainWindow#styleRunButton}).
  */
-final class Buttons {
+public final class Buttons {
 
     private Buttons() {
     }
 
     /** Botao secundario: contorno fino, cantos arredondados, sem preenchimento — a maioria dos botoes do app. */
-    static void styleSecondary(JButton button) {
+    public static void styleSecondary(JButton button) {
         button.putClientProperty("JButton.buttonType", "roundRect");
         button.putClientProperty(FlatClientProperties.STYLE, "arc: 8; borderWidth: 1");
         button.setMargin(new Insets(4, 10, 4, 10));
     }
 
     /** Botao primario: preenchido na cor da marca — SO a acao principal/de confirmacao de um dialogo ou barra. */
-    static void stylePrimary(JButton button) {
+    public static void stylePrimary(JButton button) {
         button.setBackground(MainWindow.ACCENT);
         button.setForeground(Color.WHITE);
         button.setMargin(new Insets(6, 14, 6, 14));
@@ -54,7 +54,7 @@ final class Buttons {
      * inconsistencia acumulada (spec de padronizacao visual: "mesmo
      * espacamento interno" em todo componente do mesmo tipo).
      */
-    static void styleIconButton(JButton button) {
+    public static void styleIconButton(JButton button) {
         button.putClientProperty("JButton.buttonType", "toolBarButton");
         button.putClientProperty(FlatClientProperties.STYLE, "arc: 8");
         button.setMargin(new Insets(4, 4, 4, 4));
@@ -90,26 +90,26 @@ final class Buttons {
      * {@code Color} ja resolvido, senao a troca de tema continua invisivel
      * pra este botao.
      */
-    static void bindThemedIcon(JButton button, IconType type, int size, Supplier<Color> colorSupplier) {
+    public static void bindThemedIcon(JButton button, IconType type, int size, Supplier<Color> colorSupplier) {
         Runnable refreshIcon = () -> button.setIcon(Icons.get(type, size, colorSupplier.get()));
         refreshIcon.run();
         button.addPropertyChangeListener("UI", e -> refreshIcon.run());
     }
 
     /** Igual a {@link #bindThemedIcon}, para uma cor FIXA (nao reativa ao tema, ex.: {@link Color#WHITE}). */
-    static void bindThemedIcon(JButton button, IconType type, int size, Color fixedColor) {
+    public static void bindThemedIcon(JButton button, IconType type, int size, Color fixedColor) {
         bindThemedIcon(button, type, size, () -> fixedColor);
     }
 
     /** Igual a {@link #bindThemedIcon(JButton, IconType, int, Supplier)}, para um {@code JLabel} (ex.: icone estatico de estado vazio/placeholder). */
-    static void bindThemedIcon(javax.swing.JLabel label, IconType type, int size, Supplier<Color> colorSupplier) {
+    public static void bindThemedIcon(javax.swing.JLabel label, IconType type, int size, Supplier<Color> colorSupplier) {
         Runnable refreshIcon = () -> label.setIcon(Icons.get(type, size, colorSupplier.get()));
         refreshIcon.run();
         label.addPropertyChangeListener("UI", e -> refreshIcon.run());
     }
 
     /** Cria um botao SO DE ICONE (ver {@link #styleIconButton}) ja com o icone reativo ao tema (ver {@link #bindThemedIcon}). */
-    static JButton iconButton(IconType type, int size, Supplier<Color> colorSupplier) {
+    public static JButton iconButton(IconType type, int size, Supplier<Color> colorSupplier) {
         JButton button = new JButton();
         styleIconButton(button);
         bindThemedIcon(button, type, size, colorSupplier);
@@ -117,7 +117,7 @@ final class Buttons {
     }
 
     /** Igual ao outro {@link #iconButton}, para uma cor FIXA (nao reativa ao tema, ex.: {@link Color#WHITE}). */
-    static JButton iconButton(IconType type, int size, Color fixedColor) {
+    public static JButton iconButton(IconType type, int size, Color fixedColor) {
         return iconButton(type, size, () -> fixedColor);
     }
 }

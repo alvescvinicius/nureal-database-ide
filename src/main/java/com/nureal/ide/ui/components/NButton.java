@@ -1,25 +1,23 @@
 package com.nureal.ide.ui.components;
 
-import java.awt.Color;
-
 import javax.swing.JButton;
 
-import com.formdev.flatlaf.FlatClientProperties;
-import com.nureal.ide.ui.MainWindow;
+import com.nureal.ide.ui.Buttons;
 
 /**
- * Botao padronizado do Nureal Design System — MESMO estilo ja usado (mas
- * repetido em varios lugares: {@code MainWindow#buildMainToolbar},
- * {@code MessageRenderer}) pros tres papeis reais que a IDE ja distingue
- * visualmente: acao primaria solida (verde da marca), acao secundaria em
- * contorno, acao leve/de barra de ferramentas. Nenhum valor novo — so
- * formaliza o {@code putClientProperty} que ja se repetia.
+ * Botao padronizado do Nureal Design System — ponte pra {@link Buttons}
+ * (ja existia, com os MESMOS 3 papeis, so package-private ate agora).
+ * Descoberto ao construir o rail de icones do {@code MainWindow}: a versao
+ * original deste arquivo tinha reinventado os 3 estilos com margens
+ * ligeiramente diferentes das de {@link Buttons} — corrigido pra delegar,
+ * mesma reconciliacao ja feita com {@code Spacing}/{@code Typography}/
+ * {@code GridTheme} (ver commit da reconciliacao de tema).
  */
 public final class NButton extends JButton {
 
     private static final long serialVersionUID = 1L;
 
-    /** Papel visual do botao — ver javadoc da classe pra onde cada um ja era usado antes do NDS. */
+    /** Papel visual do botao — ver {@link Buttons} pra onde cada um ja era usado antes do NDS. */
     public enum Kind {
         /** Acao principal da tela (ex.: Executar, Enviar) — fundo solido no verde da marca. */
         PRIMARY,
@@ -35,22 +33,10 @@ public final class NButton extends JButton {
 
     public NButton(String text, Kind kind) {
         super(text);
-        applyKind(kind);
-    }
-
-    private void applyKind(Kind kind) {
         switch (kind) {
-            case PRIMARY -> {
-                putClientProperty(FlatClientProperties.STYLE,
-                        "arc: 8; focusWidth: 0; innerFocusWidth: 0; borderWidth: 0");
-                setBackground(MainWindow.ACCENT);
-                setForeground(Color.WHITE);
-            }
-            case SECONDARY -> {
-                putClientProperty("JButton.buttonType", "roundRect");
-                putClientProperty(FlatClientProperties.STYLE, "arc: 8; borderWidth: 1");
-            }
-            case GHOST -> putClientProperty("JButton.buttonType", "toolBarButton");
+            case PRIMARY -> Buttons.stylePrimary(this);
+            case SECONDARY -> Buttons.styleSecondary(this);
+            case GHOST -> Buttons.styleIconButton(this);
         }
     }
 }
