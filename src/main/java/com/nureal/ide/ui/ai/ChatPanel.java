@@ -21,6 +21,8 @@ import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
 
+import com.nureal.ide.ui.components.NToolbar;
+
 /**
  * So layout e interacao com o {@link ChatController} (ver
  * {@code docs/033-ChatPanel.md}) — nenhuma chamada a {@code Agent}/
@@ -48,11 +50,7 @@ final class ChatPanel extends JPanel {
         JButton settingsButton = new JButton("⚙", null);
         settingsButton.setToolTipText("Configuracoes de IA (modelo, base URL, streaming...)");
         settingsButton.setHorizontalAlignment(SwingConstants.CENTER);
-        JPanel topBar = new JPanel(new BorderLayout());
-        topBar.setBorder(BorderFactory.createEmptyBorder(4, 6, 0, 6));
-        JPanel settingsWrap = new JPanel();
-        settingsWrap.add(settingsButton);
-        topBar.add(settingsWrap, BorderLayout.EAST);
+        NToolbar topBar = new NToolbar().setTitle("Chat com IA").addSecondaryAction(settingsButton);
         add(topBar, BorderLayout.NORTH);
         settingsButton.addActionListener(e -> onOpenSettings.run());
 

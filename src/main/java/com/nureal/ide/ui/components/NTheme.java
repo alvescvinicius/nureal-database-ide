@@ -47,6 +47,12 @@ public final class NTheme {
         };
     }
 
+    /** Versao translucida de {@link #accentColor} — fundo de {@code NBadge}, nunca a cor solida (reservada pro texto/destaque). */
+    public static Color accentBackground(NAccent accent) {
+        Color base = accentColor(accent);
+        return new Color(base.getRed(), base.getGreen(), base.getBlue(), 40);
+    }
+
     /** Fundo de uma superficie elevada (card/chip): {@code Panel.background} do tema atual, um pouco mais clara/escura. */
     public static Color surfaceBackground() {
         Color base = UIManager.getColor("Panel.background");
