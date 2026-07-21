@@ -148,6 +148,7 @@ import com.nureal.ide.ui.ai.AiSettingsDialog;
 import com.nureal.ide.ui.ai.ChatActions;
 import com.nureal.ide.ui.ai.ChatWindow;
 import com.nureal.ide.ui.ai.IdeContextAccessor;
+import com.nureal.ide.ui.components.NStatusBar;
 
 /**
  * Janela principal no estilo de uma IDE moderna (FlatLaf): top bar com acao de
@@ -1577,20 +1578,11 @@ public class MainWindow extends JFrame {
 		brand.setFont(brand.getFont().deriveFont(Font.BOLD));
 		brand.setForeground(ACCENT);
 
-		JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 12, 0));
-		left.setOpaque(false);
-		left.add(connStatusLabel);
-		left.add(statusBar);
-
-		JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 12, 0));
-		right.setOpaque(false);
-		right.add(connProgress);
-		right.add(brand);
-
-		JPanel footer = new JPanel(new BorderLayout());
-		footer.setBorder(BorderFactory.createEmptyBorder(5, 12, 5, 12));
-		footer.add(left, BorderLayout.WEST);
-		footer.add(right, BorderLayout.EAST);
+		NStatusBar footer = new NStatusBar()
+				.addLeft(connStatusLabel)
+				.addLeft(statusBar)
+				.addRight(connProgress)
+				.addRight(brand);
 
 		setDisconnectedState();
 		return footer;

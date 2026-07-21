@@ -2,6 +2,7 @@ package com.nureal.ide.ui;
 
 import com.nureal.ide.core.connection.ConnectionProfile;
 import com.nureal.ide.core.connection.ConnectionStore;
+import com.nureal.ide.ui.components.NSearchField;
 
 import javax.swing.BorderFactory;
 import javax.swing.BoxLayout;
@@ -17,11 +18,8 @@ import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
-import javax.swing.JTextField;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingConstants;
-import javax.swing.event.DocumentEvent;
-import javax.swing.event.DocumentListener;
 import java.awt.BorderLayout;
 import java.awt.CardLayout;
 import java.awt.Color;
@@ -71,7 +69,7 @@ public class ConnectionsPanel extends JPanel {
     private final Consumer<ConnectionProfile> disconnectAction;
     private final DefaultListModel<ConnectionProfile> model = new DefaultListModel<>();
     private final JList<ConnectionProfile> list = new JList<>(model);
-    private final JTextField search = new JTextField();
+    private final NSearchField search = new NSearchField("Buscar por nome, host ou schema...");
     /**
      * Alterna entre a lista e o estado vazio (ver {@link #buildEmptyState()})
      * — mesma receita (CardLayout + JLabel de icone/titulo/subtitulo) que
@@ -157,24 +155,7 @@ public class ConnectionsPanel extends JPanel {
         // ~15 conexoes salvas na empresa e precisava de um jeito rapido de
         // achar a certa em vez de rolar a lista inteira (mesmo padrao visual
         // do campo de busca do SavedQueriesPanel).
-        search.putClientProperty("JTextField.placeholderText", "Buscar por nome, host ou schema...");
-        search.putClientProperty("JTextField.showClearButton", true);
-        search.getDocument().addDocumentListener(new DocumentListener() {
-            @Override
-            public void insertUpdate(DocumentEvent e) {
-                applyFilter();
-            }
-
-            @Override
-            public void removeUpdate(DocumentEvent e) {
-                applyFilter();
-            }
-
-            @Override
-            public void changedUpdate(DocumentEvent e) {
-                applyFilter();
-            }
-        });
+        search.onTextChange(this::applyFilter);
 
         JPanel header = new JPanel(new BorderLayout(0, 6));
         header.setOpaque(false);
