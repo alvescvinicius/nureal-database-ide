@@ -963,6 +963,14 @@ public class MainWindow extends JFrame {
 		rightIcons.add(chatButton);
 
 		gbc.gridx = 7;
+		// CRITICO: weightx de volta pra 0 aqui — ficou em 1.0 desde o glue
+		// (gridx=6) e, com fill=NONE + anchor=BASELINE (centraliza
+		// horizontalmente dentro da propria celula), metade do espaco extra
+		// da janela ia pra ESTA celula em vez de toda pro glue: os icones
+		// ficavam centralizados no meio da barra, longe da quina direita
+		// (bug relatado pelo usuario). O divisor removido antes fazia esse
+		// mesmo reset — perdido junto quando ele saiu.
+		gbc.weightx = 0.0;
 		// Respiro maior (LG) antes do grupo — sozinho, sem linha divisoria, ja
 		// marca visualmente onde ele comeca.
 		gbc.insets = new Insets(0, Spacing.LG, 0, 0);
