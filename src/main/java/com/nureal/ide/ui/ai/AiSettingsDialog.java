@@ -1,32 +1,46 @@
 package com.nureal.ide.ui.ai;
 
 import java.awt.BorderLayout;
+import java.awt.CardLayout;
+import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.GridLayout;
 import java.awt.Window;
 import java.io.IOException;
+import java.security.GeneralSecurityException;
 import java.time.Duration;
 import java.util.List;
 import java.util.Vector;
 
 import javax.swing.BorderFactory;
+import javax.swing.DefaultComboBoxModel;
+import javax.swing.DefaultListCellRenderer;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JLabel;
+import javax.swing.JList;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.JPasswordField;
 import javax.swing.JSpinner;
 import javax.swing.JTextField;
 import javax.swing.SpinnerNumberModel;
 import javax.swing.SwingWorker;
 
+import com.nureal.ide.core.ai.config.AiCredentialsStore;
 import com.nureal.ide.core.ai.config.AiPreferences;
+import com.nureal.ide.core.ai.provider.ClaudeProvider;
+import com.nureal.ide.core.ai.provider.GeminiProvider;
+import com.nureal.ide.core.ai.provider.LLMProvider;
 import com.nureal.ide.core.ai.provider.OllamaProvider;
+import com.nureal.ide.core.ai.provider.OpenAiProvider;
+import com.nureal.ide.core.ai.provider.OpenRouterProvider;
+import com.nureal.ide.core.ai.provider.ProviderType;
 import com.nureal.ide.core.log.AppLogger;
 
 /**
- * Configuracao de IA (base URL do Ollama, modelo, temperatura, timeout,
+ * Configuracao de IA (provider, credenciais, modelo, temperatura, timeout,
  * streaming) — mesmo padrao "painel + JOptionPane.showConfirmDialog" ja
  * usado por outros ajustes simples do {@code MainWindow} (ex.:
  * {@code chooseEditorFont}), em vez de uma janela dedicada, ja que e um
@@ -34,10 +48,14 @@ import com.nureal.ide.core.log.AppLogger;
  */
 public final class AiSettingsDialog {
 
+    private static final String CARD_OLLAMA = "ollama";
+    private static final String CARD_CLOUD = "cloud";
+
     private AiSettingsDialog() {
     }
 
-    public static void open(Window owner, AiPreferences preferences, Runnable onSaved) {
+    public static void open(Window owner, AiPreferences preferences, AiCredentialsStore credentials,
+            Runnable onSaved) {
         AiPreferences.State current;
         try {
             current = preferences.load();
@@ -46,7 +64,37 @@ public final class AiSettingsDialog {
             current = AiPreferences.State.defaults();
         }
 
+        JComboBox<ProviderType> providerCombo = new JComboBox<>(ProviderType.values());
+        providerCombo.setSelectedItem(current.provider());
+        providerCombo.setRenderer(new DefaultListCellRenderer() {
+            private static final long serialVersionUID = 1L;
+
+            @Override
+            public Component getListCellRendererComponent(JList<?> list, Object value, int index,
+                    boolean isSelected, boolean cellHasFocus) {
+                JLabel label = (JLabel) super.getListCellRendererComponent(list, value, index, isSelected,
+                        cellHasFocus);
+                if (value instanceof ProviderType type) {
+                    label.setText(type.displayName());
+                }
+                return label;
+            }
+        });
+
         JTextField baseUrlField = new JTextField(current.baseUrl());
+        JPasswordField apiKeyField = new JPasswordField();
+        loadApiKeyIntoField(credentials, current.provider(), apiKeyField);
+
+        CardLayout cards = new CardLayout();
+        JPanel credentialsCards = new JPanel(cards);
+        JPanel ollamaCard = new JPanel(new BorderLayout());
+        ollamaCard.add(baseUrlField, BorderLayout.CENTER);
+        JPanel cloudCard = new JPanel(new BorderLayout());
+        cloudCard.add(apiKeyField, BorderLayout.CENTER);
+        credentialsCards.add(ollamaCard, CARD_OLLAMA);
+        credentialsCards.add(cloudCard, CARD_CLOUD);
+
+        JLabel credentialsLabel = new JLabel();
 
         JComboBox<String> modelCombo = new JComboBox<>();
         modelCombo.setEditable(true);
@@ -57,15 +105,36 @@ public final class AiSettingsDialog {
         JButton refreshButton = new JButton("Listar modelos");
         JLabel modelsStatus = new JLabel(" ");
 
+        Runnable updateCardForProvider = () -> {
+            ProviderType selected = (ProviderType) providerCombo.getSelectedItem();
+            if (selected.requiresApiKey()) {
+                cards.show(credentialsCards, CARD_CLOUD);
+                credentialsLabel.setText("API Key de " + selected.displayName() + ":");
+            } else {
+                cards.show(credentialsCards, CARD_OLLAMA);
+                credentialsLabel.setText("Base URL do Ollama:");
+            }
+        };
+        updateCardForProvider.run();
+        providerCombo.addActionListener(e -> {
+            updateCardForProvider.run();
+            ProviderType selected = (ProviderType) providerCombo.getSelectedItem();
+            loadApiKeyIntoField(credentials, selected, apiKeyField);
+            modelCombo.setModel(new DefaultComboBoxModel<>());
+            modelsStatus.setText(" ");
+        });
+
         refreshButton.addActionListener(e -> {
             refreshButton.setEnabled(false);
-            modelsStatus.setText("Consultando o Ollama...");
+            ProviderType selected = (ProviderType) providerCombo.getSelectedItem();
+            modelsStatus.setText("Consultando " + selected.displayName() + "...");
             String baseUrl = baseUrlField.getText().isBlank() ? AiPreferences.DEFAULT_BASE_URL
                     : baseUrlField.getText().strip();
+            String apiKey = new String(apiKeyField.getPassword()).strip();
             new SwingWorker<List<String>, Void>() {
                 @Override
                 protected List<String> doInBackground() {
-                    return new OllamaProvider(baseUrl, Duration.ofSeconds(10)).listModels();
+                    return buildPreviewProvider(selected, baseUrl, apiKey).listModels();
                 }
 
                 @Override
@@ -73,15 +142,15 @@ public final class AiSettingsDialog {
                     refreshButton.setEnabled(true);
                     try {
                         List<String> models = get();
-                        Object selected = modelCombo.getSelectedItem();
-                        modelCombo.setModel(new javax.swing.DefaultComboBoxModel<>(new Vector<>(models)));
-                        if (selected != null && models.contains(selected)) {
-                            modelCombo.setSelectedItem(selected);
+                        Object selectedModel = modelCombo.getSelectedItem();
+                        modelCombo.setModel(new DefaultComboBoxModel<>(new Vector<>(models)));
+                        if (selectedModel != null && models.contains(selectedModel)) {
+                            modelCombo.setSelectedItem(selectedModel);
                         }
-                        modelsStatus.setText(models.isEmpty() ? "Nenhum modelo instalado (\"ollama pull <modelo>\")"
+                        modelsStatus.setText(models.isEmpty() ? "Nenhum modelo disponivel."
                                 : models.size() + " modelo(s) encontrado(s).");
                     } catch (Exception ex) {
-                        modelsStatus.setText("Falha ao consultar o Ollama: " + rootMessage(ex));
+                        modelsStatus.setText("Falha ao consultar " + selected.displayName() + ": " + rootMessage(ex));
                     }
                 }
             }.execute();
@@ -99,8 +168,10 @@ public final class AiSettingsDialog {
         modelRow.add(refreshButton, BorderLayout.EAST);
 
         JPanel form = new JPanel(new GridLayout(0, 1, 4, 4));
-        form.add(new JLabel("Base URL do Ollama:"));
-        form.add(baseUrlField);
+        form.add(new JLabel("Provider:"));
+        form.add(providerCombo);
+        form.add(credentialsLabel);
+        form.add(credentialsCards);
         form.add(new JLabel("Modelo:"));
         form.add(modelRow);
         form.add(modelsStatus);
@@ -113,19 +184,18 @@ public final class AiSettingsDialog {
         JPanel panel = new JPanel(new BorderLayout(0, 8));
         panel.setBorder(BorderFactory.createEmptyBorder(4, 4, 4, 4));
         panel.add(form, BorderLayout.CENTER);
-        panel.setPreferredSize(new Dimension(440, 320));
+        panel.setPreferredSize(new Dimension(440, 400));
 
-        int result = JOptionPane.showConfirmDialog(owner, panel, "Configuracao de IA (Ollama)",
+        int result = JOptionPane.showConfirmDialog(owner, panel, "Configuracao de IA",
                 JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
         if (result != JOptionPane.OK_OPTION) {
             return;
         }
 
+        ProviderType selectedProvider = (ProviderType) providerCombo.getSelectedItem();
         String model = modelCombo.getEditor().getItem() == null ? "" : modelCombo.getEditor().getItem().toString().strip();
-        // TODO(P8): combo de provider — por ora mantem o provider ja salvo (ou Ollama,
-        // o padrao) intacto; este dialogo ainda so edita os campos do Ollama.
         AiPreferences.State newState = new AiPreferences.State(
-                current.provider(),
+                selectedProvider,
                 baseUrlField.getText().isBlank() ? AiPreferences.DEFAULT_BASE_URL : baseUrlField.getText().strip(),
                 model,
                 (double) temperatureSpinner.getValue(),
@@ -133,22 +203,51 @@ public final class AiSettingsDialog {
                 streamingCheckbox.isSelected());
         try {
             preferences.save(newState);
+            if (selectedProvider.requiresApiKey()) {
+                credentials.saveApiKey(selectedProvider, new String(apiKeyField.getPassword()).strip());
+            }
             onSaved.run();
-        } catch (IOException e) {
+        } catch (IOException | GeneralSecurityException e) {
             AppLogger.warning("Falha ao salvar configuracao de IA", e);
             JOptionPane.showMessageDialog(owner, "Nao foi possivel salvar a configuracao de IA:\n" + e.getMessage(),
                     "Configuracao de IA", JOptionPane.ERROR_MESSAGE);
         }
     }
 
+    private static void loadApiKeyIntoField(AiCredentialsStore credentials, ProviderType provider,
+            JPasswordField field) {
+        if (!provider.requiresApiKey()) {
+            field.setText("");
+            return;
+        }
+        try {
+            field.setText(credentials.loadApiKey(provider).orElse(""));
+        } catch (GeneralSecurityException | IOException e) {
+            AppLogger.warning("Falha ao carregar API key de " + provider.displayName(), e);
+            field.setText("");
+        }
+    }
+
+    /** Provider "de teste" com os valores AINDA NAO salvos do formulario — usado so pelo botao "Listar modelos". */
+    private static LLMProvider buildPreviewProvider(ProviderType type, String baseUrl, String apiKey) {
+        Duration timeout = Duration.ofSeconds(15);
+        return switch (type) {
+            case OLLAMA -> new OllamaProvider(baseUrl, timeout);
+            case CLAUDE -> new ClaudeProvider(apiKey, timeout);
+            case OPENAI -> new OpenAiProvider(apiKey, timeout);
+            case GEMINI -> new GeminiProvider(apiKey, timeout);
+            case OPENROUTER -> new OpenRouterProvider(apiKey, timeout);
+        };
+    }
+
     /**
      * {@code get()} do SwingWorker embrulha em {@code ExecutionException} o
      * que {@code doInBackground()} lancou — aqui e sempre um
-     * {@code ProviderException}, que ja tem mensagem amigavel pronta (ver
-     * {@code OllamaProvider}). So desembrulha UM nivel: nao continuar
-     * descendo a cadeia de causas, senao a mensagem amigavel do
-     * ProviderException e ignorada em favor da causa tecnica raiz dele
-     * (ex.: "ClosedChannelException" sem texto nenhum).
+     * {@code ProviderException}, que ja tem mensagem amigavel pronta. So
+     * desembrulha UM nivel: nao continuar descendo a cadeia de causas,
+     * senao a mensagem amigavel do ProviderException e ignorada em favor
+     * da causa tecnica raiz dele (ex.: "ClosedChannelException" sem texto
+     * nenhum).
      */
     private static String rootMessage(Throwable t) {
         Throwable cause = (t instanceof java.util.concurrent.ExecutionException && t.getCause() != null)

@@ -22,7 +22,6 @@ import java.awt.event.WindowEvent;
 import java.io.File;
 import java.nio.file.Path;
 import java.io.IOException;
-import java.time.Duration;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -134,12 +133,14 @@ import com.nureal.ide.core.update.UpdateChecker;
 import com.nureal.ide.core.update.UpdatePreferences;
 import com.nureal.ide.core.ai.agent.Agent;
 import com.nureal.ide.core.ai.agent.DefaultAgent;
+import com.nureal.ide.core.ai.config.AiCredentialsStore;
 import com.nureal.ide.core.ai.config.AiPreferences;
+import com.nureal.ide.core.ai.config.LLMProviderFactory;
 import com.nureal.ide.core.ai.context.ContextProvider;
 import com.nureal.ide.core.ai.context.DefaultContextProvider;
 import com.nureal.ide.core.ai.context.IdeStateAccessor;
 import com.nureal.ide.core.ai.history.ChatHistoryStore;
-import com.nureal.ide.core.ai.provider.OllamaProvider;
+import com.nureal.ide.core.ai.provider.LLMProvider;
 import com.nureal.ide.core.ai.tool.DescribeTableTool;
 import com.nureal.ide.core.ai.tool.ListTablesTool;
 import com.nureal.ide.core.ai.tool.ToolExecutor;
@@ -2556,18 +2557,20 @@ public class MainWindow extends JFrame {
 
 	private void openAiChat() {
 		AiPreferences aiPreferences = new AiPreferences();
+		AiCredentialsStore aiCredentials = new AiCredentialsStore();
 		ChatHistoryStore chatHistoryStore = new ChatHistoryStore();
-		Agent agent = buildAiAgent(aiPreferences, chatHistoryStore);
+		Agent agent = buildAiAgent(aiPreferences, aiCredentials, chatHistoryStore);
 		ChatWindow.open(this, agent, chatHistoryStore, AI_CONVERSATION_ID,
-				() -> openAiSettings(aiPreferences));
+				() -> openAiSettings(aiPreferences, aiCredentials));
 	}
 
-	private void openAiSettings(AiPreferences aiPreferences) {
-		AiSettingsDialog.open(this, aiPreferences,
-				() -> ChatWindow.updateAgent(buildAiAgent(aiPreferences, new ChatHistoryStore())));
+	private void openAiSettings(AiPreferences aiPreferences, AiCredentialsStore aiCredentials) {
+		AiSettingsDialog.open(this, aiPreferences, aiCredentials,
+				() -> ChatWindow.updateAgent(buildAiAgent(aiPreferences, aiCredentials, new ChatHistoryStore())));
 	}
 
-	private Agent buildAiAgent(AiPreferences aiPreferences, ChatHistoryStore chatHistoryStore) {
+	private Agent buildAiAgent(AiPreferences aiPreferences, AiCredentialsStore aiCredentials,
+			ChatHistoryStore chatHistoryStore) {
 		AiPreferences.State prefs;
 		try {
 			prefs = aiPreferences.load();
@@ -2575,7 +2578,7 @@ public class MainWindow extends JFrame {
 			AppLogger.warning("Falha ao carregar configuracao de IA", e);
 			prefs = AiPreferences.State.defaults();
 		}
-		OllamaProvider provider = new OllamaProvider(prefs.baseUrl(), Duration.ofSeconds(prefs.timeoutSeconds()));
+		LLMProvider provider = LLMProviderFactory.create(prefs, aiCredentials);
 		IdeStateAccessor accessor = new IdeContextAccessor(
 				this::connectionManager,
 				() -> metadataService,

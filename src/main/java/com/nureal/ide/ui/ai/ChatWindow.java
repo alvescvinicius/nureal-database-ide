@@ -31,7 +31,7 @@ public final class ChatWindow {
         panel.setOnOpenSettings(onOpenSettings);
         this.controller = new ChatController(panel, agent, historyStore, conversationId);
 
-        dialog = new JDialog(owner, "Chat com IA (Ollama)", JDialog.ModalityType.MODELESS);
+        dialog = new JDialog(owner, "Chat com IA", JDialog.ModalityType.MODELESS);
         dialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
         dialog.setLayout(new BorderLayout());
         dialog.add(panel, BorderLayout.CENTER);
