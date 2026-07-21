@@ -7,6 +7,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.HttpTimeoutException;
+import java.nio.channels.ClosedChannelException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -202,11 +203,15 @@ public final class OllamaProvider implements LLMProvider {
         } catch (HttpTimeoutException e) {
             onEvent.accept(new AiEvent.Failed(requestId,
                     new ProviderException.Timeout("O Ollama demorou demais para responder.", e)));
-        } catch (ConnectException e) {
+        } catch (ConnectException | ClosedChannelException e) {
+            // ClosedChannelException: o HttpClient do JDK as vezes lanca isto (em vez
+            // de ConnectException) quando nao ha nada ouvindo na porta — mesmo
+            // significado pratico, mesma mensagem amigavel.
             onEvent.accept(new AiEvent.Failed(requestId, connectionError(e)));
         } catch (IOException e) {
             onEvent.accept(new AiEvent.Failed(requestId,
-                    new ProviderException.ConnectionError("Erro de comunicacao com o Ollama: " + e.getMessage(), e)));
+                    new ProviderException.ConnectionError("Erro de comunicacao com o Ollama"
+                            + (e.getMessage() != null ? ": " + e.getMessage() : "."), e)));
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             onEvent.accept(new AiEvent.Cancelled(requestId));
@@ -220,10 +225,11 @@ public final class OllamaProvider implements LLMProvider {
             return httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
         } catch (HttpTimeoutException e) {
             throw new ProviderException.Timeout("O Ollama demorou demais para responder.", e);
-        } catch (ConnectException e) {
+        } catch (ConnectException | ClosedChannelException e) {
             throw connectionError(e);
         } catch (IOException e) {
-            throw new ProviderException.ConnectionError("Erro de comunicacao com o Ollama: " + e.getMessage(), e);
+            throw new ProviderException.ConnectionError("Erro de comunicacao com o Ollama"
+                    + (e.getMessage() != null ? ": " + e.getMessage() : "."), e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new ProviderException.ConnectionError("Requisicao ao Ollama interrompida.", e);

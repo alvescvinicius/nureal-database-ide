@@ -137,11 +137,18 @@ public final class AiSettingsDialog {
         }
     }
 
+    /**
+     * {@code get()} do SwingWorker embrulha em {@code ExecutionException} o
+     * que {@code doInBackground()} lancou — aqui e sempre um
+     * {@code ProviderException}, que ja tem mensagem amigavel pronta (ver
+     * {@code OllamaProvider}). So desembrulha UM nivel: nao continuar
+     * descendo a cadeia de causas, senao a mensagem amigavel do
+     * ProviderException e ignorada em favor da causa tecnica raiz dele
+     * (ex.: "ClosedChannelException" sem texto nenhum).
+     */
     private static String rootMessage(Throwable t) {
-        Throwable cause = t;
-        while (cause.getCause() != null) {
-            cause = cause.getCause();
-        }
+        Throwable cause = (t instanceof java.util.concurrent.ExecutionException && t.getCause() != null)
+                ? t.getCause() : t;
         String msg = cause.getMessage();
         return msg == null ? cause.getClass().getSimpleName() : msg;
     }
