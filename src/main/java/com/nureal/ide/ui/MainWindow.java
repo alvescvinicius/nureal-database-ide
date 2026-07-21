@@ -69,7 +69,6 @@ import javax.swing.JRootPane;
 import javax.swing.JPopupMenu;
 import javax.swing.JProgressBar;
 import javax.swing.JScrollPane;
-import javax.swing.JSeparator;
 import javax.swing.JSplitPane;
 import javax.swing.JTabbedPane;
 import javax.swing.JTable;
@@ -77,7 +76,6 @@ import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.JTree;
 import javax.swing.KeyStroke;
-import javax.swing.SwingConstants;
 import javax.swing.SwingWorker;
 import javax.swing.Timer;
 import javax.swing.UIManager;
@@ -91,7 +89,6 @@ import javax.swing.tree.DefaultMutableTreeNode;
 import javax.swing.tree.DefaultTreeModel;
 import javax.swing.tree.TreePath;
 
-import com.formdev.flatlaf.FlatClientProperties;
 import com.formdev.flatlaf.FlatDarkLaf;
 import com.formdev.flatlaf.FlatLaf;
 import com.formdev.flatlaf.FlatLightLaf;
@@ -148,6 +145,8 @@ import com.nureal.ide.ui.ai.AiSettingsDialog;
 import com.nureal.ide.ui.ai.ChatActions;
 import com.nureal.ide.ui.ai.ChatWindow;
 import com.nureal.ide.ui.ai.IdeContextAccessor;
+import com.nureal.ide.ui.components.NButton;
+import com.nureal.ide.ui.components.NIconRail;
 import com.nureal.ide.ui.components.NStatusBar;
 
 /**
@@ -234,7 +233,12 @@ public class MainWindow extends JFrame {
 	private ConnectionsPanel connectionsPanel;
 	private SavedQueriesPanel savedQueriesPanel;
 	private HistoryPanel historyPanel;
-	private JTabbedPane leftTopTabs;
+	private NIconRail leftIconRail;
+	private JPanel leftContent;
+	private static final String CARD_CONNECTIONS = "connections";
+	private static final String CARD_OBJECTS = "objects";
+	private static final String CARD_QUERIES = "queries";
+	private static final String CARD_HISTORY = "history";
 	private JTextField objectSearch;
 	/** Esquema selecionado na conexao ativa — so escrever via {@link #setCurrentSchema}. */
 	private SchemaInfo currentSchema;
@@ -777,7 +781,7 @@ public class MainWindow extends JFrame {
 		gbc.gridy = 0;
 
 		// --- Botões da Esquerda ---
-		runButton = new JButton("Executar");
+		runButton = new NButton("Executar", NButton.Kind.PRIMARY);
 		runButton.setIcon(Icons.get(IconType.RUN, 14, Color.WHITE));
 		runButton.setToolTipText("Executar (Ctrl+Enter ou F5)");
 		runButton.setEnabled(false);
@@ -787,11 +791,8 @@ public class MainWindow extends JFrame {
 		// revisao premium) e um pouco mais de respiro horizontal a esquerda
 		// (LG=16) que a direita (MD=12): unico botao PREENCHIDO/em destaque
 		// da barra, a leve assimetria reforca presenca sem parecer maior por
-		// acidente.
+		// acidente. Sobrescreve a margem padrao de NButton.Kind.PRIMARY de proposito.
 		runButton.setMargin(new Insets(Spacing.XS, Spacing.LG, Spacing.XS, Spacing.MD));
-		runButton.putClientProperty(FlatClientProperties.STYLE,
-				"arc: 8; focusWidth: 0; innerFocusWidth: 0; borderWidth: 0");
-		styleRunButton(); // Mantém o verde da Nureal
 
 		// Sem icone aqui de proposito: o icone de "linhas" ficava estranho colado
 		// ao texto "Formatar" nesse tamanho — so texto. Estilo OUTLINE (contorno,
@@ -800,7 +801,7 @@ public class MainWindow extends JFrame {
 		// lado do Executar: fica claro que Executar e a acao primaria, e o
 		// conjunto Formatar+seta e mais leve/discreto (mesma leitura de "acao
 		// secundaria" nos dois lugares da UI).
-		JButton formatButton = new JButton("Formatar");
+		JButton formatButton = new NButton("Formatar", NButton.Kind.SECONDARY);
 		formatButton.setToolTipText("Formatar SQL (Ctrl+Shift+F)");
 		formatButton.addActionListener(e -> {
 			SqlEditorPane editor = currentEditor();
@@ -809,27 +810,22 @@ public class MainWindow extends JFrame {
 			}
 		});
 		formatButton.setMargin(new Insets(Spacing.XS, Spacing.MD, Spacing.XS, Spacing.MD));
-		formatButton.putClientProperty("JButton.buttonType", "roundRect");
-		formatButton.putClientProperty(FlatClientProperties.STYLE, "arc: 8; borderWidth: 1");
 
 		JButton formatMenuButton = new JButton(new com.formdev.flatlaf.icons.FlatMenuArrowIcon());
 		formatMenuButton.setToolTipText("Presets e opcoes de formatacao");
 		formatMenuButton
 				.addActionListener(e -> buildFormatMenu().show(formatMenuButton, 0, formatMenuButton.getHeight()));
+		Buttons.styleSecondary(formatMenuButton);
 		formatMenuButton.setMargin(new Insets(Spacing.XS, Spacing.SM, Spacing.XS, Spacing.SM));
-		formatMenuButton.putClientProperty("JButton.buttonType", "roundRect");
-		formatMenuButton.putClientProperty(FlatClientProperties.STYLE, "arc: 8; borderWidth: 1");
 
 		// "Explicar" (fase 4 do GAP_ANALYSIS_DBA_DEV.md: "EXPLAIN visual") —
 		// mesmo estilo OUTLINE de "Formatar" (acao secundaria, ao lado da
 		// primaria "Executar"), rodando EXPLAIN FORMAT=JSON na instrucao atual
 		// sem executa-la de verdade.
-		JButton explainButton = new JButton("Explicar");
+		JButton explainButton = new NButton("Explicar", NButton.Kind.SECONDARY);
 		explainButton.setToolTipText("Ver o plano de execucao (EXPLAIN) da consulta atual");
 		explainButton.addActionListener(e -> onExplain());
 		explainButton.setMargin(new Insets(Spacing.XS, Spacing.MD, Spacing.XS, Spacing.MD));
-		explainButton.putClientProperty("JButton.buttonType", "roundRect");
-		explainButton.putClientProperty(FlatClientProperties.STYLE, "arc: 8; borderWidth: 1");
 
 		// O icone minusculo da seta rende um "preferred height" menor que o do
 		// texto "Executar"/"Formatar" — sem isto os tres ficam com alturas
@@ -869,7 +865,7 @@ public class MainWindow extends JFrame {
 		// Desabilitado quando a aba atual esta vazia (ver updateSaveButtonState) —
 		// antes o clique era aceito mas nao fazia nada alem de um aviso na barra
 		// de status, o que parecia um bug de "salvar nao funciona".
-		saveQueryButton = new JButton("Salvar");
+		saveQueryButton = new NButton("Salvar", NButton.Kind.SECONDARY);
 		// Buttons.bindThemedIcon (nao setIcon(Icons.get(...)) solto): sem
 		// isto o icone ficava congelado na paleta do tema em que a janela
 		// abriu, ilegivel apos o primeiro toggleTheme() (ver javadoc do
@@ -879,8 +875,6 @@ public class MainWindow extends JFrame {
 		saveQueryButton.addActionListener(e -> onSaveQuery());
 		saveQueryButton.setIconTextGap(6);
 		saveQueryButton.setMargin(new Insets(Spacing.XS, Spacing.MD, Spacing.XS, Spacing.MD));
-		saveQueryButton.putClientProperty("JButton.buttonType", "roundRect");
-		saveQueryButton.putClientProperty(FlatClientProperties.STYLE, "arc: 8; borderWidth: 1");
 		Dimension saveDim = saveQueryButton.getPreferredSize();
 		saveQueryButton.setPreferredSize(new Dimension(saveDim.width, rowHeight));
 
@@ -892,14 +886,12 @@ public class MainWindow extends JFrame {
 		// aba "Historico" do painel lateral, ja filtrada pela conexao ativa —
 		// mesmo grupo visual/posicao do Salvar, por ser tambem uma acao sobre a
 		// query da aba atual (rever/re-rodar o que ja foi executado).
-		JButton historyButton = new JButton("Historico");
+		JButton historyButton = new NButton("Historico", NButton.Kind.SECONDARY);
 		Buttons.bindThemedIcon(historyButton, IconType.HISTORY, 13, () -> GridTheme.MUTED_TEXT);
 		historyButton.setToolTipText("Ver historico de execucoes desta conexao");
 		historyButton.addActionListener(e -> showHistoryPanel());
 		historyButton.setIconTextGap(6);
 		historyButton.setMargin(new Insets(Spacing.XS, Spacing.MD, Spacing.XS, Spacing.MD));
-		historyButton.putClientProperty("JButton.buttonType", "roundRect");
-		historyButton.putClientProperty(FlatClientProperties.STYLE, "arc: 8; borderWidth: 1");
 		Dimension historyDim = historyButton.getPreferredSize();
 		historyButton.setPreferredSize(new Dimension(historyDim.width, rowHeight));
 
@@ -914,19 +906,11 @@ public class MainWindow extends JFrame {
 		gbc.insets = new Insets(0, 0, 0, 0);
 		mainBar.add(Box.createHorizontalGlue(), gbc);
 
-		// --- Separador sutil antes do grupo de icones de layout/tema ---
-		JSeparator divider = new JSeparator(SwingConstants.VERTICAL);
-		divider.setPreferredSize(new Dimension(1, 18));
-		// Era uma cor fixa clara (0xE2E5EA) — virava um tracinho claro
-		// "aceso" numa barra de ferramentas escura. UIManager.getColor segue
-		// o FlatLaf ativo (claro/escuro) automaticamente.
-		divider.setForeground(UIManager.getColor("Separator.foreground"));
-		gbc.gridx = 7;
-		gbc.weightx = 0.0;
-		gbc.insets = new Insets(0, Spacing.SM, 0, Spacing.MD);
-		mainBar.add(divider, gbc);
-
 		// --- Botões da Direita (icones discretos, mesma linguagem visual) ---
+		// Sem separador visivel antes deste grupo (principio do NDS:
+		// "divisorias deixam de ser linhas, passam a ser espaco") — o
+		// respiro extra no inset do primeiro icone (ver gridx=8 abaixo) ja
+		// comunica o agrupamento, sem precisar de um traco desenhado.
 		// Buttons.iconButton ja aplica styleIconButton E prende o icone a
 		// GridTheme.MUTED_TEXT (ver seu javadoc) — antes estes 4 botoes eram
 		// "new JButton(Icons.get(..., GridTheme.MUTED_TEXT))" com a cor
@@ -962,17 +946,20 @@ public class MainWindow extends JFrame {
 		chatButton.addActionListener(e -> openAiChat());
 
 		// Adiciona os botões da direita sequencialmente
-		gbc.insets = new Insets(0, Spacing.XS, 0, Spacing.XS); // Pequeno espaço entre os ícones
-
-		gbc.gridx = 8;
+		gbc.gridx = 7;
+		// Respiro maior (LG) antes do primeiro icone do grupo — sozinho, sem
+		// linha divisoria, ja marca visualmente onde o grupo comeca.
+		gbc.insets = new Insets(0, Spacing.LG, 0, Spacing.XS);
 		mainBar.add(toggleSidebar, gbc);
-		gbc.gridx = 9;
+
+		gbc.insets = new Insets(0, Spacing.XS, 0, Spacing.XS); // Pequeno espaço entre os ícones
+		gbc.gridx = 8;
 		mainBar.add(toggleResults, gbc);
-		gbc.gridx = 10;
+		gbc.gridx = 9;
 		mainBar.add(layoutButton, gbc);
-		gbc.gridx = 11;
+		gbc.gridx = 10;
 		mainBar.add(themeButton, gbc);
-		gbc.gridx = 12;
+		gbc.gridx = 11;
 		mainBar.add(chatButton, gbc);
 
 		toolbarBar = mainBar;
@@ -1748,20 +1735,35 @@ public class MainWindow extends JFrame {
 		savedQueriesPanel = new SavedQueriesPanel(savedQueryStore, this::openSavedQuery);
 		historyPanel = new HistoryPanel(historyStore, this::openHistoryEntry);
 
-		// "Conexoes", "Queries salvas" e "Historico" dividem o mesmo espaco de
-		// cima via abas (nao um segundo split — ja tem split demais nesse canto
-		// da tela). O navegador de objetos continua sempre visivel embaixo, nao
-		// importa qual das tres abas esta selecionada.
-		leftTopTabs = new JTabbedPane();
-		leftTopTabs.addTab("Conexoes", connectionsPanel);
-		leftTopTabs.addTab("Queries salvas", savedQueriesPanel);
-		leftTopTabs.addTab("Historico", historyPanel);
+		// Rail de icones (NDS) no lugar do antigo par abas+split: "Conexoes",
+		// "Objetos", "Consultas" e "Historico" agora ocupam o MESMO espaco,
+		// um de cada vez (estilo activity bar), em vez de Conexoes/Queries/
+		// Historico em abas com o navegador de objetos sempre visivel
+		// embaixo. Escolha explicita do usuario ao ver o mockup, ciente do
+		// tradeoff de perder a visibilidade simultanea de Conexoes+Objetos.
+		leftContent = new JPanel(new CardLayout());
+		leftContent.add(connectionsPanel, CARD_CONNECTIONS);
+		leftContent.add(buildObjectBrowser(), CARD_OBJECTS);
+		leftContent.add(savedQueriesPanel, CARD_QUERIES);
+		leftContent.add(historyPanel, CARD_HISTORY);
 
-		JSplitPane split = new JSplitPane(JSplitPane.VERTICAL_SPLIT, leftTopTabs, buildObjectBrowser());
-		split.setResizeWeight(0.5);
-		split.setBorder(BorderFactory.createEmptyBorder());
-		split.setPreferredSize(new Dimension(248, 100));
-		return split;
+		leftIconRail = new NIconRail()
+				.addItem(CARD_CONNECTIONS, IconType.CONNECTION, "Conexoes")
+				.addItem(CARD_OBJECTS, IconType.DATABASE, "Objetos")
+				.addItem(CARD_QUERIES, IconType.SAVE, "Consultas")
+				.addItem(CARD_HISTORY, IconType.HISTORY, "Historico")
+				.onSelect(this::showLeftCard);
+
+		JPanel container = new JPanel(new BorderLayout());
+		container.add(leftIconRail, BorderLayout.WEST);
+		container.add(leftContent, BorderLayout.CENTER);
+		container.setPreferredSize(new Dimension(280, 100));
+		return container;
+	}
+
+	/** Troca qual painel da lateral esta visivel (ver {@link #leftIconRail}). */
+	private void showLeftCard(String cardId) {
+		((CardLayout) leftContent.getLayout()).show(leftContent, cardId);
 	}
 
 	private JComponent buildObjectBrowser() {
@@ -3740,8 +3742,8 @@ public class MainWindow extends JFrame {
 		if (leftSide != null && !leftSide.isVisible()) {
 			toggleSidebar();
 		}
-		if (leftTopTabs != null && historyPanel != null) {
-			leftTopTabs.setSelectedComponent(historyPanel);
+		if (leftIconRail != null && historyPanel != null) {
+			leftIconRail.select(CARD_HISTORY);
 		}
 	}
 
