@@ -129,12 +129,13 @@ public final class DefaultAgent implements Agent {
                 && completed.response().hasToolCalls()
                 && turn.round < MAX_TOOL_ROUNDS - 1) {
             turn.round++;
-            turn.messages.add(new ChatMessage(ChatMessage.ROLE_ASSISTANT, completed.response().message().content()));
+            turn.messages.add(new ChatMessage(ChatMessage.ROLE_ASSISTANT, completed.response().message().content(),
+                    null, completed.response().toolCalls()));
             for (ToolCall call : completed.response().toolCalls()) {
                 ToolResult result = toolExecutor.execute(new ToolRequest(call.name(), call.arguments(),
                         turn.conversationId, call.id(), turn.context));
                 String toolContent = result.success() ? result.content() : ("Erro: " + result.error());
-                turn.messages.add(new ChatMessage(ChatMessage.ROLE_TOOL, toolContent));
+                turn.messages.add(new ChatMessage(ChatMessage.ROLE_TOOL, toolContent, call.id()));
             }
             startRound(turn);
             return;

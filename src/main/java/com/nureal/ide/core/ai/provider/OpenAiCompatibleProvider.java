@@ -276,10 +276,7 @@ abstract class OpenAiCompatibleProvider extends AbstractStreamingProvider {
         body.put("model", request.model());
         List<Map<String, Object>> messages = new ArrayList<>();
         for (ChatMessage m : request.messages()) {
-            Map<String, Object> msg = new LinkedHashMap<>();
-            msg.put("role", m.role());
-            msg.put("content", m.content());
-            messages.add(msg);
+            messages.add(toOpenAiMessage(m));
         }
         body.put("messages", messages);
         body.put("stream", stream);
@@ -301,6 +298,37 @@ abstract class OpenAiCompatibleProvider extends AbstractStreamingProvider {
             body.put("tools", tools);
         }
         return body;
+    }
+
+    /**
+     * Message no formato OpenAI: mensagens {@code tool} carregam
+     * {@code tool_call_id} (referencia ao pedido que respondem); mensagens
+     * {@code assistant} que pediram tools carregam {@code tool_calls} (com
+     * {@code arguments} como STRING JSON-encoded, nao objeto aninhado —
+     * diferente do Ollama).
+     */
+    private Map<String, Object> toOpenAiMessage(ChatMessage m) {
+        Map<String, Object> msg = new LinkedHashMap<>();
+        msg.put("role", m.role());
+        msg.put("content", m.content());
+        if (m.toolCallId() != null) {
+            msg.put("tool_call_id", m.toolCallId());
+        }
+        if (m.hasToolCalls()) {
+            List<Map<String, Object>> toolCallsJson = new ArrayList<>();
+            for (ToolCall call : m.toolCalls()) {
+                Map<String, Object> function = new LinkedHashMap<>();
+                function.put("name", call.name());
+                function.put("arguments", JsonWriter.write(call.arguments()));
+                Map<String, Object> toolCallJson = new LinkedHashMap<>();
+                toolCallJson.put("id", call.id());
+                toolCallJson.put("type", "function");
+                toolCallJson.put("function", function);
+                toolCallsJson.add(toolCallJson);
+            }
+            msg.put("tool_calls", toolCallsJson);
+        }
+        return msg;
     }
 
     private ChatResponse toChatResponse(Map<?, ?> root) {
