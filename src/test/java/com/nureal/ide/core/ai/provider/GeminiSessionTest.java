@@ -124,6 +124,65 @@ class GeminiSessionTest {
     }
 
     @Test
+    void reenviaOThoughtSignatureNaMesmaPartDeFunctionCall() throws IOException, InterruptedException {
+        String firstRoundSse = "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":["
+                + "{\"functionCall\":{\"name\":\"list_tables\",\"args\":{}},"
+                + "\"thoughtSignature\":\"opaque-sig-abc\"}]},\"finishReason\":\"STOP\"}]}\n";
+        String secondRoundSse = "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":["
+                + "{\"text\":\"Pronto.\"}]},\"finishReason\":\"STOP\"}]}\n";
+
+        AtomicInteger requestCount = new AtomicInteger(0);
+        List<String> capturedBodies = new ArrayList<>();
+        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1beta/models/gemini-2.0-flash:streamGenerateContent", exchange -> {
+            ByteArrayOutputStream captured = new ByteArrayOutputStream();
+            exchange.getRequestBody().transferTo(captured);
+            synchronized (capturedBodies) {
+                capturedBodies.add(captured.toString(StandardCharsets.UTF_8));
+            }
+            byte[] body = (requestCount.getAndIncrement() == 0 ? firstRoundSse : secondRoundSse)
+                    .getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, body.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(body);
+            }
+        });
+        server.start();
+        String baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
+        GeminiProvider provider = new GeminiProvider("key-teste", baseUrl, Duration.ofSeconds(5));
+
+        ChatRequest seed = new ChatRequest("gemini-2.0-flash",
+                List.of(new ChatMessage(ChatMessage.ROLE_SYSTEM, "voce e um assistente de banco de dados")), null,
+                List.of(new ToolSpec("list_tables", "lista tabelas", Map.of())));
+
+        CountDownLatch toolLatch = new CountDownLatch(1);
+        CountDownLatch finalLatch = new CountDownLatch(1);
+        AtomicReference<AiEvent.ToolCallsRequested> toolCallsRequested = new AtomicReference<>();
+        ConversationSession session = provider.createSession(seed, event -> {
+            if (event instanceof AiEvent.ToolCallsRequested requested) {
+                toolCallsRequested.set(requested);
+                toolLatch.countDown();
+            } else if (event instanceof AiEvent.Completed) {
+                finalLatch.countDown();
+            }
+        });
+
+        session.send("quais tabelas existem?");
+        assertTrue(toolLatch.await(5, TimeUnit.SECONDS));
+        session.submitToolResult(toolCallsRequested.get().calls().get(0).id(), "orders, customers");
+        assertTrue(finalLatch.await(5, TimeUnit.SECONDS));
+
+        @SuppressWarnings("unchecked")
+        var secondBody = (Map<String, Object>) JsonParser.parse(capturedBodies.get(1));
+        @SuppressWarnings("unchecked")
+        var contents = (List<Map<String, Object>>) secondBody.get("contents");
+        @SuppressWarnings("unchecked")
+        var modelParts = (List<Map<String, Object>>) contents.get(1).get("parts");
+        assertEquals("opaque-sig-abc", modelParts.get(0).get("thoughtSignature"),
+                "sem reenviar a mesma thoughtSignature, o Gemini responde HTTP 400 nas rodadas seguintes");
+    }
+
+    @Test
     void semToolCallEncerraDireto() throws IOException, InterruptedException {
         String sse = "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":["
                 + "{\"text\":\"Ola!\"}]},\"finishReason\":\"STOP\"}]}\n";

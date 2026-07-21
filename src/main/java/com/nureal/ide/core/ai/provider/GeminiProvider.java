@@ -235,7 +235,8 @@ public final class GeminiProvider extends AbstractStreamingProvider {
                                 onEvent.accept(new AiEvent.Chunk(requestId, textDelta));
                             } else if (part.get("functionCall") instanceof Map<?, ?> fc
                                     && fc.get("name") instanceof String name) {
-                                toolCalls.add(new ToolCall(name, name, extractArgs(fc.get("args"))));
+                                toolCalls.add(new ToolCall(name, name, extractArgs(fc.get("args")),
+                                        extractThoughtSignature(part)));
                             }
                         }
                     }
@@ -382,7 +383,13 @@ public final class GeminiProvider extends AbstractStreamingProvider {
                 parts.add(Map.of("text", m.content()));
             }
             for (ToolCall call : m.toolCalls()) {
-                parts.add(Map.of("functionCall", Map.of("name", call.name(), "args", call.arguments())));
+                Map<String, Object> part = new LinkedHashMap<>();
+                part.put("functionCall", Map.of("name", call.name(), "args", call.arguments()));
+                Object signature = call.metadata().get("thoughtSignature");
+                if (signature instanceof String sig && !sig.isBlank()) {
+                    part.put("thoughtSignature", sig);
+                }
+                parts.add(part);
             }
             return Map.of("role", "model", "parts", parts);
         }
@@ -405,7 +412,7 @@ public final class GeminiProvider extends AbstractStreamingProvider {
                 if (part.get("text") instanceof String t) {
                     text.append(t);
                 } else if (part.get("functionCall") instanceof Map<?, ?> fc && fc.get("name") instanceof String name) {
-                    toolCalls.add(new ToolCall(name, name, extractArgs(fc.get("args"))));
+                    toolCalls.add(new ToolCall(name, name, extractArgs(fc.get("args")), extractThoughtSignature(part)));
                 }
             }
         }
@@ -418,6 +425,19 @@ public final class GeminiProvider extends AbstractStreamingProvider {
     @SuppressWarnings("unchecked")
     private static Map<String, Object> extractArgs(Object rawArgs) {
         return rawArgs instanceof Map<?, ?> m ? (Map<String, Object>) m : Map.of();
+    }
+
+    /**
+     * {@code thoughtSignature} vem como irmao de {@code functionCall} dentro da MESMA
+     * part (nao dentro do proprio {@code functionCall}) — modelos com "thinking"
+     * exigem que ela volte identica na proxima rodada (mesma part de functionCall),
+     * senao o Gemini responde HTTP 400 ("Function call is missing a
+     * thought_signature"). Guardada em {@link ToolCall#metadata()} pra
+     * {@link #toGeminiContent} reanexar sem o Agent precisar saber que isso existe.
+     */
+    private static Map<String, Object> extractThoughtSignature(Map<?, ?> part) {
+        return part.get("thoughtSignature") instanceof String sig && !sig.isBlank()
+                ? Map.of("thoughtSignature", sig) : Map.of();
     }
 
     private ChatUsage extractUsage(Object usageObj) {
