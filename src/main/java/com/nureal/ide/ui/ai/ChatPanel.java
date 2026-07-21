@@ -39,6 +39,7 @@ final class ChatPanel extends JPanel {
     private Consumer<String> onSend = s -> { };
     private Runnable onCancel = () -> { };
     private Runnable onOpenSettings = () -> { };
+    private ChatActions actions = ChatActions.NONE;
     private boolean sending;
 
     ChatPanel() {
@@ -121,6 +122,11 @@ final class ChatPanel extends JPanel {
         this.onOpenSettings = onOpenSettings;
     }
 
+    /** Acoes dos cards SQL (Executar/Formatar/Explicar) — ver {@link ChatActions}. */
+    void setActions(ChatActions actions) {
+        this.actions = actions;
+    }
+
     private void triggerSend() {
         String text = input.getText().strip();
         if (text.isEmpty() || sending) {
@@ -132,9 +138,22 @@ final class ChatPanel extends JPanel {
 
     /** Mensagem final (usuario, ou historico ja carregado) — sempre renderizada de uma vez. */
     void addMessage(String role, String content) {
-        messagesContainer.add(MessageRenderer.render(role, content));
+        messagesContainer.add(MessageRenderer.render(role, content, actions));
         messagesContainer.add(javax.swing.Box.createVerticalStrut(2));
         revalidateAndScrollToBottom();
+    }
+
+    /**
+     * Card de status de uma tool em execucao (ex.: "Buscando tabelas..."),
+     * atualizado pro resultado final quando a tool terminar — ver
+     * {@link ToolCardHandle#complete}.
+     */
+    ToolCardHandle beginToolCard(String label) {
+        MessageRenderer.ToolCard card = MessageRenderer.toolCard(label);
+        messagesContainer.add(card.component());
+        messagesContainer.add(javax.swing.Box.createVerticalStrut(2));
+        revalidateAndScrollToBottom();
+        return new ToolCardHandle(card.statusLabel());
     }
 
     /** Inicia uma bolha de resposta do assistente que vai crescendo enquanto os chunks chegam. */
@@ -202,18 +221,18 @@ final class ChatPanel extends JPanel {
             revalidateAndScrollToBottom();
         }
 
-        /** Troca a bolha "ao vivo" pela versao final renderizada (com blocos de codigo). */
+        /** Troca a bolha "ao vivo" pela versao final renderizada (com cards/blocos de codigo). */
         void finish(String finalContent) {
-            replaceWith(MessageRenderer.render("assistant", finalContent));
+            replaceWith(MessageRenderer.render("assistant", finalContent, actions));
         }
 
         void fail(String errorMessage) {
-            replaceWith(MessageRenderer.render("assistant", "⚠ " + errorMessage));
+            replaceWith(MessageRenderer.renderError(errorMessage));
         }
 
         void cancelled() {
             String text = content.length() > 0 ? content.toString() + "\n\n(cancelado)" : "(cancelado)";
-            replaceWith(MessageRenderer.render("assistant", text));
+            replaceWith(MessageRenderer.render("assistant", text, actions));
         }
 
         private void replaceWith(JComponent replacement) {
@@ -229,6 +248,20 @@ final class ChatPanel extends JPanel {
             }
             messagesContainer.remove(index);
             messagesContainer.add(replacement, index);
+            revalidateAndScrollToBottom();
+        }
+    }
+
+    /** Alca de um card de tool em execucao — ver {@link #beginToolCard}. */
+    final class ToolCardHandle {
+        private final JLabel statusLabel;
+
+        private ToolCardHandle(JLabel statusLabel) {
+            this.statusLabel = statusLabel;
+        }
+
+        void complete(boolean success, String summary) {
+            statusLabel.setText((success ? "✓ " : "❌ ") + summary);
             revalidateAndScrollToBottom();
         }
     }

@@ -21,7 +21,11 @@ public final class PromptComposer {
             "Voce e o assistente de IA integrado a Nureal Database IDE, uma IDE para bancos de dados. "
                     + "Responda em portugues do Brasil, de forma direta e tecnica. "
                     + "Quando precisar de informacoes reais do banco conectado (tabelas, colunas, indices, "
-                    + "chaves estrangeiras), use as tools disponiveis em vez de adivinhar.";
+                    + "chaves estrangeiras), use as tools disponiveis em vez de adivinhar. "
+                    + "Sempre que sugerir SQL, coloque em um bloco de codigo ```sql. Quando fizer sentido "
+                    + "destacar uma dica ou um aviso importante (ex.: risco de uma operacao destrutiva), use "
+                    + "um bloco de citacao no formato \"> [!TIP]\" ou \"> [!WARNING]\" seguido do texto nas "
+                    + "linhas seguintes comecando com \">\", em vez de misturar isso no meio do paragrafo.";
 
     private PromptComposer() {
     }

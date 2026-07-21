@@ -26,10 +26,10 @@ public final class ChatWindow {
     private final ChatController controller;
 
     private ChatWindow(Window owner, Agent agent, ChatHistoryStore historyStore, String conversationId,
-            Runnable onOpenSettings) {
+            Runnable onOpenSettings, ChatActions actions) {
         ChatPanel panel = new ChatPanel();
         panel.setOnOpenSettings(onOpenSettings);
-        this.controller = new ChatController(panel, agent, historyStore, conversationId);
+        this.controller = new ChatController(panel, agent, historyStore, conversationId, actions);
 
         dialog = new JDialog(owner, "Chat com IA", JDialog.ModalityType.MODELESS);
         dialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
@@ -46,7 +46,7 @@ public final class ChatWindow {
     }
 
     public static void open(Window owner, Agent agent, ChatHistoryStore historyStore, String conversationId,
-            Runnable onOpenSettings) {
+            Runnable onOpenSettings, ChatActions actions) {
         if (instance != null) {
             instance.controller.updateAgent(agent);
             instance.dialog.setVisible(true);
@@ -54,7 +54,7 @@ public final class ChatWindow {
             instance.dialog.requestFocus();
             return;
         }
-        instance = new ChatWindow(owner, agent, historyStore, conversationId, onOpenSettings);
+        instance = new ChatWindow(owner, agent, historyStore, conversationId, onOpenSettings, actions);
         instance.dialog.setVisible(true);
     }
 

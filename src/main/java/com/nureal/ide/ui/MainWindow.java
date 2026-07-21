@@ -145,6 +145,7 @@ import com.nureal.ide.core.ai.tool.DescribeTableTool;
 import com.nureal.ide.core.ai.tool.ListTablesTool;
 import com.nureal.ide.core.ai.tool.ToolExecutor;
 import com.nureal.ide.ui.ai.AiSettingsDialog;
+import com.nureal.ide.ui.ai.ChatActions;
 import com.nureal.ide.ui.ai.ChatWindow;
 import com.nureal.ide.ui.ai.IdeContextAccessor;
 
@@ -2560,8 +2561,21 @@ public class MainWindow extends JFrame {
 		AiCredentialsStore aiCredentials = new AiCredentialsStore();
 		ChatHistoryStore chatHistoryStore = new ChatHistoryStore();
 		Agent agent = buildAiAgent(aiPreferences, aiCredentials, chatHistoryStore);
+		ChatActions actions = new ChatActions(this::runSqlFromChat, this::currentSqlFormatter, sql -> { });
 		ChatWindow.open(this, agent, chatHistoryStore, AI_CONVERSATION_ID,
-				() -> openAiSettings(aiPreferences, aiCredentials));
+				() -> openAiSettings(aiPreferences, aiCredentials), actions);
+	}
+
+	/**
+	 * "Executar" de um card SQL do chat de IA — abre uma aba nova com a
+	 * consulta (preserva as abas existentes do usuario) e roda pelo MESMO
+	 * caminho do botao "Executar" da toolbar ({@link #onRun}), reusando toda
+	 * a logica de resolucao de schema/conexao em vez de duplicar.
+	 */
+	private void runSqlFromChat(String sql) {
+		if (addQueryTab("Chat: consulta", sql)) {
+			onRun();
+		}
 	}
 
 	private void openAiSettings(AiPreferences aiPreferences, AiCredentialsStore aiCredentials) {

@@ -126,10 +126,13 @@ public final class DefaultAgent implements Agent {
                 return;
             }
             turn.round++;
+            turn.onEvent.accept(event);
             for (ToolCall call : requested.calls()) {
                 ToolResult result = toolExecutor.execute(new ToolRequest(call.name(), call.arguments(),
                         turn.conversationId, call.id(), turn.context));
                 String toolContent = result.success() ? result.content() : ("Erro: " + result.error());
+                turn.onEvent.accept(new AiEvent.ToolCallResult(requested.requestId(), call, result.success(),
+                        toolContent));
                 turn.session.submitToolResult(call.id(), toolContent);
             }
             return;
