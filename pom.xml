@@ -103,17 +103,6 @@
                 <version>3.5.0</version>
                 <configuration>
                     <mainClass>${exec.mainClass}</mainClass>
-                    <!-- Chat de IA via Kotlin+Compose Desktop (ver chat-ui/, modulo Gradle
-                         separado deste build Maven), ligado via reflection (Class.forName),
-                         nunca uma dependencia Maven direta (evitaria um ciclo de build).
-                         Caminho FIXO gerado por "gradlew copyUberJarFixedName" em
-                         chat-ui/build.gradle.kts. Se esse jar nao existir (chat-ui nunca
-                         buildado), este elemento so aponta pra um arquivo ausente, e java -cp
-                         ignora entradas de classpath que nao existem: "mvn exec:java"
-                         continua funcionando normalmente, so cai pro ChatWindow Swing de sempre. -->
-                    <additionalClasspathElements>
-                        <additionalClasspathElement>${project.basedir}/chat-ui/build/dist/chat-ui.jar</additionalClasspathElement>
-                    </additionalClasspathElements>
                 </configuration>
             </plugin>
 

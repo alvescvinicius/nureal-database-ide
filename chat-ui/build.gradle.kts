@@ -49,22 +49,3 @@ compose.desktop {
         mainClass = "com.nureal.ide.ui.ai.compose.HarnessKt"
     }
 }
-
-/**
- * "packageUberJarForCurrentOS" nomeia o jar com SO+versao
- * (ex.: chat-ui-windows-x64-0.1.0.jar) — nome que muda a cada bump de
- * versao/SO. O pom.xml principal (exec-maven-plugin) referencia este jar
- * pra montar o classpath de "mvn exec:java"; copia pra um nome FIXO aqui
- * pra essa referencia nunca precisar mudar.
- */
-tasks.register<Copy>("copyUberJarFixedName") {
-    dependsOn("packageUberJarForCurrentOS")
-    from(layout.buildDirectory.dir("compose/jars"))
-    include("*.jar")
-    into(layout.buildDirectory.dir("dist"))
-    rename { "chat-ui.jar" }
-}
-
-tasks.named("build") {
-    dependsOn("copyUberJarFixedName")
-}
