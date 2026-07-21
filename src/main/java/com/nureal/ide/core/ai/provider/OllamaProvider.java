@@ -41,9 +41,6 @@ import com.nureal.ide.core.json.JsonWriter;
  */
 public final class OllamaProvider implements LLMProvider {
 
-    /** Downloads de modelo podem levar bem mais que o timeout de chat configurado — dedicado, generoso (poucos GB numa conexao lenta). */
-    private static final Duration PULL_TIMEOUT = Duration.ofMinutes(30);
-
     private final String baseUrl;
     private final Duration timeout;
     private final HttpClient httpClient;
@@ -136,84 +133,6 @@ public final class OllamaProvider implements LLMProvider {
         AtomicBoolean flag = inFlight.get(requestId);
         if (flag != null) {
             flag.set(true);
-        }
-    }
-
-    /**
-     * Baixa um modelo ({@code POST /api/pull}), retornando imediatamente um
-     * id de requisicao (cancelavel via {@link #cancel}) — mesmo idioma
-     * assincrono de {@link #stream}. Especifico do Ollama, fora da interface
-     * {@link LLMProvider} (ver {@link PullEvent}).
-     */
-    public String pullModel(String model, Consumer<PullEvent> onEvent) {
-        String requestId = UUID.randomUUID().toString();
-        AtomicBoolean cancelled = new AtomicBoolean(false);
-        inFlight.put(requestId, cancelled);
-        streamExecutor.submit(() -> runPull(requestId, model, onEvent, cancelled));
-        return requestId;
-    }
-
-    private void runPull(String requestId, String model, Consumer<PullEvent> onEvent, AtomicBoolean cancelled) {
-        try {
-            String json = JsonWriter.write(Map.of("model", model, "stream", true));
-            HttpRequest httpRequest = HttpRequest.newBuilder(URI.create(baseUrl + "/api/pull"))
-                    .timeout(PULL_TIMEOUT)
-                    .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8))
-                    .build();
-            HttpResponse<Stream<String>> response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofLines());
-            if (response.statusCode() != 200) {
-                String body = response.body().reduce("", (a, b) -> a + b);
-                onEvent.accept(new PullEvent.Failed(requestId, statusToException(response.statusCode(), body)));
-                return;
-            }
-            try (Stream<String> lines = response.body()) {
-                for (String line : (Iterable<String>) lines::iterator) {
-                    if (cancelled.get()) {
-                        onEvent.accept(new PullEvent.Cancelled(requestId));
-                        return;
-                    }
-                    if (line.isBlank()) {
-                        continue;
-                    }
-                    Object parsed;
-                    try {
-                        parsed = JsonParser.parse(line);
-                    } catch (JsonParser.JsonParseException e) {
-                        onEvent.accept(new PullEvent.Failed(requestId,
-                                new ProviderException.UnexpectedResponse("Resposta do Ollama em formato inesperado.", e)));
-                        return;
-                    }
-                    if (!(parsed instanceof Map<?, ?> chunk)) {
-                        continue;
-                    }
-                    if (chunk.get("error") instanceof String errorMsg) {
-                        onEvent.accept(new PullEvent.Failed(requestId, new ProviderException.UnexpectedResponse(errorMsg)));
-                        return;
-                    }
-                    String status = chunk.get("status") instanceof String s ? s : "";
-                    onEvent.accept(new PullEvent.Progress(requestId, status, asLong(chunk.get("completed")),
-                            asLong(chunk.get("total"))));
-                    if ("success".equals(status)) {
-                        onEvent.accept(new PullEvent.Completed(requestId));
-                        return;
-                    }
-                }
-            }
-        } catch (HttpTimeoutException e) {
-            onEvent.accept(new PullEvent.Failed(requestId,
-                    new ProviderException.Timeout("O download do modelo demorou demais.", e)));
-        } catch (ConnectException | ClosedChannelException e) {
-            onEvent.accept(new PullEvent.Failed(requestId, connectionError(e)));
-        } catch (IOException e) {
-            onEvent.accept(new PullEvent.Failed(requestId,
-                    new ProviderException.ConnectionError("Erro de comunicacao com o Ollama"
-                            + (e.getMessage() != null ? ": " + e.getMessage() : "."), e)));
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            onEvent.accept(new PullEvent.Cancelled(requestId));
-        } finally {
-            inFlight.remove(requestId);
         }
     }
 

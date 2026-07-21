@@ -9,21 +9,6 @@ on:
 permissions:
   contents: write   # necessario para criar o Release e anexar arquivos
 
-env:
-  # Versao do Ollama embutida no instalador (baixada dos Releases oficiais do
-  # projeto Ollama e empacotada dentro do app-image — ver o step "Baixar o
-  # Ollama embutido" de cada job abaixo). Fixada (nao "latest") pelo mesmo
-  # motivo de todo o resto do projeto usar versoes travadas: reprodutibilidade
-  # do build.
-  #
-  # ATENCAO: verifique em https://github.com/ollama/ollama/releases se esta
-  # tag e os nomes de asset usados abaixo (ollama-windows-amd64.zip,
-  # ollama-darwin.tgz, ollama-linux-amd64.tgz) ainda existem/tem esse formato
-  # ANTES de confiar num run real deste workflow — o projeto Ollama pode
-  # renomear/reestruturar os assets entre versoes, e isto so e confirmavel
-  # com uma execucao de verdade do Actions (nao simulavel localmente).
-  OLLAMA_VERSION: v0.9.0
-
 jobs:
   # ==========================================================================
   # Windows — .exe (bootstrapper WiX Burn, uso comum) E .msi (instalacao
@@ -85,23 +70,6 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path target/dist | Out-Null
           Copy-Item target/nureal-database-ide.jar target/dist/
-
-      - name: Baixar o Ollama embutido (Windows amd64)
-        # Fica em target/dist/ollama-bin/ollama.exe -- dentro do MESMO --input
-        # do jpackage, entao acaba embutido no app-image final em
-        # <raiz do app-image>/app/ollama-bin/ollama.exe (ver
-        # core.ai.runtime.OllamaBinaryLocator, que resolve exatamente este
-        # caminho em runtime via "jpackage.app-path").
-        shell: pwsh
-        run: |
-          $dest = "target/dist/ollama-bin"
-          New-Item -ItemType Directory -Force -Path $dest | Out-Null
-          $zipUrl = "https://github.com/ollama/ollama/releases/download/$env:OLLAMA_VERSION/ollama-windows-amd64.zip"
-          curl.exe -L -o target/ollama.zip $zipUrl
-          Expand-Archive -Path target/ollama.zip -DestinationPath $dest -Force
-          if (-not (Test-Path "$dest/ollama.exe")) {
-            throw "ollama.exe nao encontrado apos extrair $zipUrl -- o nome/formato do asset do Ollama pode ter mudado (ver OLLAMA_VERSION no topo do workflow)"
-          }
 
       - name: Gerar a imagem da aplicacao (app-image)
         # Passo 1 de 4 do instalador (era so 1 passo antes): gera a "app
@@ -307,25 +275,6 @@ jobs:
           mkdir -p target/dist
           cp target/nureal-database-ide.jar target/dist/
 
-      - name: Baixar o Ollama embutido (macOS, binario universal arm64+x64)
-        # O Ollama publica um UNICO binario "universal" (lipo) pro macOS --
-        # mesmo asset serve os dois legs da matrix (arm64/Apple Silicon e
-        # x64/Intel), sem logica por arquitetura aqui. Fica em
-        # target/dist/ollama-bin/ollama, dentro do --input do jpackage (o
-        # macOS nao tem um passo de app-image separado -- vai direto pro
-        # --type dmg abaixo), entao acaba embutido em
-        # Contents/app/ollama-bin/ollama no .app final (ver
-        # core.ai.runtime.OllamaBinaryLocator).
-        run: |
-          mkdir -p target/dist/ollama-bin
-          curl -L -o target/ollama.tgz "https://github.com/ollama/ollama/releases/download/${OLLAMA_VERSION}/ollama-darwin.tgz"
-          tar -xzf target/ollama.tgz -C target/dist/ollama-bin
-          if [ ! -f target/dist/ollama-bin/ollama ]; then
-            echo "ollama nao encontrado apos extrair ollama-darwin.tgz -- o nome/formato do asset do Ollama pode ter mudado (ver OLLAMA_VERSION no topo do workflow)" >&2
-            exit 1
-          fi
-          chmod +x target/dist/ollama-bin/ollama
-
       - name: Gerar o icone .icns a partir do PNG existente
         # O projeto so tem .ico (Windows) e .svg/.png (UI) — o macOS exige
         # .icns. Gerado em build-time com as ferramentas que ja vem no
@@ -419,27 +368,6 @@ jobs:
         run: |
           mkdir -p target/dist
           cp target/nureal-database-ide.jar target/dist/
-
-      - name: Baixar o Ollama embutido (Linux amd64)
-        # Fica em target/dist/ollama-bin/ollama, dentro do --input do
-        # jpackage, entao acaba embutido no app-image final em
-        # <raiz do app-image>/app/ollama-bin/ollama (ver
-        # core.ai.runtime.OllamaBinaryLocator). O .tgz do Linux tradicionalmente
-        # traz o binario dentro de bin/ (as vezes junto de lib/ com
-        # dependencias) -- normaliza pra ollama-bin/ollama ficar direto na
-        # raiz esperada pelo locator, mantendo qualquer lib/ associada ao lado.
-        run: |
-          mkdir -p target/dist/ollama-bin
-          curl -L -o target/ollama.tgz "https://github.com/ollama/ollama/releases/download/${OLLAMA_VERSION}/ollama-linux-amd64.tgz"
-          tar -xzf target/ollama.tgz -C target/dist/ollama-bin
-          if [ -f target/dist/ollama-bin/bin/ollama ] && [ ! -f target/dist/ollama-bin/ollama ]; then
-            mv target/dist/ollama-bin/bin/ollama target/dist/ollama-bin/ollama
-          fi
-          if [ ! -f target/dist/ollama-bin/ollama ]; then
-            echo "ollama nao encontrado apos extrair ollama-linux-amd64.tgz -- o nome/formato do asset do Ollama pode ter mudado (ver OLLAMA_VERSION no topo do workflow)" >&2
-            exit 1
-          fi
-          chmod +x target/dist/ollama-bin/ollama
 
       - name: Gerar a imagem da aplicacao (app-image)
         # Mesma base para os dois formatos abaixo (.deb e .AppImage) — evita
@@ -545,13 +473,6 @@ jobs:
             - **macOS (Apple Silicon)**: `.dmg` (arquivo `-arm64.dmg`)
             - **macOS (Intel)**: `.dmg` (arquivo `-x64.dmg`)
             - **Linux**: `.deb` (Debian/Ubuntu) ou `.AppImage` (qualquer distro, sem instalar)
-
-            > Chat com IA: o Ollama vem embutido no instalador (por isso ele ficou maior —
-            > mais ~100-300MB) — nao e preciso instalar nada separado. No primeiro uso do
-            > chat a IDE baixa sozinha um modelo padrao (poucos GB, precisa de internet
-            > nesse momento; depois funciona 100% offline). Quem preferir apontar pra um
-            > Ollama proprio (outra maquina, GPU dedicada etc.) pode desligar o modo
-            > embutido nas configuracoes de IA.
 
             > Windows: nem o `.exe` nem o `.msi` sao assinados (sem certificado de
             > assinatura de codigo configurado neste repositorio) — o SmartScreen

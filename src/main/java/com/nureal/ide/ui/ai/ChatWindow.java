@@ -64,17 +64,4 @@ public final class ChatWindow {
             instance.controller.updateAgent(agent);
         }
     }
-
-    /**
-     * Mostra um status de sistema (ex.: progresso de inicializacao/download
-     * do Ollama embutido) na janela, se estiver aberta — sem efeito (e sem
-     * abrir a janela) caso contrario, ja que e so um retorno informativo de
-     * uma tarefa de background que pode terminar antes/depois do usuario
-     * abrir o chat.
-     */
-    public static void updateStatus(String text) {
-        if (instance != null) {
-            instance.controller.showSystemStatus(text);
-        }
-    }
 }

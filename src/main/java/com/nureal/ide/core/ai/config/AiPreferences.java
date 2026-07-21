@@ -24,8 +24,6 @@ public class AiPreferences {
     public static final String DEFAULT_BASE_URL = "http://localhost:11434";
     public static final double DEFAULT_TEMPERATURE = 0.2;
     public static final int DEFAULT_TIMEOUT_SECONDS = 60;
-    /** Baixado automaticamente no 1o uso do Ollama embutido, se nenhum modelo estiver instalado/configurado. */
-    public static final String DEFAULT_MODEL = "llama3.2:3b";
 
     private final Path file;
 
@@ -41,18 +39,12 @@ public class AiPreferences {
         return file;
     }
 
-    /**
-     * Estado imutavel da configuracao de IA. {@code model} vazio = nenhum escolhido ainda.
-     * {@code embeddedMode}: {@code true} = usa o Ollama embutido no instalador (a IDE sobe/
-     * derruba o processo sozinha, baixa o modelo padrao no 1o uso — ver
-     * {@code core.ai.runtime.OllamaBootstrapper}); {@code false} = {@code baseUrl} aponta pra
-     * um Ollama externo que o usuario ja gerencia por conta propria (comportamento original).
-     */
+    /** Estado imutavel da configuracao de IA. {@code model} vazio = nenhum escolhido ainda. */
     public record State(String baseUrl, String model, double temperature, int timeoutSeconds,
-                         boolean streamingEnabled, boolean embeddedMode) {
+                         boolean streamingEnabled) {
 
         public static State defaults() {
-            return new State(DEFAULT_BASE_URL, "", DEFAULT_TEMPERATURE, DEFAULT_TIMEOUT_SECONDS, true, true);
+            return new State(DEFAULT_BASE_URL, "", DEFAULT_TEMPERATURE, DEFAULT_TIMEOUT_SECONDS, true);
         }
     }
 
@@ -66,7 +58,6 @@ public class AiPreferences {
         double temperature = DEFAULT_TEMPERATURE;
         int timeoutSeconds = DEFAULT_TIMEOUT_SECONDS;
         boolean streamingEnabled = true;
-        boolean embeddedMode = true;
 
         List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);
         for (String raw : lines) {
@@ -86,13 +77,12 @@ public class AiPreferences {
                 case "temperature" -> temperature = parseTemperature(value);
                 case "timeoutSeconds" -> timeoutSeconds = parseTimeout(value);
                 case "streamingEnabled" -> streamingEnabled = Boolean.parseBoolean(value);
-                case "embeddedMode" -> embeddedMode = Boolean.parseBoolean(value);
                 default -> {
                     // ignora chaves desconhecidas (versoes futuras)
                 }
             }
         }
-        return new State(baseUrl, model, temperature, timeoutSeconds, streamingEnabled, embeddedMode);
+        return new State(baseUrl, model, temperature, timeoutSeconds, streamingEnabled);
     }
 
     /** Grava a configuracao, criando a pasta se necessario. */
@@ -108,7 +98,6 @@ public class AiPreferences {
         sb.append("temperature=").append(state.temperature()).append('\n');
         sb.append("timeoutSeconds=").append(state.timeoutSeconds()).append('\n');
         sb.append("streamingEnabled=").append(state.streamingEnabled()).append('\n');
-        sb.append("embeddedMode=").append(state.embeddedMode()).append('\n');
         Files.write(file, sb.toString().getBytes(StandardCharsets.UTF_8));
     }
 
