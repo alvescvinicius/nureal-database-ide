@@ -31,7 +31,7 @@ import com.nureal.ide.ui.Typography;
  * Uso: {@code new NCard(NAccent.INFO, "Dica")}, depois {@code add(conteudo)}
  * normalmente (e um {@code JPanel} com {@code BoxLayout.Y_AXIS}).
  */
-public final class NCard extends JPanel {
+public class NCard extends JPanel {
 
     private static final long serialVersionUID = 1L;
 

@@ -158,16 +158,17 @@ import com.nureal.ide.ui.ai.IdeContextAccessor;
 public class MainWindow extends JFrame {
 
 	private static final long serialVersionUID = 1L;
-	// Pacote-visivel (nao private): reaproveitada por ResultStatusBar para o
-	// icone do botao "Exportar" — evita duplicar o mesmo valor de cor em duas
-	// classes do mesmo pacote.
+	// Publica (nao so pacote-visivel): reaproveitada por ResultStatusBar para o
+	// icone do botao "Exportar" e por com.nureal.ide.ui.components.NButton
+	// (Nureal Design System) — evita duplicar o mesmo valor de cor em outra
+	// classe/pacote.
 	// Verde institucional da marca Nureal (ver logo) — era 0x059669 (um verde-
 	// esmeralda generico, sem relacao com a marca); atualizado apos revisao de
 	// identidade visual (ver DESIGN_SYSTEM.md, secao 2). Unico ponto de
 	// verdade: qualquer lugar que precisar do verde da marca reusa ACCENT, nunca
 	// um literal proprio (ja auditado — ver Buttons/ConnectionsPanel/
 	// ObjectTreeCellRenderer/ResultStatusBar).
-	static final Color ACCENT = new Color(0x1E9147);
+	public static final Color ACCENT = new Color(0x1E9147);
 
 	private static final int PAGE_SIZE = 200;
 	private static final int MAX_TABS = 15;

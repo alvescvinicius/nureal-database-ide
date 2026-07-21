@@ -2,10 +2,7 @@ package com.nureal.ide.ui.ai;
 
 import java.awt.BorderLayout;
 import java.awt.Color;
-import java.awt.Dimension;
 import java.awt.Font;
-import java.awt.Toolkit;
-import java.awt.datatransfer.StringSelection;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Locale;
@@ -15,7 +12,6 @@ import java.util.regex.Pattern;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
-import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
@@ -25,11 +21,11 @@ import javax.swing.UIManager;
 import org.fife.ui.rsyntaxtextarea.RSyntaxTextArea;
 import org.fife.ui.rsyntaxtextarea.SyntaxConstants;
 import org.fife.ui.rsyntaxtextarea.Theme;
-import org.fife.ui.rtextarea.RTextScrollPane;
 
 import com.nureal.ide.ui.SqlEditorPane;
 import com.nureal.ide.ui.components.NAccent;
 import com.nureal.ide.ui.components.NCard;
+import com.nureal.ide.ui.components.NCodeBlock;
 import com.nureal.ide.ui.components.NTheme;
 
 /**
@@ -209,52 +205,23 @@ final class MessageRenderer {
 
     private static JComponent codeCard(String code, String language, ChatActions actions) {
         boolean isSql = "sql".equalsIgnoreCase(language);
-        String trimmedCode = code.stripTrailing();
+        NCodeBlock.CodeStyler styler = isSql
+                ? SqlEditorPane::styleAsReadOnlySql
+                : area -> {
+                    area.setEditable(false);
+                    area.setSyntaxEditingStyle(styleFor(language));
+                    area.setCodeFoldingEnabled(false);
+                    themeGenericCode(area);
+                };
 
-        RSyntaxTextArea area = new RSyntaxTextArea(trimmedCode);
+        NCodeBlock block = new NCodeBlock(code, isSql ? NAccent.SQL : NAccent.NEUTRAL,
+                isSql ? "SQL" : displayLanguage(language), styler);
         if (isSql) {
-            SqlEditorPane.styleAsReadOnlySql(area);
-        } else {
-            area.setEditable(false);
-            area.setSyntaxEditingStyle(styleFor(language));
-            area.setCodeFoldingEnabled(false);
-            themeGenericCode(area);
+            block.addAction("Formatar", () -> block.setCode(actions.sqlFormatterSupplier().get().format(block.getCode())));
+            block.addAction("Explicar", () -> actions.onExplainSql().accept(block.getCode()));
+            block.addAction("Executar", () -> actions.onExecuteSql().accept(block.getCode()));
         }
-        area.setRows(Math.min(20, Math.max(1, trimmedCode.split("\n", -1).length)));
-        area.setHighlightCurrentLine(false);
-
-        RTextScrollPane scroll = new RTextScrollPane(area);
-        scroll.setLineNumbersEnabled(false);
-        scroll.setFoldIndicatorEnabled(false);
-        scroll.setBackground(area.getBackground());
-        scroll.getGutter().setBackground(area.getBackground());
-        scroll.setMaximumSize(new Dimension(Integer.MAX_VALUE, scroll.getPreferredSize().height));
-        scroll.setAlignmentX(JComponent.LEFT_ALIGNMENT);
-
-        JPanel toolbar = new JPanel();
-        toolbar.setLayout(new BoxLayout(toolbar, BoxLayout.X_AXIS));
-        toolbar.setOpaque(false);
-        toolbar.setAlignmentX(JComponent.LEFT_ALIGNMENT);
-        toolbar.add(Box.createHorizontalGlue());
-        toolbar.add(button("Copiar", () -> Toolkit.getDefaultToolkit().getSystemClipboard()
-                .setContents(new StringSelection(area.getText()), null)));
-        if (isSql) {
-            toolbar.add(button("Formatar", () -> area.setText(actions.sqlFormatterSupplier().get().format(area.getText()))));
-            toolbar.add(button("Explicar", () -> actions.onExplainSql().accept(area.getText())));
-            toolbar.add(button("Executar", () -> actions.onExecuteSql().accept(area.getText())));
-        }
-
-        JPanel body = new JPanel();
-        body.setLayout(new BoxLayout(body, BoxLayout.Y_AXIS));
-        body.setOpaque(false);
-        body.setAlignmentX(JComponent.LEFT_ALIGNMENT);
-        body.add(toolbar);
-        body.add(Box.createVerticalStrut(4));
-        body.add(scroll);
-
-        NCard card = new NCard(isSql ? NAccent.SQL : NAccent.NEUTRAL, isSql ? "SQL" : displayLanguage(language));
-        card.addContent(body);
-        return card;
+        return block;
     }
 
     /**
@@ -290,13 +257,6 @@ final class MessageRenderer {
         wrapper.setAlignmentX(JComponent.LEFT_ALIGNMENT);
         wrapper.add(card, BorderLayout.CENTER);
         return wrapper;
-    }
-
-    private static JButton button(String label, Runnable action) {
-        JButton button = new JButton(label);
-        button.putClientProperty("JButton.buttonType", "toolBarButton");
-        button.addActionListener(e -> action.run());
-        return button;
     }
 
     private static String styleFor(String language) {
