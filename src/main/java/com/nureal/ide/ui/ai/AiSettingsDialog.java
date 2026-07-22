@@ -105,56 +105,9 @@ public final class AiSettingsDialog {
         JButton refreshButton = new JButton("Listar modelos");
         JLabel modelsStatus = new JLabel(" ");
 
-        Runnable updateCardForProvider = () -> {
-            ProviderType selected = (ProviderType) providerCombo.getSelectedItem();
-            if (selected.requiresApiKey()) {
-                cards.show(credentialsCards, CARD_CLOUD);
-                credentialsLabel.setText("API Key de " + selected.displayName() + ":");
-            } else {
-                cards.show(credentialsCards, CARD_OLLAMA);
-                credentialsLabel.setText("Base URL do Ollama:");
-            }
-        };
-        updateCardForProvider.run();
-        providerCombo.addActionListener(e -> {
-            updateCardForProvider.run();
-            ProviderType selected = (ProviderType) providerCombo.getSelectedItem();
-            loadApiKeyIntoField(credentials, selected, apiKeyField);
-            modelCombo.setModel(new DefaultComboBoxModel<>());
-            modelsStatus.setText(" ");
-        });
-
-        refreshButton.addActionListener(e -> {
-            refreshButton.setEnabled(false);
-            ProviderType selected = (ProviderType) providerCombo.getSelectedItem();
-            modelsStatus.setText("Consultando " + selected.displayName() + "...");
-            String baseUrl = baseUrlField.getText().isBlank() ? AiPreferences.DEFAULT_BASE_URL
-                    : baseUrlField.getText().strip();
-            String apiKey = new String(apiKeyField.getPassword()).strip();
-            new SwingWorker<List<String>, Void>() {
-                @Override
-                protected List<String> doInBackground() {
-                    return buildPreviewProvider(selected, baseUrl, apiKey).listModels();
-                }
-
-                @Override
-                protected void done() {
-                    refreshButton.setEnabled(true);
-                    try {
-                        List<String> models = get();
-                        Object selectedModel = modelCombo.getSelectedItem();
-                        modelCombo.setModel(new DefaultComboBoxModel<>(new Vector<>(models)));
-                        if (selectedModel != null && models.contains(selectedModel)) {
-                            modelCombo.setSelectedItem(selectedModel);
-                        }
-                        modelsStatus.setText(models.isEmpty() ? "Nenhum modelo disponivel."
-                                : models.size() + " modelo(s) encontrado(s).");
-                    } catch (Exception ex) {
-                        modelsStatus.setText("Falha ao consultar " + selected.displayName() + ": " + rootMessage(ex));
-                    }
-                }
-            }.execute();
-        });
+        wireProviderChange(providerCombo, cards, credentialsCards, credentialsLabel, apiKeyField, modelCombo,
+                modelsStatus, credentials);
+        wireRefreshModels(refreshButton, providerCombo, baseUrlField, apiKeyField, modelCombo, modelsStatus);
 
         JSpinner temperatureSpinner = new JSpinner(
                 new SpinnerNumberModel(current.temperature(), 0.0, 2.0, 0.1));
@@ -191,7 +144,76 @@ public final class AiSettingsDialog {
         if (result != JOptionPane.OK_OPTION) {
             return;
         }
+        saveState(owner, preferences, credentials, onSaved, providerCombo, baseUrlField, modelCombo,
+                temperatureSpinner, timeoutSpinner, streamingCheckbox, apiKeyField);
+    }
 
+    /** "Provider" muda -> troca o card de credenciais (API key vs Base URL) e limpa a lista de modelos ja consultada. */
+    private static void wireProviderChange(JComboBox<ProviderType> providerCombo, CardLayout cards,
+            JPanel credentialsCards, JLabel credentialsLabel, JPasswordField apiKeyField,
+            JComboBox<String> modelCombo, JLabel modelsStatus, AiCredentialsStore credentials) {
+        Runnable updateCardForProvider = () -> {
+            ProviderType selected = (ProviderType) providerCombo.getSelectedItem();
+            if (selected.requiresApiKey()) {
+                cards.show(credentialsCards, CARD_CLOUD);
+                credentialsLabel.setText("API Key de " + selected.displayName() + ":");
+            } else {
+                cards.show(credentialsCards, CARD_OLLAMA);
+                credentialsLabel.setText("Base URL do Ollama:");
+            }
+        };
+        updateCardForProvider.run();
+        providerCombo.addActionListener(e -> {
+            updateCardForProvider.run();
+            ProviderType selected = (ProviderType) providerCombo.getSelectedItem();
+            loadApiKeyIntoField(credentials, selected, apiKeyField);
+            modelCombo.setModel(new DefaultComboBoxModel<>());
+            modelsStatus.setText(" ");
+        });
+    }
+
+    /** Botao "Listar modelos": consulta o provider com os valores AINDA NAO salvos do formulario. */
+    private static void wireRefreshModels(JButton refreshButton, JComboBox<ProviderType> providerCombo,
+            JTextField baseUrlField, JPasswordField apiKeyField, JComboBox<String> modelCombo,
+            JLabel modelsStatus) {
+        refreshButton.addActionListener(e -> {
+            refreshButton.setEnabled(false);
+            ProviderType selected = (ProviderType) providerCombo.getSelectedItem();
+            modelsStatus.setText("Consultando " + selected.displayName() + "...");
+            String baseUrl = baseUrlField.getText().isBlank() ? AiPreferences.DEFAULT_BASE_URL
+                    : baseUrlField.getText().strip();
+            String apiKey = new String(apiKeyField.getPassword()).strip();
+            new SwingWorker<List<String>, Void>() {
+                @Override
+                protected List<String> doInBackground() {
+                    return buildPreviewProvider(selected, baseUrl, apiKey).listModels();
+                }
+
+                @Override
+                protected void done() {
+                    refreshButton.setEnabled(true);
+                    try {
+                        List<String> models = get();
+                        Object selectedModel = modelCombo.getSelectedItem();
+                        modelCombo.setModel(new DefaultComboBoxModel<>(new Vector<>(models)));
+                        if (selectedModel != null && models.contains(selectedModel)) {
+                            modelCombo.setSelectedItem(selectedModel);
+                        }
+                        modelsStatus.setText(models.isEmpty() ? "Nenhum modelo disponivel."
+                                : models.size() + " modelo(s) encontrado(s).");
+                    } catch (Exception ex) {
+                        modelsStatus.setText("Falha ao consultar " + selected.displayName() + ": " + rootMessage(ex));
+                    }
+                }
+            }.execute();
+        });
+    }
+
+    /** Le os campos do formulario ja confirmado, monta o {@link AiPreferences.State} e salva (preferencias + API key). */
+    private static void saveState(Window owner, AiPreferences preferences, AiCredentialsStore credentials,
+            Runnable onSaved, JComboBox<ProviderType> providerCombo, JTextField baseUrlField,
+            JComboBox<String> modelCombo, JSpinner temperatureSpinner, JSpinner timeoutSpinner,
+            JCheckBox streamingCheckbox, JPasswordField apiKeyField) {
         ProviderType selectedProvider = (ProviderType) providerCombo.getSelectedItem();
         String model = modelCombo.getEditor().getItem() == null ? "" : modelCombo.getEditor().getItem().toString().strip();
         AiPreferences.State newState = new AiPreferences.State(

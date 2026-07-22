@@ -82,25 +82,41 @@ public final class ConnectionEditDialog {
         c.gridy = row++;
         form.add(savePassword, c);
 
-        // Botao "Testar conexao": abre uma conexao de verdade com os dados
-        // JA DIGITADOS no formulario (sem precisar salvar antes) e mostra o
-        // resultado ao lado, sem fechar o dialogo — pedido explicito para
-        // conferir host/porta/usuario/senha antes de confirmar. So MySQL por
-        // enquanto (mesmo dialeto unico usado no resto do app hoje, ver
-        // MainWindow#dialect); quando entrar um segundo banco, este dialeto
-        // fixo vira um parametro escolhido pelo usuario no formulario.
-        //
-        // Largura do rotulo de status TRAVADA em HTML (ver #htmlStatus) —
-        // sem isto, o texto ("Testando conexao...", ou pior, uma mensagem de
-        // erro de dezenas de caracteres tipo "Access denied for user...")
-        // cresce DEPOIS que o JOptionPane ja calculou o tamanho da janela
-        // (pack() so acontece uma vez, ao abrir; nao ha auto-resize quando um
-        // filho muda de tamanho depois). O GridBagLayout, ao tentar encaixar
-        // essa largura nova SEM a janela crescer junto, espreme a coluna
-        // inteira (a MESMA dos campos Nome/Host/Porta/...) ate o minimo —
-        // bug relatado pelo usuario: campos viram caixinhas vazias ao clicar
-        // em "Testar conexao". Com largura fixa, o texto QUEBRA LINHA (altera
-        // altura, nao largura) em vez de forcar a coluna a crescer.
+        JPanel testRow = buildTestRow(host, port, schema, user, password);
+        c.gridx = 0;
+        c.gridy = row++;
+        c.gridwidth = 2;
+        form.add(testRow, c);
+        c.gridwidth = 1;
+
+        String title = (existing == null) ? "Nova conexao" : "Editar conexao";
+        Component owner = DialogUtil.owner(parent);
+        return resolveProfile(owner, form, title, name, host, port, schema, user, password, savePassword, nameTaken);
+    }
+
+    /**
+     * Botao "Testar conexao": abre uma conexao de verdade com os dados JA
+     * DIGITADOS no formulario (sem precisar salvar antes) e mostra o
+     * resultado ao lado, sem fechar o dialogo — pedido explicito para
+     * conferir host/porta/usuario/senha antes de confirmar. So MySQL por
+     * enquanto (mesmo dialeto unico usado no resto do app hoje, ver
+     * MainWindow#dialect); quando entrar um segundo banco, este dialeto fixo
+     * vira um parametro escolhido pelo usuario no formulario.
+     * <p>
+     * Largura do rotulo de status TRAVADA em HTML (ver {@link #htmlStatus}) —
+     * sem isto, o texto ("Testando conexao...", ou pior, uma mensagem de erro
+     * de dezenas de caracteres tipo "Access denied for user...") cresce
+     * DEPOIS que o JOptionPane ja calculou o tamanho da janela (pack() so
+     * acontece uma vez, ao abrir; nao ha auto-resize quando um filho muda de
+     * tamanho depois). O GridBagLayout, ao tentar encaixar essa largura nova
+     * SEM a janela crescer junto, espreme a coluna inteira (a MESMA dos
+     * campos Nome/Host/Porta/...) ate o minimo — bug relatado pelo usuario:
+     * campos viram caixinhas vazias ao clicar em "Testar conexao". Com
+     * largura fixa, o texto QUEBRA LINHA (altera altura, nao largura) em vez
+     * de forcar a coluna a crescer.
+     */
+    private static JPanel buildTestRow(JTextField host, JTextField port, JTextField schema, JTextField user,
+            JPasswordField password) {
         JButton testButton = new JButton("Testar conexao");
         JLabel testStatus = new JLabel(htmlStatus(" "));
         testStatus.setFont(testStatus.getFont().deriveFont(Font.PLAIN, 11f));
@@ -151,20 +167,20 @@ public final class ConnectionEditDialog {
                 }
             }.execute();
         });
+        return testRow;
+    }
 
-        c.gridx = 0;
-        c.gridy = row++;
-        c.gridwidth = 2;
-        form.add(testRow, c);
-        c.gridwidth = 1;
-
-        String title = (existing == null) ? "Nova conexao" : "Editar conexao";
-        Component owner = DialogUtil.owner(parent);
-
-        // Loop em vez de um showConfirmDialog unico: se o nome digitado ja
-        // estiver em uso, avisa e REABRE o mesmo formulario (campos mantem o
-        // que o usuario ja tinha digitado) para corrigir, em vez de fechar e
-        // deixar duas conexoes com o mesmo nome.
+    /**
+     * Mostra {@code form} num {@link JOptionPane} e resolve o
+     * {@link ConnectionProfile} final — loop em vez de um
+     * {@code showConfirmDialog} unico: se o nome digitado ja estiver em uso,
+     * avisa e REABRE o mesmo formulario (campos mantem o que o usuario ja
+     * tinha digitado) para corrigir, em vez de fechar e deixar duas conexoes
+     * com o mesmo nome.
+     */
+    private static ConnectionProfile resolveProfile(Component owner, JPanel form, String title, JTextField name,
+            JTextField host, JTextField port, JTextField schema, JTextField user, JPasswordField password,
+            JCheckBox savePassword, Predicate<String> nameTaken) {
         while (true) {
             // Centraliza na JANELA do chamador, nao no componente exato
             // passado (ex: ConnectionsPanel, um painel pequeno na lateral).
