@@ -117,7 +117,31 @@ final class ResultGrid extends JPanel {
         this.editController = new GridEditController(model);
         model.setEditController(editController);
 
-        this.table = new JTable(model) {
+        this.table = buildTable(model, scale, rowHeightBasePx);
+        ColumnMetadataResolver resolver = installRenderers(model, connectionManager, schema, metadataCache);
+        this.sorter = new ColumnSorter(table);
+
+        ColumnHeaderRenderer.MetadataSource metadataSource =
+                col -> resolver.resolve(model, col, () -> table.getTableHeader().repaint());
+
+        this.selection = SelectionManager.install(table);
+        installSelectionSummaryListeners();
+
+        JComponent corner = RowNumberGutter.corner();
+        this.headerRenderer = new ColumnHeaderRenderer(sorter);
+        JTableHeader header = ResultTableHeader.install(table, sorter, selection, metadataSource, headerRenderer);
+        applyHeaderHeight(header, scale);
+        selection.installCorner(corner, this::persistLayout);
+
+        this.fingerprint = GridPreferences.fingerprint(columnNames(model));
+        applyPersistedLayoutOrAutoFit(model);
+
+        wireContextMenusAndScroll(model, connectionManager, schema, metadataCache, exportExcel, scale,
+                metadataSource, header, corner);
+    }
+
+    private JTable buildTable(ResultTableModel model, IntUnaryOperator scale, int rowHeightBasePx) {
+        JTable newTable = new JTable(model) {
             private static final long serialVersionUID = 1L;
 
             @Override
@@ -157,31 +181,35 @@ final class ResultGrid extends JPanel {
         // consulta um componente depois que ele foi registrado nele (o que
         // setToolTipText(...) faz implicitamente) — sem isto, a celula nunca
         // mostraria tooltip mesmo com o metodo sobrescrito corretamente.
-        javax.swing.ToolTipManager.sharedInstance().registerComponent(table);
-        styleTable(table, scale, rowHeightBasePx);
+        javax.swing.ToolTipManager.sharedInstance().registerComponent(newTable);
+        styleTable(newTable, scale, rowHeightBasePx);
+        return newTable;
+    }
 
-        // Resolver de metadados (PK/FK/indices/comentario) desta grade
-        // especifica — guardado como client property ANTES de instalar os
-        // renderers para que AbstractTypedCellRenderer consiga destacar
-        // colunas que sao chave primaria/estrangeira de verdade (ver
-        // RendererFactory#KEY_METADATA_RESOLVER), o mesmo resolver usado pelo
-        // indicador de FK do cabecalho e pelo popup de metadados.
+    /**
+     * Resolver de metadados (PK/FK/indices/comentario) desta grade
+     * especifica — guardado como client property ANTES de instalar os
+     * renderers para que AbstractTypedCellRenderer consiga destacar colunas
+     * que sao chave primaria/estrangeira de verdade (ver
+     * RendererFactory#KEY_METADATA_RESOLVER), o mesmo resolver usado pelo
+     * indicador de FK do cabecalho e pelo popup de metadados.
+     */
+    private ColumnMetadataResolver installRenderers(ResultTableModel model, ConnectionManager connectionManager,
+            String schema, TableMetadataCache metadataCache) {
         ColumnMetadataResolver resolver = new ColumnMetadataResolver(metadataCache, connectionManager, schema);
         table.putClientProperty(RendererFactory.KEY_METADATA_RESOLVER, resolver);
         RendererFactory.installOn(table, model);
+        return resolver;
+    }
 
-        this.sorter = new ColumnSorter(table);
-
-        ColumnHeaderRenderer.MetadataSource metadataSource =
-                col -> resolver.resolve(model, col, () -> table.getTableHeader().repaint());
-
-        this.selection = SelectionManager.install(table);
-
-        // Resumo de selecao (contagem + soma): ouve os DOIS modelos de
-        // selecao (linha E coluna) separadamente — um arrasto horizontal
-        // dentro de uma unica linha, por exemplo, muda so o modelo de
-        // coluna, nunca o de linha (ver SelectionManager#installBodyMouseHandling),
-        // entao ouvir so um dos dois deixaria casos assim sem atualizar.
+    /**
+     * Resumo de selecao (contagem + soma): ouve os DOIS modelos de selecao
+     * (linha E coluna) separadamente — um arrasto horizontal dentro de uma
+     * unica linha, por exemplo, muda so o modelo de coluna, nunca o de linha
+     * (ver SelectionManager#installBodyMouseHandling), entao ouvir so um dos
+     * dois deixaria casos assim sem atualizar.
+     */
+    private void installSelectionSummaryListeners() {
         javax.swing.event.ListSelectionListener selectionSummaryListener = e -> {
             if (!e.getValueIsAdjusting()) {
                 updateSelectionSummary();
@@ -189,16 +217,11 @@ final class ResultGrid extends JPanel {
         };
         table.getSelectionModel().addListSelectionListener(selectionSummaryListener);
         table.getColumnModel().getSelectionModel().addListSelectionListener(selectionSummaryListener);
+    }
 
-        JComponent corner = RowNumberGutter.corner();
-        this.headerRenderer = new ColumnHeaderRenderer(sorter);
-        JTableHeader header = ResultTableHeader.install(table, sorter, selection, metadataSource, headerRenderer);
-        applyHeaderHeight(header, scale);
-        selection.installCorner(corner, this::persistLayout);
-
-        this.fingerprint = GridPreferences.fingerprint(columnNames(model));
-        applyPersistedLayoutOrAutoFit(model);
-
+    private void wireContextMenusAndScroll(ResultTableModel model, ConnectionManager connectionManager,
+            String schema, TableMetadataCache metadataCache, Runnable exportExcel, IntUnaryOperator scale,
+            ColumnHeaderRenderer.MetadataSource metadataSource, JTableHeader header, JComponent corner) {
         ResultContextMenu.FilterController filterController = new ResultContextMenu.FilterController() {
             @Override
             public void filterByValue(int modelColumn, String value) {

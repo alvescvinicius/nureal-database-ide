@@ -206,7 +206,31 @@ public class SqlEditorPane extends JPanel {
         this.schemaSupplier = schemaSupplier;
         this.connectionNameSupplier = connectionNameSupplier;
         this.onOpenObject = onOpenObject;
-        textArea = new RSyntaxTextArea(20, 80) {
+        this.textArea = buildTextArea();
+        // Ligado JA AQUI (antes de qualquer setText(sql) que o chamador venha
+        // a fazer pra carregar o conteudo inicial da aba) — MainWindow chama
+        // discardUndoHistory() logo depois de carregar o SQL salvo, pra esse
+        // carregamento inicial nao entrar no historico de desfazer (ver
+        // MainWindow#addQueryTab).
+        this.undoManager = new EditorUndoManager(textArea);
+        configureTextAreaAppearance(fontFamily);
+        installAutocomplete(provider);
+        bindRunAndFormatShortcuts(onRun);
+        bindFindReplaceShortcuts();
+        bindCaseShortcuts();
+        bindUndoRedoShortcuts();
+        bindZoomShortcuts();
+        bindNavigationShortcuts(onNavigateBack);
+
+        RTextScrollPane scroll = buildScrollPane();
+        add(buildBreadcrumbBar(onRun, onHistory, onToggleExpand, onMoreOptions), BorderLayout.NORTH);
+        add(scroll, BorderLayout.CENTER);
+        add(buildFindBar(), BorderLayout.SOUTH);
+        installBreadcrumbSync(textArea);
+    }
+
+    private RSyntaxTextArea buildTextArea() {
+        RSyntaxTextArea area = new RSyntaxTextArea(20, 80) {
             private static final long serialVersionUID = 1L;
 
             @Override
@@ -215,7 +239,7 @@ public class SqlEditorPane extends JPanel {
                 return (hit != null) ? tooltipHtmlFor(hit) : null;
             }
         };
-        javax.swing.ToolTipManager.sharedInstance().registerComponent(textArea);
+        javax.swing.ToolTipManager.sharedInstance().registerComponent(area);
         // setSyntaxEditingStyle continua chamado primeiro: e o nome de
         // estilo guardado na PROPRIA RSyntaxTextArea (nao no documento) que
         // o code folding usa pra achar o FoldParser certo (ver SqlFoldParser
@@ -225,17 +249,15 @@ public class SqlEditorPane extends JPanel {
         // deixaria a instancia "conhecer" esta RSyntaxTextArea — ver
         // SqlHighlightTokenMaker#getTokenList para o motivo de precisar
         // disso: negritar aliases usados ANTES do FROM que os define).
-        textArea.setSyntaxEditingStyle(SyntaxConstants.SYNTAX_STYLE_SQL);
-        ((RSyntaxDocument) textArea.getDocument()).setSyntaxStyle(new SqlHighlightTokenMaker(textArea));
-        textArea.setCodeFoldingEnabled(true);
-        textArea.setTabSize(2);
-        textArea.setText("");
-        // Ligado JA AQUI (antes de qualquer setText(sql) que o chamador venha
-        // a fazer pra carregar o conteudo inicial da aba) — MainWindow chama
-        // discardUndoHistory() logo depois de carregar o SQL salvo, pra esse
-        // carregamento inicial nao entrar no historico de desfazer (ver
-        // MainWindow#addQueryTab).
-        this.undoManager = new EditorUndoManager(textArea);
+        area.setSyntaxEditingStyle(SyntaxConstants.SYNTAX_STYLE_SQL);
+        ((RSyntaxDocument) area.getDocument()).setSyntaxStyle(new SqlHighlightTokenMaker(area));
+        area.setCodeFoldingEnabled(true);
+        area.setTabSize(2);
+        area.setText("");
+        return area;
+    }
+
+    private void configureTextAreaAppearance(String fontFamily) {
         textArea.setFont(pickEditorFont(fontFamily, BASE_FONT_SIZE));
         // Nomes de tabela/view/procedure/alias (ver SqlHighlightTokenMaker,
         // que os reclassifica para DATA_TYPE) devem ficar em NEGRITO, mas
@@ -270,7 +292,9 @@ public class SqlEditorPane extends JPanel {
         // biblioteca) pelo nosso, ligado ao EditorUndoManager — sem isso,
         // clique direito e Ctrl+Z desfariam coisas diferentes.
         textArea.setComponentPopupMenu(buildEditorPopupMenu());
+    }
 
+    private void installAutocomplete(SqlCompletionProvider provider) {
         AutoCompletion ac = new AutoCompletion(provider);
         ac.setAutoActivationEnabled(true);
         ac.setAutoActivationDelay(200);
@@ -279,8 +303,10 @@ public class SqlEditorPane extends JPanel {
         // (clique, Enter ou Ctrl+Espaco), para nao atrapalhar a digitacao.
         ac.setAutoCompleteSingleChoices(false);
         ac.install(textArea);
+    }
 
-        // Executa: Ctrl+Enter (preferido) e F5
+    /** Executa: Ctrl+Enter (preferido) e F5. Ctrl+Shift+F formata (beautifier). */
+    private void bindRunAndFormatShortcuts(Runnable onRun) {
         textArea.getActionMap().put("run-sql", new AbstractAction() {
             @Override
             public void actionPerformed(ActionEvent e) {
@@ -291,7 +317,6 @@ public class SqlEditorPane extends JPanel {
                 KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, InputEvent.CTRL_DOWN_MASK), "run-sql");
         textArea.getInputMap().put(KeyStroke.getKeyStroke(KeyEvent.VK_F5, 0), "run-sql");
 
-        // Ctrl+Shift+F formata (beautifier)
         textArea.getInputMap().put(KeyStroke.getKeyStroke("control shift F"), "format-sql");
         textArea.getActionMap().put("format-sql", new AbstractAction() {
             @Override
@@ -299,13 +324,17 @@ public class SqlEditorPane extends JPanel {
                 formatText();
             }
         });
+    }
 
-        // Ctrl+F / Ctrl+H abrem a MESMA barra (localizar + substituir ja
-        // aparecem juntos, sem aba separada) — mas cada um foca o campo que
-        // o usuario espera pelo atalho: Ctrl+F -> "Localizar", Ctrl+H ->
-        // "Substituir" (convencao de Word/VS Code/etc.). Antes os dois
-        // focavam sempre "Localizar", entao Ctrl+H nao se comportava
-        // diferente de Ctrl+F — corrigido aqui.
+    /**
+     * Ctrl+F / Ctrl+H abrem a MESMA barra (localizar + substituir ja
+     * aparecem juntos, sem aba separada) — mas cada um foca o campo que o
+     * usuario espera pelo atalho: Ctrl+F -> "Localizar", Ctrl+H ->
+     * "Substituir" (convencao de Word/VS Code/etc.). Antes os dois focavam
+     * sempre "Localizar", entao Ctrl+H nao se comportava diferente de Ctrl+F
+     * — corrigido aqui.
+     */
+    private void bindFindReplaceShortcuts() {
         AbstractAction showFind = new AbstractAction() {
             @Override
             public void actionPerformed(ActionEvent e) {
@@ -322,8 +351,10 @@ public class SqlEditorPane extends JPanel {
         textArea.getInputMap().put(KeyStroke.getKeyStroke("control H"), "show-replace");
         textArea.getActionMap().put("show-find", showFind);
         textArea.getActionMap().put("show-replace", showReplace);
+    }
 
-        // Caixa: Ctrl+U / Ctrl+Shift+U -> MAIUSCULAS ; Ctrl+L / Ctrl+Shift+L -> minusculas
+    /** Caixa: Ctrl+U / Ctrl+Shift+U -> MAIUSCULAS ; Ctrl+L / Ctrl+Shift+L -> minusculas. */
+    private void bindCaseShortcuts() {
         AbstractAction toUpper = new AbstractAction() {
             @Override
             public void actionPerformed(ActionEvent e) {
@@ -342,17 +373,38 @@ public class SqlEditorPane extends JPanel {
         textArea.getInputMap().put(KeyStroke.getKeyStroke("control shift U"), "to-upper");
         textArea.getInputMap().put(KeyStroke.getKeyStroke("control L"), "to-lower");
         textArea.getInputMap().put(KeyStroke.getKeyStroke("control shift L"), "to-lower");
+    }
 
-        // Desfazer/Refazer: Ctrl+Z / Ctrl+Y (Ctrl+Shift+Z como alias comum de
-        // "refazer", igual boa parte dos editores) passam a chamar o
-        // EditorUndoManager PROPRIO (ver campo undoManager), nao o
-        // undo/redo padrao do RSyntaxTextArea — o padrao da biblioteca
-        // desfaz LETRA POR LETRA (uma edicao por chamada de
-        // insertString/remove do Document), nunca o "grupo" que o usuario
-        // espera ao digitar uma palavra/frase de uma vez (ver javadoc de
-        // EditorUndoManager). Registrado tanto no InputMap/ActionMap quanto
-        // no KeyListener bruto abaixo, pelo MESMO motivo do Ctrl+U/Ctrl+L
-        // (ver comentario logo abaixo).
+    /**
+     * Desfazer/Refazer: Ctrl+Z / Ctrl+Y (Ctrl+Shift+Z como alias comum de
+     * "refazer", igual boa parte dos editores) passam a chamar o
+     * EditorUndoManager PROPRIO (ver campo undoManager), nao o undo/redo
+     * padrao do RSyntaxTextArea — o padrao da biblioteca desfaz LETRA POR
+     * LETRA (uma edicao por chamada de insertString/remove do Document),
+     * nunca o "grupo" que o usuario espera ao digitar uma palavra/frase de
+     * uma vez (ver javadoc de EditorUndoManager). Registrado tanto no
+     * InputMap/ActionMap quanto no KeyListener bruto abaixo, pelo MESMO
+     * motivo do Ctrl+U/Ctrl+L (ver comentario logo abaixo).
+     * <p>
+     * Reforco: os bindings de InputMap/ActionMap acima as vezes NAO
+     * disparavam (usuario relatou Ctrl+U/Ctrl+L sem nenhum efeito numa
+     * selecao grande — e depois, Ctrl+Z "nao funcionando direito" e perdendo
+     * digitacao). Causa provavel: o Swing notifica TODOS os KeyListener's
+     * registrados no editor (inclusive o da biblioteca de autocomplete,
+     * instalada via {@link #installAutocomplete}) ANTES de processar os key
+     * bindings do InputMap — se qualquer um deles consumir o evento
+     * (e.consume()) por algum motivo proprio, o binding de InputMap
+     * simplesmente nunca chega a rodar, sem erro nenhum. Um KeyListener
+     * proprio, registrado diretamente, sempre RODA (listeners nao impedem
+     * uns aos outros de serem chamados so por consumir o evento) —
+     * chamando as acoes daqui direto, os atalhos funcionam independente do
+     * que mais estiver escutando teclas no editor. Ctrl+V/Ctrl+X tambem
+     * entram aqui (e nao so no InputMap padrao) pra sempre passar por
+     * {@link EditorUndoManager#runAsSingleEdit}, garantindo colar/recortar
+     * como UMA operacao propria no historico (nunca misturada com digitacao
+     * ao redor).
+     */
+    private void bindUndoRedoShortcuts() {
         textArea.getActionMap().put("nureal-undo", new AbstractAction() {
             @Override
             public void actionPerformed(ActionEvent e) {
@@ -369,24 +421,6 @@ public class SqlEditorPane extends JPanel {
         textArea.getInputMap().put(KeyStroke.getKeyStroke("control Y"), "nureal-redo");
         textArea.getInputMap().put(KeyStroke.getKeyStroke("control shift Z"), "nureal-redo");
 
-        // Reforco: os bindings de InputMap/ActionMap acima as vezes NAO
-        // disparavam (usuario relatou Ctrl+U/Ctrl+L sem nenhum efeito numa
-        // selecao grande — e depois, Ctrl+Z "nao funcionando direito" e
-        // perdendo digitacao). Causa provavel: o Swing notifica TODOS os
-        // KeyListener's registrados no editor (inclusive o da biblioteca de
-        // autocomplete, instalada logo acima via ac.install(textArea)) ANTES
-        // de processar os key bindings do InputMap — se qualquer um deles
-        // consumir o evento (e.consume()) por algum motivo proprio, o
-        // binding de InputMap simplesmente nunca chega a rodar, sem erro
-        // nenhum. Um KeyListener proprio, registrado diretamente, sempre
-        // RODA (listeners nao impedem uns aos outros de serem chamados so
-        // por consumir o evento) — chamando as acoes daqui direto, os
-        // atalhos funcionam independente do que mais estiver escutando
-        // teclas no editor. Ctrl+V/Ctrl+X tambem entram aqui (e nao so no
-        // InputMap padrao) pra sempre passar por
-        // {@link EditorUndoManager#runAsSingleEdit}, garantindo colar/
-        // recortar como UMA operacao propria no historico (nunca misturada
-        // com digitacao ao redor).
         textArea.addKeyListener(new java.awt.event.KeyAdapter() {
             @Override
             public void keyPressed(KeyEvent e) {
@@ -418,8 +452,10 @@ public class SqlEditorPane extends JPanel {
                 }
             }
         });
+    }
 
-        // Zoom: Ctrl + '=' / '+' / numpad+  aumenta; Ctrl + '-' diminui; Ctrl+0 reseta
+    /** Zoom: Ctrl + '=' / '+' / numpad+  aumenta; Ctrl + '-' diminui; Ctrl+0 reseta. */
+    private void bindZoomShortcuts() {
         textArea.getActionMap().put("zoom-in", new AbstractAction() {
             @Override public void actionPerformed(ActionEvent e) { zoom(+1); }
         });
@@ -436,15 +472,19 @@ public class SqlEditorPane extends JPanel {
         textArea.getInputMap().put(KeyStroke.getKeyStroke(KeyEvent.VK_MINUS, ctrl), "zoom-out");
         textArea.getInputMap().put(KeyStroke.getKeyStroke(KeyEvent.VK_SUBTRACT, ctrl), "zoom-out");
         textArea.getInputMap().put(KeyStroke.getKeyStroke(KeyEvent.VK_0, ctrl), "zoom-reset");
+    }
 
-        // Navegacao (secao 8.6 do pedido "Navegacao Inteligente e
-        // Interativa"): F12 = ir para definicao do objeto sob o CURSOR (mesmo
-        // destino do CTRL+Clique da secao 8.3, so que sem precisar do mouse);
-        // ALT+Seta-esquerda = voltar ao objeto anterior no historico mantido
-        // por quem chama (ver #onNavigateBack). CTRL+Hover ja funciona sem
-        // nada extra aqui: o tooltip da secao 8.2 (getToolTipText, ver acima)
-        // aparece em qualquer hover sobre um objeto reconhecido, com ou sem
-        // CTRL pressionado.
+    /**
+     * Navegacao (secao 8.6 do pedido "Navegacao Inteligente e Interativa"):
+     * F12 = ir para definicao do objeto sob o CURSOR (mesmo destino do
+     * CTRL+Clique da secao 8.3, so que sem precisar do mouse); ALT+Seta-
+     * esquerda = voltar ao objeto anterior no historico mantido por quem
+     * chama (ver onNavigateBack). CTRL+Hover ja funciona sem nada extra
+     * aqui: o tooltip da secao 8.2 (getToolTipText, ver buildTextArea)
+     * aparece em qualquer hover sobre um objeto reconhecido, com ou sem
+     * CTRL pressionado.
+     */
+    private void bindNavigationShortcuts(Runnable onNavigateBack) {
         textArea.getActionMap().put("goto-definition", new AbstractAction() {
             @Override
             public void actionPerformed(ActionEvent e) {
@@ -469,7 +509,9 @@ public class SqlEditorPane extends JPanel {
         });
         textArea.getInputMap().put(
                 KeyStroke.getKeyStroke(KeyEvent.VK_LEFT, InputEvent.ALT_DOWN_MASK), "navigate-back");
+    }
 
+    private RTextScrollPane buildScrollPane() {
         RTextScrollPane scroll = new RTextScrollPane(textArea);
         this.scrollPane = scroll;
         scroll.setBorder(BorderFactory.createEmptyBorder());
@@ -486,10 +528,7 @@ public class SqlEditorPane extends JPanel {
                 }
             }
         });
-        add(buildBreadcrumbBar(onRun, onHistory, onToggleExpand, onMoreOptions), BorderLayout.NORTH);
-        add(scroll, BorderLayout.CENTER);
-        add(buildFindBar(), BorderLayout.SOUTH);
-        installBreadcrumbSync(textArea);
+        return scroll;
     }
 
     /**
