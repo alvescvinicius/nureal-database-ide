@@ -97,18 +97,6 @@ final class DdlAssistantDialog {
         new Session(parent, schema, dialect, tableName, details, null, runner, sendToEditor, onSuccess).show();
     }
 
-    /**
-     * Campos COMUNS de uma linha de coluna, capturados ao copiar (Ctrl+C ou
-     * botao "Duplicar") de QUALQUER uma das duas grades da aba Colunas —
-     * "Colunas atuais" (existentes, so leitura de Nome/Chave/Extra) ou
-     * "Colunas novas a adicionar" (Nome/PK/AI editaveis). Nome NAO faz parte
-     * do snapshot — ver javadoc de {@code Session#copiedColumnRow}.
-     */
-    private record ColumnRowSnapshot(
-            String type, String size, boolean nullable, boolean pk, boolean ai, String defaultValue,
-            String comment) {
-    }
-
     private static final String[] TYPES = {
             "VARCHAR", "CHAR", "TEXT", "MEDIUMTEXT", "LONGTEXT",
             "INT", "BIGINT", "SMALLINT", "TINYINT",
@@ -139,18 +127,8 @@ final class DdlAssistantDialog {
         private DefaultTableModel existingColumnsModel; // alter mode: editaveis (MODIFY) + "Remover" (DROP)
         private JTable newColumnsTable; // a mesma tabela de columnsModel — guardada para focar a linha apos "Duplicar"
         private JTable existingColumnsTable; // alter mode: a mesma tabela de existingColumnsModel
-        /**
-         * Ultima linha de coluna COPIADA (Ctrl+C numa das duas grades da aba
-         * Colunas) — ver {@link #snapshotColumnRow} / {@link #pasteAsNewColumn}.
-         * Nome fica de FORA do snapshot de proposito: e o unico campo
-         * obrigatorio que precisa ser diferente em cada coluna (duas colunas
-         * com o mesmo nome nao fazem sentido), entao colar sempre deixa o
-         * Nome em branco, pronto para digitar, com todo o resto ja igual ao
-         * da linha copiada — pedido explicito do usuario ("copie uma linha e
-         * cole como uma nova mantendo os [valores] e mudando apenas o
-         * obrigatorio").
-         */
-        private ColumnRowSnapshot copiedColumnRow;
+        /** Ctrl+C/Ctrl+V/"Duplicar" de uma linha de coluna — ver {@link DdlColumnRowClipboard}. Montado em {@link #buildColumnsTab}. */
+        private DdlColumnRowClipboard columnClipboard;
         private DefaultTableModel fkModel;
         private DefaultTableModel existingFkModel; // alter mode: so "Remover" (DROP FOREIGN KEY)
         private DefaultTableModel indexModel;
@@ -296,7 +274,6 @@ final class DdlAssistantDialog {
                 existingColumnsTable.getColumnModel().getColumn(1)
                         .setCellEditor(new DefaultCellEditor(new JComboBox<>(TYPES)));
                 existingColumnsTable.putClientProperty("terminateEditOnFocusLost", Boolean.TRUE);
-                bindCopyColumnRow(existingColumnsTable);
                 JScrollPane existingScroll = new JScrollPane(existingColumnsTable);
                 existingScroll.setPreferredSize(new Dimension(880, 140));
                 JPanel existingWrap = new JPanel(new BorderLayout(0, 4));
@@ -333,8 +310,16 @@ final class DdlAssistantDialog {
             JTable table = newColumnsTable; // nome curto local, mesmo estilo do resto do metodo
             table.getColumnModel().getColumn(1).setCellEditor(new DefaultCellEditor(new JComboBox<>(TYPES)));
             table.putClientProperty("terminateEditOnFocusLost", Boolean.TRUE);
-            bindCopyColumnRow(table);
-            bindPasteColumnRow(table);
+            // So agora as duas grades/modelos existem (a de "Colunas atuais" e
+            // opcional, so no modo alterar) — o clipboard precisa dos dois pra
+            // reconhecer de qual grade uma linha copiada veio (ver
+            // DdlColumnRowClipboard#snapshot).
+            columnClipboard = new DdlColumnRowClipboard(columnsModel, existingColumnsModel, newColumnsTable, alterMode);
+            if (existingColumnsTable != null) {
+                columnClipboard.bindCopy(existingColumnsTable);
+            }
+            columnClipboard.bindCopy(table);
+            columnClipboard.bindPaste(table);
 
             JButton addRow = new JButton("+ Coluna");
             addRow.addActionListener(a -> {
@@ -350,12 +335,13 @@ final class DdlAssistantDialog {
                     columnsModel.removeRow(rows[i]);
                 }
             });
-            // "Duplicar": mesmo resultado do Ctrl+C + Ctrl+V (ver bindCopyColumnRow/
-            // bindPasteColumnRow), so num unico clique — copia a linha selecionada
-            // em QUALQUER uma das duas grades (esta, ou "Colunas atuais" no modo
-            // alterar) e cola como uma coluna nova, com tudo igual exceto o Nome
-            // (em branco, unico campo obrigatorio que precisa ser diferente).
-            // Descoberta mais facil que os atalhos de teclado pra quem nao usa.
+            // "Duplicar": mesmo resultado do Ctrl+C + Ctrl+V (ver
+            // DdlColumnRowClipboard#bindCopy/#bindPaste), so num unico clique —
+            // copia a linha selecionada em QUALQUER uma das duas grades (esta,
+            // ou "Colunas atuais" no modo alterar) e cola como uma coluna
+            // nova, com tudo igual exceto o Nome (em branco, unico campo
+            // obrigatorio que precisa ser diferente). Descoberta mais facil
+            // que os atalhos de teclado pra quem nao usa.
             JButton duplicateRow = new JButton("Duplicar");
             duplicateRow.setToolTipText(
                     "Copia a linha selecionada (aqui ou em \"Colunas atuais\") como uma coluna nova — "
@@ -363,9 +349,9 @@ final class DdlAssistantDialog {
             duplicateRow.addActionListener(a -> {
                 stopEditing(table);
                 if (table.getSelectedRow() >= 0) {
-                    duplicateColumnRow(table);
+                    columnClipboard.duplicate(table);
                 } else if (existingColumnsTable != null && existingColumnsTable.getSelectedRow() >= 0) {
-                    duplicateColumnRow(existingColumnsTable);
+                    columnClipboard.duplicate(existingColumnsTable);
                 } else {
                     JOptionPane.showMessageDialog(dialog,
                             "Selecione uma linha (nesta tabela ou em \"Colunas atuais\") para duplicar.",
@@ -1074,124 +1060,6 @@ final class DdlAssistantDialog {
             if (table.isEditing()) {
                 table.getCellEditor().stopCellEditing();
             }
-        }
-
-        /**
-         * Liga Ctrl+C, na tabela informada, a "copiar esta linha" — NAO o
-         * Ctrl+C padrao do JTable (que copiaria texto cru para a area de
-         * transferencia do SISTEMA operacional). O alvo aqui e
-         * {@link #copiedColumnRow}, para colar como uma coluna NOVA em
-         * qualquer uma das duas grades desta aba (ver
-         * {@link #bindPasteColumnRow} / botao "Duplicar" em
-         * {@link #buildColumnsTab}).
-         */
-        private void bindCopyColumnRow(JTable table) {
-            table.getInputMap(JComponent.WHEN_FOCUSED).put(
-                    KeyStroke.getKeyStroke(KeyEvent.VK_C, InputEvent.CTRL_DOWN_MASK), "ddl-copy-column-row");
-            table.getActionMap().put("ddl-copy-column-row", new AbstractAction() {
-                private static final long serialVersionUID = 1L;
-
-                @Override
-                public void actionPerformed(ActionEvent e) {
-                    stopEditing(table);
-                    ColumnRowSnapshot snap = snapshotColumnRow(table, table.getSelectedRow());
-                    if (snap != null) {
-                        copiedColumnRow = snap;
-                    }
-                }
-            });
-        }
-
-        /** Liga Ctrl+V, na grade de colunas NOVAS, a "colar {@link #copiedColumnRow} como uma coluna nova". */
-        private void bindPasteColumnRow(JTable table) {
-            table.getInputMap(JComponent.WHEN_FOCUSED).put(
-                    KeyStroke.getKeyStroke(KeyEvent.VK_V, InputEvent.CTRL_DOWN_MASK), "ddl-paste-column-row");
-            table.getActionMap().put("ddl-paste-column-row", new AbstractAction() {
-                private static final long serialVersionUID = 1L;
-
-                @Override
-                public void actionPerformed(ActionEvent e) {
-                    if (copiedColumnRow != null) {
-                        pasteAsNewColumn(copiedColumnRow);
-                    }
-                }
-            });
-        }
-
-        /** Copia a linha selecionada de {@code source} e ja cola direto como coluna nova — usado pelo botao "Duplicar". */
-        private void duplicateColumnRow(JTable source) {
-            ColumnRowSnapshot snap = snapshotColumnRow(source, source.getSelectedRow());
-            if (snap != null) {
-                // Guarda tambem em copiedColumnRow: um Ctrl+V logo depois repete a
-                // mesma colagem, sem precisar copiar de novo.
-                copiedColumnRow = snap;
-                pasteAsNewColumn(snap);
-            }
-        }
-
-        /**
-         * Le os campos comuns (ver {@link ColumnRowSnapshot}) da linha
-         * {@code row} de {@code table} — reconhece se veio da grade "Colunas
-         * atuais" ({@link #existingColumnsModel}: colunas Chave/Extra viram
-         * PK/AI por INFERENCIA, "PRI" e "auto_increment") ou da grade
-         * "Colunas novas" ({@link #columnsModel}: PK/AI ja sao as proprias
-         * colunas). {@code null} se a linha nao existir ou a tabela nao for
-         * uma das duas conhecidas.
-         */
-        private ColumnRowSnapshot snapshotColumnRow(JTable table, int row) {
-            if (row < 0 || row >= table.getRowCount()) {
-                return null;
-            }
-            if (table.getModel() == existingColumnsModel) {
-                String type = str(existingColumnsModel.getValueAt(row, 1));
-                String size = str(existingColumnsModel.getValueAt(row, 2));
-                boolean nullable = bool(existingColumnsModel.getValueAt(row, 3));
-                String chave = str(existingColumnsModel.getValueAt(row, 4));
-                String extra = str(existingColumnsModel.getValueAt(row, 5));
-                String def = str(existingColumnsModel.getValueAt(row, 6));
-                String comment = str(existingColumnsModel.getValueAt(row, 7));
-                boolean pk = "PRI".equalsIgnoreCase(chave.trim());
-                boolean ai = extra.toLowerCase(Locale.ROOT).contains("auto_increment");
-                return new ColumnRowSnapshot(type, size, nullable, pk, ai, def, comment);
-            }
-            if (table.getModel() == columnsModel) {
-                String type = str(columnsModel.getValueAt(row, 1));
-                String size = str(columnsModel.getValueAt(row, 2));
-                boolean nullable = bool(columnsModel.getValueAt(row, 3));
-                boolean pk = bool(columnsModel.getValueAt(row, 4));
-                boolean ai = bool(columnsModel.getValueAt(row, 5));
-                String def = str(columnsModel.getValueAt(row, 6));
-                String comment = str(columnsModel.getValueAt(row, 7));
-                return new ColumnRowSnapshot(type, size, nullable, pk, ai, def, comment);
-            }
-            return null;
-        }
-
-        /**
-         * Acrescenta {@code snap} como uma linha NOVA em {@link #columnsModel}
-         * (grade "Colunas novas a adicionar"), com o Nome em branco — ver
-         * javadoc de {@link #copiedColumnRow} — e ja move selecao/edicao para
-         * a celula de Nome dessa linha, pronta pra digitar: o unico campo que
-         * o usuario ainda precisa preencher. No modo alterar, PK/AI sempre
-         * saem falsos — a propria grade ja nao oferece essas duas colunas
-         * para colunas novas em ALTER TABLE (ver {@code isCellEditable} do
-         * model criado em {@link #buildColumnsTab}).
-         */
-        private void pasteAsNewColumn(ColumnRowSnapshot snap) {
-            boolean pk = !alterMode && snap.pk();
-            boolean ai = !alterMode && snap.ai();
-            columnsModel.addRow(new Object[] {
-                    "", snap.type(), snap.size(), snap.nullable(), pk, ai, snap.defaultValue(), snap.comment() });
-            int newRow = columnsModel.getRowCount() - 1;
-            SwingUtilities.invokeLater(() -> {
-                newColumnsTable.requestFocusInWindow();
-                newColumnsTable.setRowSelectionInterval(newRow, newRow);
-                newColumnsTable.editCellAt(newRow, 0);
-                Component editor = newColumnsTable.getEditorComponent();
-                if (editor != null) {
-                    editor.requestFocusInWindow();
-                }
-            });
         }
 
         private static String str(Object v) {
