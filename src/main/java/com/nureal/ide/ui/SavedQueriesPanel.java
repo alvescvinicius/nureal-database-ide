@@ -3,6 +3,7 @@ package com.nureal.ide.ui;
 import com.nureal.ide.core.log.AppLogger;
 import com.nureal.ide.core.queries.SavedQueryStore;
 import com.nureal.ide.core.queries.SavedQueryStore.Query;
+import com.nureal.ide.ui.components.NSearchField;
 
 import javax.swing.BorderFactory;
 import javax.swing.DefaultListCellRenderer;
@@ -15,11 +16,8 @@ import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
-import javax.swing.JTextField;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingConstants;
-import javax.swing.event.DocumentEvent;
-import javax.swing.event.DocumentListener;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
@@ -55,7 +53,7 @@ public class SavedQueriesPanel extends JPanel {
     private final Consumer<Query> openAction;
     private final DefaultListModel<Query> model = new DefaultListModel<>();
     private final JList<Query> list = new JList<>(model);
-    private final JTextField search = new JTextField();
+    private final NSearchField search = new NSearchField("Buscar por titulo ou SQL...");
 
     private List<Query> all = new ArrayList<>();
     private String activeConnection; // null = workspace "sem conexao" (SCRATCH)
@@ -94,24 +92,7 @@ public class SavedQueriesPanel extends JPanel {
         // "HISTORICO" — ponto unico, sem copia colada.
         JLabel title = Typography.sectionHeader("QUERIES SALVAS");
 
-        search.putClientProperty("JTextField.placeholderText", "Buscar por titulo ou SQL...");
-        search.putClientProperty("JTextField.showClearButton", true);
-        search.getDocument().addDocumentListener(new DocumentListener() {
-            @Override
-            public void insertUpdate(DocumentEvent e) {
-                applyFilter();
-            }
-
-            @Override
-            public void removeUpdate(DocumentEvent e) {
-                applyFilter();
-            }
-
-            @Override
-            public void changedUpdate(DocumentEvent e) {
-                applyFilter();
-            }
-        });
+        search.onTextChange(this::applyFilter);
 
         JPanel header = new JPanel(new BorderLayout(0, 6));
         header.setOpaque(false);

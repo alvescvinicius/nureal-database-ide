@@ -40,12 +40,9 @@ import javax.swing.JScrollPane;
 import javax.swing.JTabbedPane;
 import javax.swing.JTable;
 import javax.swing.JTextArea;
-import javax.swing.JTextField;
 import javax.swing.JTree;
 import javax.swing.KeyStroke;
 import javax.swing.SwingWorker;
-import javax.swing.event.DocumentEvent;
-import javax.swing.event.DocumentListener;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.TableColumn;
 import javax.swing.tree.DefaultMutableTreeNode;
@@ -66,6 +63,7 @@ import com.nureal.ide.core.metadata.model.TableDetails;
 import com.nureal.ide.core.metadata.model.TableInfo;
 import com.nureal.ide.core.sql.SqlTypeKind;
 import com.nureal.ide.core.sql.TableAliasGenerator;
+import com.nureal.ide.ui.components.NSearchField;
 
 /**
  * Explorador de objetos do banco: arvore de tabelas/views/procedures/
@@ -85,7 +83,7 @@ final class ObjectExplorerController {
 	private final MainWindow owner;
 
 	private JTree objectTree;
-	private JTextField objectSearch;
+	private NSearchField objectSearch;
 	private JComponent objectBrowserPanel;
 
 	/**
@@ -149,26 +147,9 @@ final class ObjectExplorerController {
 		JScrollPane sp = new JScrollPane(objectTree);
 		sp.setBorder(BorderFactory.createEmptyBorder());
 
-		objectSearch = new JTextField();
-		objectSearch.putClientProperty("JTextField.placeholderText", "Buscar objeto...");
-		objectSearch.putClientProperty("JTextField.showClearButton", true);
+		objectSearch = new NSearchField("Buscar objeto...");
 		objectSearch.setEnabled(false);
-		objectSearch.getDocument().addDocumentListener(new DocumentListener() {
-			@Override
-			public void insertUpdate(DocumentEvent e) {
-				applyObjectFilter();
-			}
-
-			@Override
-			public void removeUpdate(DocumentEvent e) {
-				applyObjectFilter();
-			}
-
-			@Override
-			public void changedUpdate(DocumentEvent e) {
-				applyObjectFilter();
-			}
-		});
+		objectSearch.onTextChange(this::applyObjectFilter);
 
 		JButton switchSchemaButton = Buttons.iconButton(IconType.DATABASE, 13, () -> GridTheme.MUTED_TEXT);
 		switchSchemaButton.setToolTipText("Trocar esquema / ver todos os esquemas");

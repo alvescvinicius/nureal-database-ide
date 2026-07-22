@@ -1,6 +1,7 @@
 package com.nureal.ide.ui;
 
 import com.nureal.ide.core.dialect.DatabaseDialect;
+import com.nureal.ide.ui.components.NSearchField;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
@@ -12,10 +13,7 @@ import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTable;
 import javax.swing.JTabbedPane;
-import javax.swing.JTextField;
 import javax.swing.RowFilter;
-import javax.swing.event.DocumentEvent;
-import javax.swing.event.DocumentListener;
 import javax.swing.table.DefaultTableModel;
 import javax.swing.table.TableRowSorter;
 import java.awt.BorderLayout;
@@ -99,30 +97,11 @@ final class EventsReplicationDialog {
             TableRowSorter<DefaultTableModel> sorter = new TableRowSorter<>(eventsModel);
             table.setRowSorter(sorter);
 
-            JTextField search = new JTextField();
-            search.putClientProperty("JTextField.placeholderText", "Filtrar por nome...");
-            search.putClientProperty("JTextField.showClearButton", true);
-            search.getDocument().addDocumentListener(new DocumentListener() {
-                @Override
-                public void insertUpdate(DocumentEvent e) {
-                    apply();
-                }
-
-                @Override
-                public void removeUpdate(DocumentEvent e) {
-                    apply();
-                }
-
-                @Override
-                public void changedUpdate(DocumentEvent e) {
-                    apply();
-                }
-
-                private void apply() {
-                    String text = search.getText().trim();
-                    sorter.setRowFilter(text.isEmpty() ? null
-                            : RowFilter.regexFilter("(?i)" + java.util.regex.Pattern.quote(text), 0));
-                }
+            NSearchField search = new NSearchField("Filtrar por nome...");
+            search.onTextChange(() -> {
+                String text = search.getText().trim();
+                sorter.setRowFilter(text.isEmpty() ? null
+                        : RowFilter.regexFilter("(?i)" + java.util.regex.Pattern.quote(text), 0));
             });
 
             JButton refresh = new JButton("Atualizar");

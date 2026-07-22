@@ -1,6 +1,7 @@
 package com.nureal.ide.ui;
 
 import com.nureal.ide.core.connection.ConnectionManager;
+import com.nureal.ide.ui.components.NSearchField;
 
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
@@ -8,11 +9,8 @@ import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTable;
-import javax.swing.JTextField;
 import javax.swing.RowSorter;
 import javax.swing.SortOrder;
-import javax.swing.event.DocumentEvent;
-import javax.swing.event.DocumentListener;
 import javax.swing.table.JTableHeader;
 import java.awt.BorderLayout;
 import java.awt.Dimension;
@@ -55,9 +53,9 @@ final class ResultGrid extends JPanel {
     private final ColumnSorter sorter;
     private final String fingerprint;
     private final JComboBox<String> filterColumnBox = new JComboBox<>();
-    private final JTextField filterField = new JTextField(20);
+    private final NSearchField filterField = new NSearchField("Filtrar...  (ex: >= 2026-06-01)");
     /** Campo curto e independente do filtro de valores: so navega ate a coluna, nunca restringe linhas (ver {@link #searchColumn}). */
-    private final JTextField columnSearchField = new JTextField(10);
+    private final NSearchField columnSearchField = new NSearchField("Buscar coluna...");
     private final GridEditController editController;
     private final ColumnHeaderRenderer headerRenderer;
     private final SelectionManager selection;
@@ -491,8 +489,7 @@ final class ResultGrid extends JPanel {
         for (int c = 0; c < model.getColumnCount(); c++) {
             filterColumnBox.addItem(model.getColumnName(c));
         }
-        filterField.putClientProperty("JTextField.placeholderText", "Filtrar...  (ex: >= 2026-06-01)");
-        filterField.putClientProperty("JTextField.showClearButton", true);
+        filterField.setColumns(20);
         filterField.setToolTipText("<html>Filtro inteligente:<br>"
                 + "&bull; texto: <b>contem</b> (ex: silva)<br>"
                 + "&bull; operadores: <b>&gt;= &lt;= &gt; &lt; = &lt;&gt;</b> (ex: &gt;= 2026-06-01, &gt; 100)<br>"
@@ -505,11 +502,7 @@ final class ResultGrid extends JPanel {
             int modelColumn = filterColumnBox.getSelectedIndex() - 1;
             sorter.rowSorter().setRowFilter(SmartCellFilter.build(filterField.getText(), modelColumn));
         };
-        filterField.getDocument().addDocumentListener(new DocumentListener() {
-            @Override public void insertUpdate(DocumentEvent e) { apply.run(); }
-            @Override public void removeUpdate(DocumentEvent e) { apply.run(); }
-            @Override public void changedUpdate(DocumentEvent e) { apply.run(); }
-        });
+        filterField.onTextChange(apply);
         // O combo de colunas ja funciona como "busca de coluna" (JComboBox
         // pesquisa por digitacao nativamente): alem de restringir o filtro a
         // ela, leva a visao ate a coluna escolhida e marca seu cabecalho —
@@ -524,14 +517,9 @@ final class ResultGrid extends JPanel {
         // tecla, localiza a coluna cujo nome mais se aproxima do texto
         // digitado e rola/realca o cabecalho dela — pedido explicito do
         // usuario para tabelas com muitas colunas.
-        columnSearchField.putClientProperty("JTextField.placeholderText", "Buscar coluna...");
-        columnSearchField.putClientProperty("JTextField.showClearButton", true);
+        columnSearchField.setColumns(10);
         columnSearchField.setToolTipText("Digite parte do nome da coluna: a grade rola ate ela e destaca o cabecalho.");
-        columnSearchField.getDocument().addDocumentListener(new DocumentListener() {
-            @Override public void insertUpdate(DocumentEvent e) { searchColumn(); }
-            @Override public void removeUpdate(DocumentEvent e) { searchColumn(); }
-            @Override public void changedUpdate(DocumentEvent e) { searchColumn(); }
-        });
+        columnSearchField.onTextChange(this::searchColumn);
 
         JPanel bar = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 3));
         JLabel columnLabel = new JLabel("Coluna:");

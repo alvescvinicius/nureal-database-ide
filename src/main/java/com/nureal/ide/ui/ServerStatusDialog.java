@@ -14,14 +14,12 @@ import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTabbedPane;
 import javax.swing.JTable;
-import javax.swing.JTextField;
 import javax.swing.RowFilter;
-import javax.swing.event.DocumentEvent;
-import javax.swing.event.DocumentListener;
 import javax.swing.table.DefaultTableModel;
 import javax.swing.table.TableRowSorter;
 
 import com.nureal.ide.core.dialect.DatabaseDialect;
+import com.nureal.ide.ui.components.NSearchField;
 
 /**
  * Visor de variaveis ({@code SHOW GLOBAL VARIABLES}) e status
@@ -84,30 +82,11 @@ final class ServerStatusDialog {
             TableRowSorter<DefaultTableModel> sorter = new TableRowSorter<>(model);
             table.setRowSorter(sorter);
 
-            JTextField search = new JTextField();
-            search.putClientProperty("JTextField.placeholderText", "Filtrar por nome...");
-            search.putClientProperty("JTextField.showClearButton", true);
-            search.getDocument().addDocumentListener(new DocumentListener() {
-                @Override
-                public void insertUpdate(DocumentEvent e) {
-                    applyFilter();
-                }
-
-                @Override
-                public void removeUpdate(DocumentEvent e) {
-                    applyFilter();
-                }
-
-                @Override
-                public void changedUpdate(DocumentEvent e) {
-                    applyFilter();
-                }
-
-                private void applyFilter() {
-                    String text = search.getText().trim();
-                    sorter.setRowFilter(text.isEmpty() ? null
-                            : RowFilter.regexFilter("(?i)" + java.util.regex.Pattern.quote(text), 0));
-                }
+            NSearchField search = new NSearchField("Filtrar por nome...");
+            search.onTextChange(() -> {
+                String text = search.getText().trim();
+                sorter.setRowFilter(text.isEmpty() ? null
+                        : RowFilter.regexFilter("(?i)" + java.util.regex.Pattern.quote(text), 0));
             });
 
             JButton refresh = new JButton("Atualizar");

@@ -2,6 +2,7 @@ package com.nureal.ide.ui;
 
 import com.nureal.ide.core.metadata.model.SchemaForeignKey;
 import com.nureal.ide.core.metadata.model.TableInfo;
+import com.nureal.ide.ui.components.NSearchField;
 
 import javax.imageio.ImageIO;
 import javax.swing.BorderFactory;
@@ -12,9 +13,6 @@ import javax.swing.JFileChooser;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
-import javax.swing.JTextField;
-import javax.swing.event.DocumentEvent;
-import javax.swing.event.DocumentListener;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.BorderLayout;
 import java.awt.Component;
@@ -82,29 +80,9 @@ final class ErDiagramWindow {
         }
 
         private JComponent buildToolbar() {
-            JTextField search = new JTextField(16);
-            search.putClientProperty("JTextField.placeholderText", "Buscar tabela...");
-            search.putClientProperty("JTextField.showClearButton", true);
-            search.getDocument().addDocumentListener(new DocumentListener() {
-                @Override
-                public void insertUpdate(DocumentEvent e) {
-                    apply();
-                }
-
-                @Override
-                public void removeUpdate(DocumentEvent e) {
-                    apply();
-                }
-
-                @Override
-                public void changedUpdate(DocumentEvent e) {
-                    apply();
-                }
-
-                private void apply() {
-                    canvas.highlight(search.getText());
-                }
-            });
+            NSearchField search = new NSearchField("Buscar tabela...");
+            search.setColumns(16);
+            search.onTextChange(() -> canvas.highlight(search.getText()));
 
             JLabel count = new JLabel("  " + canvas.tableCount() + " tabela(s), "
                     + canvas.relationshipCount() + " relacionamento(s)");
