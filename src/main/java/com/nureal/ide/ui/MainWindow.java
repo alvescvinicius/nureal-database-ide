@@ -8,7 +8,6 @@ import java.awt.Desktop;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
-import java.awt.Graphics;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
@@ -43,7 +42,6 @@ import javax.swing.AbstractAction;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.ButtonGroup;
-import javax.swing.BoxLayout;
 import javax.swing.DefaultListCellRenderer;
 import javax.swing.Icon;
 import javax.swing.JButton;
@@ -60,7 +58,6 @@ import javax.swing.JOptionPane;
 import javax.swing.JRadioButtonMenuItem;
 import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
-import javax.swing.JProgressBar;
 import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
 import javax.swing.JTabbedPane;
@@ -90,9 +87,7 @@ import com.nureal.ide.core.format.SqlFormatter;
 import com.nureal.ide.core.log.AppLogger;
 import com.nureal.ide.core.metadata.MetadataCache;
 import com.nureal.ide.core.metadata.MetadataService;
-import com.nureal.ide.core.metadata.model.ColumnDetail;
 import com.nureal.ide.core.metadata.model.SchemaInfo;
-import com.nureal.ide.core.metadata.model.TableDetails;
 import com.nureal.ide.core.queries.SavedQueryStore;
 import com.nureal.ide.core.history.ExecutionHistoryStore;
 import com.nureal.ide.core.safety.SqlRiskAnalyzer;
@@ -146,7 +141,7 @@ public class MainWindow extends JFrame {
 	// ObjectTreeCellRenderer/ResultStatusBar).
 	public static final Color ACCENT = new Color(0x1E9147);
 
-	private static final int PAGE_SIZE = 200;
+	static final int PAGE_SIZE = 200;
 	private static final int MAX_TABS = 15;
 
 	private static final String SCRATCH = "(sem conexao)";
@@ -186,7 +181,6 @@ public class MainWindow extends JFrame {
 	private JComponent resultsArea;
 	private JComponent editorAreaPanel;
 	private JComponent toolbarBar;
-	private JButton resultsOrientationButton;
 	private int sidebarLoc = 248;
 	private int resultsLoc = -1;
 
@@ -201,9 +195,8 @@ public class MainWindow extends JFrame {
 	private boolean resultsFocusMode;
 	private boolean resultsFocusHadSidebar;
 	private int resultsFocusPrevDividerLoc = -1;
-	private JTabbedPane resultTabs;
-	private JPanel resultsCards;
 	private final ObjectExplorerController objectExplorer = new ObjectExplorerController(this);
+	private final ResultsAreaController resultsController = new ResultsAreaController(this);
 	private ConnectionsPanel connectionsPanel;
 	private SavedQueriesPanel savedQueriesPanel;
 	private HistoryPanel historyPanel;
@@ -229,27 +222,14 @@ public class MainWindow extends JFrame {
 	private JButton runButton;
 	private JButton saveQueryButton;
 	private JButton themeButton;
-	private JComponent resultsOverlay;
-	private JPanel executingCard;
 	/** Nome da conexao em processo de conectar agora (ver {@link #setConnectingState}), ou null. */
 	private String connectingWorkspaceName;
-	private SwingWorker<List<QueryResult>, Void> runWorker;
-	private volatile Statement runningStatement;
+	SwingWorker<List<QueryResult>, Void> runWorker;
+	volatile Statement runningStatement;
 
 	// Tema ESCURO agora e o padrao de arranque do app (ver App#main) — este
 	// campo so espelha o L&F ja ativo quando a janela e construida.
 	private boolean dark = true;
-	private List<QueryResult> lastResults = new ArrayList<>();
-	private final List<ResultCursor> openCursors = new ArrayList<>();
-	/**
-	 * Ultimo conjunto de resultados de CADA aba de SQL — cada aba tem os
-	 * seus proprios resultados, independentes das outras (ver
-	 * {@code showResultsForActiveEditor}, chamado ao trocar de aba). Uma aba
-	 * sem entrada aqui ainda nao rodou nenhuma query nesta sessao (mostra o
-	 * estado vazio). Entrada removida quando a aba fecha (ver
-	 * {@code closeQueryTab}).
-	 */
-	private final Map<SqlEditorPane, List<QueryResult>> resultsByTab = new LinkedHashMap<>();
 
 	// ---------- Layout flexivel / zoom / modo compacto ----------
 
@@ -273,7 +253,7 @@ public class MainWindow extends JFrame {
 	private final UiPreferences uiPrefsStore = new UiPreferences();
 	private Font baseDefaultFont;
 	private boolean sidebarOnRight = false;
-	private boolean resultsVertical = false;
+	boolean resultsVertical = false;
 	private boolean compactMode = false;
 	private int zoomIndex = UiPreferences.DEFAULT_ZOOM_INDEX;
 	private int rowSpacingIndex = UiPreferences.DEFAULT_ROW_SPACING_INDEX;
@@ -709,7 +689,7 @@ public class MainWindow extends JFrame {
 		add(updateBanner, BorderLayout.NORTH);
 
 		leftSide = buildLeftSide();
-		resultsArea = buildResultsArea();
+		resultsArea = resultsController.buildResultsArea();
 		editorAreaPanel = buildEditorArea();
 
 		centerSplit = new JSplitPane(resultsVertical ? JSplitPane.HORIZONTAL_SPLIT : JSplitPane.VERTICAL_SPLIT,
@@ -1249,7 +1229,7 @@ public class MainWindow extends JFrame {
 	 * {@code #buildResultsArea}). Mesma logica de restaurar SO o que este
 	 * modo mexeu, ver {@link #toggleEditorFocusMode}.
 	 */
-	private void toggleResultsFocusMode() {
+	void toggleResultsFocusMode() {
 		if (!resultsFocusMode) {
 			resultsFocusHadSidebar = leftSide.isVisible();
 			resultsFocusPrevDividerLoc = centerSplit.getDividerLocation();
@@ -1356,7 +1336,7 @@ public class MainWindow extends JFrame {
 	/**
 	 * Alterna entre Resultados embaixo do editor (horizontal) e ao lado (vertical).
 	 */
-	private void toggleResultsOrientation() {
+	void toggleResultsOrientation() {
 		resultsVertical = !resultsVertical;
 		centerSplit.setOrientation(resultsVertical ? JSplitPane.HORIZONTAL_SPLIT : JSplitPane.VERTICAL_SPLIT);
 		centerSplit.setResizeWeight(0.62);
@@ -1364,9 +1344,7 @@ public class MainWindow extends JFrame {
 		centerSplit.setDividerLocation(0.62);
 		centerSplit.revalidate();
 		centerSplit.repaint();
-		if (resultsOrientationButton != null) {
-			updateOrientationToggleIcon(resultsOrientationButton);
-		}
+		resultsController.refreshOrientationIcon();
 		focusEditor();
 		saveUiState();
 		if (statusBar != null) {
@@ -1509,9 +1487,7 @@ public class MainWindow extends JFrame {
 		}
 		// Reconstroi as abas de resultado (tabela, gutter e cabecalho usam
 		// tamanhos fixos definidos na hora da criacao do JTable).
-		if (resultTabs != null && resultTabs.getTabCount() > 0) {
-			showResults(lastResults);
-		}
+		resultsController.reshowIfVisible();
 		if (mainSplit != null) {
 			mainSplit.revalidate();
 			mainSplit.repaint();
@@ -1775,7 +1751,7 @@ public class MainWindow extends JFrame {
 				}
 			} else {
 				scheduleSave();
-				showResultsForActiveEditor();
+				resultsController.showResultsForActiveEditor();
 				updateSaveButtonState();
 			}
 		});
@@ -2075,7 +2051,7 @@ public class MainWindow extends JFrame {
 		// Os resultados dessa aba morrem com ela — nao fazem mais sentido
 		// sem a aba de SQL que os gerou (ver resultsByTab).
 		if (target instanceof SqlEditorPane sep) {
-			resultsByTab.remove(sep);
+			resultsController.forgetTab(sep);
 		}
 		scheduleSave();
 	}
@@ -2141,7 +2117,7 @@ public class MainWindow extends JFrame {
 		for (int i = 0; i < editorTabs.getTabCount(); i++) {
 			Component c = editorTabs.getComponentAt(i);
 			if (c instanceof SqlEditorPane sep) {
-				resultsByTab.remove(sep);
+				resultsController.forgetTab(sep);
 			}
 		}
 		editorTabs.removeAll();
@@ -2169,7 +2145,7 @@ public class MainWindow extends JFrame {
 				if (c instanceof SqlEditorPane sep) {
 					List<QueryResult> saved = savedResults.get(sep.tabId());
 					if (saved != null) {
-						resultsByTab.put(sep, saved);
+						resultsController.rememberTab(sep, saved);
 					}
 				}
 			}
@@ -2182,7 +2158,7 @@ public class MainWindow extends JFrame {
 		// selecionado, o JTabbedPane nao dispara ChangeEvent nenhum, e o
 		// painel de RESULTADOS ficaria mostrando o estado da aba antiga (de
 		// outro workspace/sessao) por engano.
-		showResultsForActiveEditor();
+		resultsController.showResultsForActiveEditor();
 	}
 
 	/**
@@ -2243,7 +2219,7 @@ public class MainWindow extends JFrame {
 				continue;
 			}
 			if (c instanceof SqlEditorPane sep) {
-				List<QueryResult> results = resultsByTab.get(sep);
+				List<QueryResult> results = resultsController.resultsFor(sep);
 				if (results != null) {
 					snapshot.put(sep.tabId(), results);
 				}
@@ -2545,296 +2521,6 @@ public class MainWindow extends JFrame {
 		}
 	}
 
-	/**
-	 * Redesenha o painel de RESULTADOS com o que a aba de SQL atualmente
-	 * selecionada tinha da ULTIMA vez que rodou algo (ver
-	 * {@code resultsByTab}, preenchido em {@code onRun}) — nunca o que outra
-	 * aba rodou. Aba que ainda nao rodou nada nesta sessao: estado vazio.
-	 * Chamado sempre que a selecao de {@code editorTabs} muda para uma aba
-	 * real (ver {@code buildEditorArea}).
-	 */
-	private void showResultsForActiveEditor() {
-		SqlEditorPane editor = currentEditor();
-		List<QueryResult> results = (editor == null) ? null : resultsByTab.get(editor);
-		if (results == null) {
-			lastResults = new ArrayList<>();
-			resultTabs.removeAll();
-			showEmptyState();
-			return;
-		}
-		showResults(results);
-	}
-
-	// ---------- Resultados ----------
-
-	private JComponent buildResultsArea() {
-		resultTabs = new JTabbedPane();
-		resultTabs.putClientProperty("JTabbedPane.tabType", "card");
-		resultTabs.putClientProperty("JTabbedPane.minimumTabWidth", 96);
-		resultTabs.addMouseListener(new MouseAdapter() {
-			@Override
-			public void mousePressed(MouseEvent e) {
-				maybeShowTabMenu(e);
-			}
-
-			@Override
-			public void mouseReleased(MouseEvent e) {
-				maybeShowTabMenu(e);
-			}
-		});
-
-		JPanel tabsPanel = new JPanel(new BorderLayout());
-		tabsPanel.add(resultTabs, BorderLayout.CENTER);
-
-		resultsCards = new JPanel(new CardLayout());
-		resultsCards.add(buildEmptyState(), "empty");
-		resultsCards.add(tabsPanel, "tabs");
-
-		JButton orientationToggle = new JButton();
-		orientationToggle.addActionListener(e -> toggleResultsOrientation());
-		updateOrientationToggleIcon(orientationToggle);
-		// Sem isto, o icone (tipo E cor) so era recalculado quando o PROPRIO
-		// botao era clicado — trocar o tema sem mexer na orientacao deixava
-		// este icone especifico com a cor MUTED_TEXT do tema antigo (mesmo
-		// bug sistemico corrigido nos demais botoes-so-de-icone, ver
-		// Buttons#bindThemedIcon; aqui e manual porque o TIPO do icone
-		// tambem depende de estado, nao so a cor).
-		orientationToggle.addPropertyChangeListener("UI", e -> updateOrientationToggleIcon(orientationToggle));
-		this.resultsOrientationButton = orientationToggle;
-
-		// Atalho para exportar TODOS os resultados abertos (mesma acao do
-		// "Exportar > Exportar todos" no rodape de cada aba de resultado, ver
-		// ResultStatusBar) — so uma segunda porta de entrada pro mesmo
-		// recurso ja existente, pensado pra ficar ao alcance sem precisar
-		// abrir o menu do botao la embaixo. Estilo identico ao restante dos
-		// icones da barra de ferramentas (ver #buildToolbar), pra esta linha
-		// nao parecer "de outro app" dentro da mesma janela.
-		JButton exportAllButton = new JButton();
-		Buttons.bindThemedIcon(exportAllButton, IconType.EXPORT, 14, () -> GridTheme.MUTED_TEXT);
-		exportAllButton.setToolTipText("Exportar todos os resultados abertos (uma aba por resultado)");
-		exportAllButton.addActionListener(e -> exportAll());
-
-		// "Expandir": empurra o divisor central quase todo pro lado dos
-		// resultados e esconde o painel lateral (ver #toggleResultsFocusMode)
-		// — o editor nao some de vez (so fica com uma faixa minima), pra nao
-		// perder o contexto de qual instrucao gerou o resultado. Clicar de
-		// novo (aqui ou no botao espelho do editor) desfaz.
-		JButton expandResultsButton = new JButton();
-		Buttons.bindThemedIcon(expandResultsButton, IconType.EXPAND, 14, () -> GridTheme.MUTED_TEXT);
-		expandResultsButton.setToolTipText("Expandir/recolher resultados (oculta paineis laterais)");
-		expandResultsButton.addActionListener(e -> toggleResultsFocusMode());
-
-		for (JButton btn : new JButton[] { exportAllButton, orientationToggle, expandResultsButton }) {
-			Buttons.styleIconButton(btn);
-		}
-
-		JPanel headerIcons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 3, 0));
-		headerIcons.setOpaque(false);
-		headerIcons.add(exportAllButton);
-		headerIcons.add(orientationToggle);
-		headerIcons.add(expandResultsButton);
-
-		JPanel header = new JPanel(new BorderLayout());
-		header.setOpaque(false);
-		header.add(sectionHeader("RESULTADOS"), BorderLayout.WEST);
-		header.add(headerIcons, BorderLayout.EAST);
-
-		JPanel panel = new JPanel(new BorderLayout(0, 8));
-		panel.setBorder(BorderFactory.createEmptyBorder(4, 8, 8, 8));
-		panel.add(header, BorderLayout.NORTH);
-		panel.add(overlayStack(resultsCards), BorderLayout.CENTER);
-		return panel;
-	}
-
-	/**
-	 * Atualiza icone/tooltip do botao de orientacao dos resultados conforme o
-	 * estado atual.
-	 */
-	private void updateOrientationToggleIcon(JButton button) {
-		button.setIcon(resultsVertical ? Icons.get(IconType.PANEL_LEFT, 14, GridTheme.MUTED_TEXT)
-				: Icons.get(IconType.PANEL_BOTTOM, 14, GridTheme.MUTED_TEXT));
-		button.setToolTipText(resultsVertical ? "Mudar para resultados embaixo do editor (horizontal)"
-				: "Mudar para resultados ao lado do editor (vertical)");
-	}
-
-	/** Empilha o conteudo dos resultados e um overlay de "carregando" por cima. */
-	private JComponent overlayStack(JComponent content) {
-		resultsOverlay = buildResultsOverlay();
-		JPanel stack = new JPanel(null) {
-			private static final long serialVersionUID = 1L;
-
-			@Override
-			public void doLayout() {
-				for (Component c : getComponents()) {
-					c.setBounds(0, 0, getWidth(), getHeight());
-				}
-			}
-		};
-		stack.add(resultsOverlay);
-		stack.add(content);
-		stack.setComponentZOrder(resultsOverlay, 0); // overlay no topo
-		return stack;
-	}
-
-	/** Camada translucida com spinner e botao Cancelar, escondida por padrao. */
-	private JComponent buildResultsOverlay() {
-		JLabel label = new JLabel("Executando consulta...");
-		label.setAlignmentX(Component.CENTER_ALIGNMENT);
-		label.setFont(label.getFont().deriveFont(13f));
-		// Nivel PRIMARIO (mensagem de destaque) — mesma correcao do
-		// buildEmptyState logo abaixo: so definia o peso, sem cor explicita.
-		Typography.primary(label);
-
-		JProgressBar spinner = new JProgressBar();
-		spinner.setIndeterminate(true);
-		spinner.setPreferredSize(new Dimension(200, 6));
-		spinner.setMaximumSize(new Dimension(200, 6));
-		spinner.setAlignmentX(Component.CENTER_ALIGNMENT);
-
-		JButton cancel = new JButton("Cancelar");
-		cancel.setAlignmentX(Component.CENTER_ALIGNMENT);
-		cancel.addActionListener(e -> cancelExecution());
-		// Mesmo padrao secundario (contorno) de qualquer outro botao do app —
-		// antes era um JButton cru, unico botao "fora do padrao" da janela
-		// principal (ver Buttons).
-		Buttons.styleSecondary(cancel);
-
-		JPanel card = new JPanel();
-		card.setLayout(new BoxLayout(card, BoxLayout.Y_AXIS));
-		card.setBorder(BorderFactory.createCompoundBorder(BorderFactory.createLineBorder(new Color(0xE0E3E7)),
-				BorderFactory.createEmptyBorder(18, 28, 18, 28)));
-		card.add(label);
-		card.add(Box.createVerticalStrut(12));
-		card.add(spinner);
-		card.add(Box.createVerticalStrut(14));
-		card.add(cancel);
-		executingCard = card;
-
-		// O fundo do card e o "esfumacado" por tras dele eram fixos em cores
-		// claras (branco/cinza quase branco) — no tema escuro isso aparecia
-		// como uma caixa branca chocante flutuando no meio de uma janela
-		// escura toda vez que uma consulta rodava (bug relatado: "essas
-		// funcionalidades nao ficavam boas" no tema escuro). O scrim (dim)
-		// le FlatLaf.isLafDark() dentro do proprio paintComponent — repinta
-		// a cada vez que o overlay aparece (ver showExecuting), entao esta
-		// sempre correto; o card em si e estilizado por #styleExecutingOverlay,
-		// chamado aqui E de novo em showExecuting(true), ja que o Look and
-		// Feel pode ter sido alternado enquanto o overlay estava escondido.
-		JPanel overlay = new JPanel(new GridBagLayout()) {
-			private static final long serialVersionUID = 1L;
-
-			@Override
-			protected void paintComponent(Graphics g) {
-				g.setColor(FlatLaf.isLafDark() ? new Color(10, 11, 13, 190) : new Color(244, 245, 247, 205));
-				g.fillRect(0, 0, getWidth(), getHeight());
-				super.paintComponent(g);
-			}
-		};
-		overlay.setOpaque(false);
-		overlay.add(card);
-		// bloqueia interacao com os resultados por tras
-		overlay.addMouseListener(new MouseAdapter() {
-		});
-		overlay.setVisible(false);
-		styleExecutingOverlay();
-		return overlay;
-	}
-
-	/**
-	 * Cores do card "Executando consulta..." — separado de {@link #buildResultsOverlay}
-	 * (chamado uma unica vez) para poder ser chamado de novo sempre que o
-	 * overlay for exibido (ver {@link #showExecuting}), pegando o tema ATUAL
-	 * mesmo que o usuario tenha alternado claro/escuro enquanto nenhuma
-	 * consulta estava rodando.
-	 */
-	private void styleExecutingOverlay() {
-		if (executingCard == null) {
-			return;
-		}
-		boolean dark = FlatLaf.isLafDark();
-		executingCard.setBackground(dark ? new Color(0x2B, 0x2D, 0x30) : new Color(0xFF, 0xFF, 0xFF));
-		executingCard.setBorder(BorderFactory.createCompoundBorder(
-				BorderFactory.createLineBorder(dark ? new Color(0x44, 0x48, 0x4D) : new Color(0xE0, 0xE3, 0xE7)),
-				BorderFactory.createEmptyBorder(18, 28, 18, 28)));
-	}
-
-	private void showExecuting(boolean executing) {
-		if (resultsOverlay != null) {
-			if (executing) {
-				styleExecutingOverlay();
-			}
-			resultsOverlay.setVisible(executing);
-			resultsOverlay.repaint();
-		}
-	}
-
-	/** Cancela de fato a instrucao em execucao (Statement.cancel) e o worker. */
-	private void cancelExecution() {
-		statusBar.setText(" Cancelando execucao...");
-		Statement st = runningStatement;
-		if (st != null) {
-			// roda em outra thread: nao pode bloquear a EDT esperando o KILL QUERY
-			new Thread(() -> {
-				try {
-					st.cancel();
-				} catch (SQLException ignore) {
-					// ignora
-				}
-			}, "cancel-query").start();
-		}
-		if (runWorker != null) {
-			runWorker.cancel(true);
-		}
-	}
-
-	private JComponent buildEmptyState() {
-		// GridTheme.MUTED_TEXT (reativo ao tema) em vez de um literal PROPRIO
-		// (0xCBD5E1) que so funcionava bem no tema escuro — no tema claro
-		// esse mesmo tom (um cinza-azulado claro) tinha baixo contraste
-		// contra o fundo claro do painel.
-		// buildEmptyState() e chamado UMA vez so, no arranque (ver
-		// resultsCards.add(..., "empty")) — sem Buttons.bindThemedIcon, este
-		// icone ficava congelado no tema de arranque se o usuario trocasse de
-		// tema ANTES de rodar a primeira consulta (mesmo bug sistemico
-		// corrigido no resto do app, ver Buttons#bindThemedIcon).
-		JLabel icon = new JLabel();
-		Buttons.bindThemedIcon(icon, IconType.TABLE, 46, () -> GridTheme.MUTED_TEXT);
-		icon.setAlignmentX(Component.CENTER_ALIGNMENT);
-
-		JLabel title = new JLabel("Execute uma consulta para ver os resultados");
-		title.setFont(title.getFont().deriveFont(14f));
-		// Nivel PRIMARIO (mensagem de destaque) — antes so definia o peso
-		// (Bold) sem nenhuma cor explicita, caindo no padrao do L&F por
-		// acaso em vez do alto contraste que todo outro titulo do app usa.
-		Typography.primary(title);
-		title.setAlignmentX(Component.CENTER_ALIGNMENT);
-
-		JLabel sub = new JLabel("Os resultados da consulta aparecerao aqui");
-		Typography.tertiary(sub);
-		sub.setAlignmentX(Component.CENTER_ALIGNMENT);
-
-		JPanel box = new JPanel();
-		box.setOpaque(false);
-		box.setLayout(new BoxLayout(box, BoxLayout.Y_AXIS));
-		box.add(icon);
-		box.add(Box.createVerticalStrut(12));
-		box.add(title);
-		box.add(Box.createVerticalStrut(4));
-		box.add(sub);
-
-		JPanel center = new JPanel(new GridBagLayout());
-		center.add(box);
-		return center;
-	}
-
-	private void showEmptyState() {
-		((CardLayout) resultsCards.getLayout()).show(resultsCards, "empty");
-	}
-
-	private void showResultsCard() {
-		((CardLayout) resultsCards.getLayout()).show(resultsCards, "tabs");
-	}
-
 	/** Delega para {@link Typography#sectionHeader} — ponto UNICO desta receita, compartilhado com os paineis laterais. */
 	JLabel sectionHeader(String text) {
 		return Typography.sectionHeader(text);
@@ -2897,8 +2583,8 @@ public class MainWindow extends JFrame {
 		// grade — reconstroi a grade da aba ativa (showResultsForActiveEditor
 		// cria um ResultGrid NOVO a partir do modelo salvo) pra refletir a
 		// paleta nova imediatamente, sem esperar a proxima consulta.
-		showResultsForActiveEditor();
-		styleExecutingOverlay();
+		resultsController.showResultsForActiveEditor();
+		resultsController.styleExecutingOverlay();
 		// Mesmo motivo: os cards do chat de IA (MessageRenderer) tem cores de
 		// RSyntaxTextArea/fundo proprias, presas no tema de quando cada
 		// mensagem foi renderizada — sem isto, o chat (janela singleton que
@@ -3026,7 +2712,7 @@ public class MainWindow extends JFrame {
 			return;
 		}
 		if (activeWorkspace == w) {
-			closeOpenCursors();
+			resultsController.closeOpenCursors();
 		}
 		w.mgr.close();
 		w.schema = null;
@@ -3396,12 +3082,12 @@ public class MainWindow extends JFrame {
 			// precisa de um SELECT 1 de teste tao cedo.
 			activeWorkspace.setLastActivityMillis(System.currentTimeMillis());
 		}
-		closeOpenCursors();
+		resultsController.closeOpenCursors();
 		if (resultsArea != null && !resultsArea.isVisible()) {
 			toggleResults(); // reabre os resultados para mostrar o carregamento
 		}
 		runButton.setEnabled(false);
-		showExecuting(true);
+		resultsController.showExecuting(true);
 		boolean usingSelection = editor.hasSelection();
 		statusBar.setText(" Executando " + statements.size() + " instrucao(oes)"
 				+ (usingSelection ? "  —  ATENCAO: rodando apenas a SELECAO" : "") + "...");
@@ -3467,7 +3153,7 @@ public class MainWindow extends JFrame {
 
 			@Override
 			protected void done() {
-				showExecuting(false);
+				resultsController.showExecuting(false);
 				runningStatement = null;
 				runWorker = null;
 				runButton.setEnabled(true);
@@ -3479,9 +3165,9 @@ public class MainWindow extends JFrame {
 					// de RESULTADOS se aquela aba ainda for a selecionada;
 					// senao, so guarda (ver showResultsForActiveEditor,
 					// chamado quando o usuario voltar pra ela).
-					resultsByTab.put(editor, results);
+					resultsController.rememberTab(editor, results);
 					if (editor == currentEditor()) {
-						showResults(results);
+						resultsController.showResults(results);
 					}
 					if (ranStructuralDdl(statements, results)) {
 						objectExplorer.refreshObjectTree(false);
@@ -3661,525 +3347,13 @@ public class MainWindow extends JFrame {
 		return false;
 	}
 
-	/**
-	 * Redesenha as abas de RESULTADOS a partir de {@code results} — chamada
-	 * tanto logo apos uma execucao quanto para REDESENHAR (zoom/modo
-	 * compacto, ver refreshDynamicSizing, ou troca de aba de SQL, ver
-	 * showResultsForActiveEditor) um conjunto ja existente. Por isso o
-	 * {@code openCursors.contains(...)} abaixo: sem ele, reexibir o MESMO
-	 * resultado (o mesmo objeto {@code ResultCursor}) duas vezes duplicaria
-	 * a entrada na lista de cursores abertos.
-	 */
-	private void showResults(List<QueryResult> results) {
-		this.lastResults = results;
-		resultTabs.removeAll();
-		boolean error = false;
-		int grids = 0;
-		for (QueryResult r : results) {
-			JComponent content;
-			if (r.model() != null) {
-				if (r.cursor() != null && !r.cursor().exhausted && !openCursors.contains(r.cursor())) {
-					openCursors.add(r.cursor());
-				}
-				content = buildGridPanel(r);
-				grids++;
-			} else {
-				JTextArea area = new JTextArea(r.message() + "\n\n(executado em " + r.execMs() + " ms)");
-				area.setEditable(false);
-				content = new JScrollPane(area);
-			}
-			resultTabs.addTab(r.title(), content);
-			resultTabs.setToolTipTextAt(resultTabs.getTabCount() - 1, sqlTooltip(r.sql()));
-			error = error || r.error();
-		}
-		if (resultTabs.getTabCount() > 0) {
-			resultTabs.setSelectedIndex(0);
-			showResultsCard();
-		} else {
-			showEmptyState();
-		}
-		statusBar.setText(" " + results.size() + " instrucao(oes) executada(s), " + grids + " com resultado"
-				+ (error ? " - parou em erro" : ""));
-	}
-
-	/**
-	 * Painel de grade de uma aba de resultado: monta {@link ResultGrid} +
-	 * {@link ResultStatusBar} atraves de {@link ResultView}. MainWindow so decide
-	 * OS CALLBACKS que dependem do ciclo de vida do cursor JDBC (paginacao/leitura,
-	 * que e responsabilidade sua, nao da grade nem da barra) — nenhuma logica de
-	 * layout do resultado mora aqui.
-	 */
-	private JComponent buildGridPanel(QueryResult r) {
-		ResultTableModel model = (ResultTableModel) r.model();
-		String schemaName = (currentSchema != null) ? currentSchema.name() : null;
-		ResultGrid grid = new ResultGrid(model, connectionManager(), schemaName, tableMetadataCache,
-				() -> exportResult(r), this::scaledPx, resultRowHeightBasePx());
-
-		// Nome distinto de propósito do campo MainWindow.statusBar (JLabel do
-		// rodape da JANELA inteira) — esta e a barra de UMA aba de resultado.
-		ResultStatusBar resultStatusBar = new ResultStatusBar(PAGE_SIZE);
-		// Bug relatado pelo usuario: "Excluir linha nao esta funcionando" —
-		// clicar no botao "Excluir linha(s)" movia o foco da tabela para o
-		// PROPRIO botao antes do seu actionPerformed rodar, e o
-		// SelectionManager (ver #installFocusClearing) limpava a selecao
-		// nesse focusLost — o botao entao lia uma selecao ja vazia e nao
-		// fazia nada, sem nenhum erro visivel. Eximir a barra de acoes
-		// INTEIRA (Nova linha/Excluir/Descartar/Salvar) deste "limpar ao
-		// perder foco" resolve, sem perder o comportamento original para
-		// cliques em qualquer OUTRO lugar do app.
-		grid.keepSelectionOnFocusTo(resultStatusBar.asComponent());
-		Runnable refresh = () -> resultStatusBar.refresh(r.model().getRowCount(), r.execMs(), r.fetchMs(),
-				r.cursor() != null && !r.cursor().exhausted);
-		resultStatusBar.onLoadMore(() -> loadPage(r, PAGE_SIZE, refresh));
-		resultStatusBar.onLoadAll(() -> loadAll(r, refresh));
-		resultStatusBar.onExportThis(() -> exportResult(r));
-		resultStatusBar.onExportAll(this::exportAll);
-		resultStatusBar.onExportCsv(() -> exportResultCsv(grid.table(), r.title()));
-		grid.onSelectionSummary(resultStatusBar::updateSelectionSummary);
-		refresh.run();
-
-		wireGridEditing(grid, resultStatusBar, model, schemaName);
-
-		return new ResultView(grid, resultStatusBar).asComponent();
-	}
-
-	// ---------- Edicao direta na grade (update/insert/delete) ----------
-
-	/**
-	 * Liga os botoes de edicao da barra de resultado a {@link GridEditController}
-	 * da grade, e tenta habilitar a edicao em si (ver {@link #tryEnableEditing}).
-	 * Pedido explicito do usuario: poder atualizar/inserir/excluir linhas
-	 * direto na grade (em lote, com um botao "Salvar alteracoes"), em vez de
-	 * so gerar o SQL para copiar (ver {@link GridClipboard}).
-	 */
-	private void wireGridEditing(ResultGrid grid, ResultStatusBar resultStatusBar, ResultTableModel model,
-			String schemaName) {
-		GridEditController editController = grid.editController();
-
-		Runnable refreshEditUi = () -> resultStatusBar.updatePendingState(
-				editController.pendingCount(), grid.selectedModelRows().length > 0);
-		editController.setOnChange(refreshEditUi);
-		grid.table().getSelectionModel().addListSelectionListener(e -> {
-			if (!e.getValueIsAdjusting()) {
-				refreshEditUi.run();
-			}
-		});
-
-		// "Modo de edicao": comeca sempre DESLIGADO (ver tryEnableEditing
-		// abaixo) — pedido explicito do usuario para o resultado se
-		// comportar como puramente visual/navegacao ate ele ligar de
-		// proposito. Desligar de novo so e permitido sem alteracoes
-		// pendentes (senao o usuario perderia edicoes sem perceber, ja que
-		// desligado a grade some visualmente com Nova linha/Excluir/Salvar);
-		// com pendencias, avisa e mantem ligado.
-		resultStatusBar.onToggleEditMode(() -> {
-			if (editController.isEditModeOn()) {
-				if (editController.hasPendingChanges()) {
-					JOptionPane.showMessageDialog(this,
-							"Salve ou descarte as alteracoes pendentes antes de desativar o modo de edicao.",
-							"Modo de edicao", JOptionPane.WARNING_MESSAGE);
-					return;
-				}
-				editController.setEditModeOn(false);
-			} else {
-				editController.setEditModeOn(true);
-			}
-			resultStatusBar.setEditModeOn(editController.isEditModeOn());
-			refreshEditUi.run();
-		});
-
-		resultStatusBar.onAddRow(grid::addNewRowAndReveal);
-		resultStatusBar.onDeleteRows(() -> {
-			int[] rows = grid.selectedModelRows();
-			if (rows.length > 0) {
-				editController.markForDelete(rows);
-				// markForDelete so muda um Set interno do controller — NENHUM
-				// TableModelEvent e disparado (ao contrario de addNewRow/
-				// discardAll, que mexem no TableModel de verdade e por isso o
-				// JTable se repinta sozinho). Sem este repaint(), a linha
-				// continuava com a cor de sempre ate algum repaint incidental
-				// acontecer (rolar, redimensionar...) — clicar em "Excluir
-				// linha(s)" parecia nao fazer nada, mesmo a exclusao ja
-				// estando registrada (valendo no proximo "Salvar alteracoes").
-				grid.table().repaint();
-			}
-		});
-		resultStatusBar.onDiscardChanges(() -> {
-			editController.discardAll();
-			grid.table().repaint();
-		});
-		resultStatusBar.onSaveChanges(() -> applyPendingChanges(editController, grid, resultStatusBar, refreshEditUi));
-
-		tryEnableEditing(schemaName, model, () -> {
-			resultStatusBar.showEditControls(true);
-			resultStatusBar.setEditModeOn(false);
-			refreshEditUi.run();
-		});
-	}
-
-	/**
-	 * So habilita a edicao quando TODAS as colunas com tabela de origem
-	 * conhecida apontam para a MESMA tabela (SELECT simples, sem JOIN — ver
-	 * {@link #uniqueSourceTable}) e essa tabela tem ao menos uma coluna de PK
-	 * PRESENTE no resultado (sem PK nao da pra identificar univocamente qual
-	 * linha fisica atualizar/excluir). Os metadados da tabela (PK) podem
-	 * ainda nao estar em cache — dispara a carga e tenta de novo quando ela
-	 * terminar, mesmo padrao ja usado por {@link ColumnMetadataResolver}.
-	 */
-	private void tryEnableEditing(String schemaName, ResultTableModel model, Runnable onEnabled) {
-		if (schemaName == null) {
-			return; // workspace "sem conexao" (SCRATCH) nunca tem metadados de tabela
-		}
-		String table = uniqueSourceTable(model);
-		if (table == null) {
-			return;
-		}
-		TableDetails details = tableMetadataCache.get(connectionManager(), schemaName, table,
-				() -> tryEnableEditing(schemaName, model, onEnabled));
-		if (details == null) {
-			return; // ainda carregando; o callback acima tenta de novo quando terminar
-		}
-		EditableTarget target = buildEditableTarget(model, table, details);
-		if (target == null) {
-			return; // sem PK conhecida presente no resultado
-		}
-		model.editController().enable(target);
-		onEnabled.run();
-	}
-
-	/** A UNICA tabela fisica de origem entre as colunas do resultado, ou {@code null} se houver mais de uma (JOIN) ou nenhuma. */
-	private static String uniqueSourceTable(ResultTableModel model) {
-		String table = null;
-		for (int c = 0; c < model.getColumnCount(); c++) {
-			String t = model.sourceTable(c);
-			if (t == null || t.isBlank()) {
-				continue;
-			}
-			if (table == null) {
-				table = t;
-			} else if (!table.equalsIgnoreCase(t)) {
-				return null;
-			}
-		}
-		return table;
-	}
-
-	private static EditableTarget buildEditableTarget(ResultTableModel model, String table, TableDetails details) {
-		Set<String> pkNames = new HashSet<>();
-		for (ColumnDetail col : details.columns()) {
-			if ("PRI".equalsIgnoreCase(col.key())) {
-				pkNames.add(col.name().toLowerCase(Locale.ROOT));
-			}
-		}
-		if (pkNames.isEmpty()) {
-			return null;
-		}
-		List<Integer> pkModelColumns = new ArrayList<>();
-		List<Integer> editableColumns = new ArrayList<>();
-		for (int c = 0; c < model.getColumnCount(); c++) {
-			String realCol = model.realColumnName(c);
-			String sourceTable = model.sourceTable(c);
-			if (realCol == null || sourceTable == null || !sourceTable.equalsIgnoreCase(table)) {
-				continue;
-			}
-			editableColumns.add(c);
-			if (pkNames.contains(realCol.toLowerCase(Locale.ROOT))) {
-				pkModelColumns.add(c);
-			}
-		}
-		if (pkModelColumns.isEmpty()) {
-			return null; // a PK da tabela nao esta presente no resultado (ex.: SELECT sem a coluna de id)
-		}
-		return new EditableTarget(table, pkModelColumns, editableColumns);
-	}
-
-	/** Pede confirmacao e aplica tudo que esta pendente numa unica transacao (ver {@link GridEditController#apply}). */
-	private void applyPendingChanges(GridEditController editController, ResultGrid grid,
-			ResultStatusBar resultStatusBar, Runnable refreshEditUi) {
-		if (!editController.hasPendingChanges()) {
-			return;
-		}
-		if (!connectionManager().isConnected()) {
-			statusBar.setText(" Conecte-se a uma base antes de salvar alteracoes.");
-			return;
-		}
-		int pending = editController.pendingCount();
-		int ok = JOptionPane.showConfirmDialog(this,
-				"Salvar " + pending + " alteracao(oes) pendente(s) na tabela \"" + editController.target().table()
-						+ "\"?\nIsto grava direto no banco (uma unica transacao; tudo ou nada).",
-				"Salvar alteracoes", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
-		if (ok != JOptionPane.YES_OPTION) {
-			return;
-		}
-		Connection conn = connectionManager().getConnection();
-		DatabaseDialect dialect = connectionManager().dialect();
-		resultStatusBar.setEditBusy(true);
-		SwingWorker<GridEditController.ApplyResult, Void> worker = new SwingWorker<>() {
-			@Override
-			protected GridEditController.ApplyResult doInBackground() throws SQLException {
-				return editController.apply(conn, dialect);
-			}
-
-			@Override
-			protected void done() {
-				// Ordem importa: primeiro devolve os 4 botoes ao habilitado
-				// "de linha de base", DEPOIS refreshEditUi corrige de novo com
-				// base no estado real (pendingCount pode ter zerado com o
-				// sucesso, ou continuar positivo se a excecao interrompeu no
-				// meio) — nunca o contrario, ou a correcao seria sobrescrita.
-				resultStatusBar.setEditBusy(false);
-				try {
-					GridEditController.ApplyResult result = get();
-					statusBar.setText(" Alteracoes salvas: " + result.inserted() + " inserida(s), "
-							+ result.updated() + " atualizada(s), " + result.deleted() + " excluida(s).");
-					grid.table().repaint();
-				} catch (Exception ex) {
-					showError("Falha ao salvar as alteracoes da grade", ex);
-				} finally {
-					refreshEditUi.run();
-				}
-			}
-		};
-		worker.execute();
-	}
-
-	/** Exporta um resultado especifico (este) para um arquivo Excel. */
-	private void exportResult(QueryResult r) {
-		if (r.model() == null) {
-			JOptionPane.showMessageDialog(this, "Este resultado nao possui dados tabulares para exportar.",
-					"Exportar para Excel", JOptionPane.INFORMATION_MESSAGE);
-			return;
-		}
-		File file = chooseSaveFile(r.title());
-		if (file != null) {
-			List<ExcelExporter.TableSheet> sheets = new ArrayList<>();
-			sheets.add(new ExcelExporter.TableSheet(r.title(), r.model()));
-			sheets.add(instructionsSheet(List.of(r)));
-			doExport(sheets, file);
-		}
-	}
-
-	/**
-	 * Exporta este resultado para CSV (todas as linhas/colunas VISIVEIS na
-	 * grade — respeita filtro/ordenacao atuais, ver {@link GridExporter}).
-	 * Mesma acao ja alcancavel pelo clique-direito na grade
-	 * ("Exportar > CSV..." em {@link ResultContextMenu}); exposta tambem aqui,
-	 * no botao "Exportar" principal, para paridade de descoberta com o Excel
-	 * (ver {@code GAP_ANALYSIS_DBA_DEV.md}, fase 3).
-	 */
-	private void exportResultCsv(JTable table, String title) {
-		JFileChooser fc = new JFileChooser();
-		fc.setDialogTitle("Exportar CSV");
-		fc.setSelectedFile(new File(title + ".csv"));
-		fc.setFileFilter(new FileNameExtensionFilter("CSV (*.csv)", "csv"));
-		if (fc.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) {
-			return;
-		}
-		File file = fc.getSelectedFile();
-		if (!file.getName().toLowerCase(java.util.Locale.ROOT).endsWith(".csv")) {
-			file = new File(file.getParentFile(), file.getName() + ".csv");
-		}
-		try {
-			GridExporter.exportCsv(table, file.toPath());
-		} catch (IOException ex) {
-			showError("Falha ao exportar CSV", ex);
-		}
-	}
-
-	/**
-	 * Le ate {@code max} linhas do cursor em segundo plano (a leitura do
-	 * ResultSet e a mutacao do TableModel NUNCA podem rodar fora da EDT — mesmo
-	 * padrao seguro de {@link #loadAll}, so que limitado a uma pagina em vez de
-	 * ate o fim do cursor) e entao chama {@code refresh}.
-	 */
-	private void loadPage(QueryResult r, int max, Runnable refresh) {
-		ResultCursor c = r.cursor();
-		if (c == null || c.exhausted) {
-			return;
-		}
-		new SwingWorker<List<Vector<Object>>, Void>() {
-			@Override
-			protected List<Vector<Object>> doInBackground() throws SQLException {
-				int cols = r.model().getColumnCount();
-				List<Vector<Object>> rows = new ArrayList<>();
-				while (rows.size() < max && c.rs.next()) {
-					Vector<Object> row = new Vector<>(cols);
-					for (int i = 1; i <= cols; i++) {
-						row.add(c.rs.getObject(i));
-					}
-					rows.add(row);
-				}
-				return rows;
-			}
-
-			@Override
-			protected void done() {
-				try {
-					List<Vector<Object>> rows = get();
-					int before = r.model().getRowCount();
-					for (Vector<Object> row : rows) {
-						r.model().addRow(row);
-					}
-					// As linhas recem-carregadas tambem precisam de uma "foto"
-					// original se a edicao ja estiver ligada (ver GridEditController) —
-					// senao um UPDATE/DELETE nelas nao teria WHERE para ancorar.
-					((ResultTableModel) r.model()).editController().onRowsAppended(before);
-					if (rows.size() < max) {
-						c.exhausted = true;
-						c.close();
-						openCursors.remove(c);
-					}
-				} catch (Exception ex) {
-					Throwable cause = (ex.getCause() != null) ? ex.getCause() : ex;
-					AppLogger.warning("Falha ao carregar mais linhas", ex);
-					c.exhausted = true;
-					c.close();
-					openCursors.remove(c);
-					statusBar.setText(" Erro ao carregar mais linhas: " + cause.getMessage());
-				}
-				refresh.run();
-			}
-		}.execute();
-	}
-
-	/** Le todas as linhas restantes do cursor em segundo plano. */
-	private void loadAll(QueryResult r, Runnable refresh) {
-		ResultCursor c = r.cursor();
-		if (c == null || c.exhausted) {
-			return;
-		}
-		statusBar.setText(" Carregando todas as linhas...");
-		new SwingWorker<Void, Vector<Object>>() {
-			@Override
-			protected Void doInBackground() throws Exception {
-				int cols = r.model().getColumnCount();
-				while (c.rs.next()) {
-					Vector<Object> row = new Vector<>(cols);
-					for (int i = 1; i <= cols; i++) {
-						row.add(c.rs.getObject(i));
-					}
-					publish(row);
-				}
-				return null;
-			}
-
-			@Override
-			protected void process(List<Vector<Object>> chunks) {
-				int before = r.model().getRowCount();
-				for (Vector<Object> row : chunks) {
-					r.model().addRow(row);
-				}
-				((ResultTableModel) r.model()).editController().onRowsAppended(before);
-				refresh.run();
-			}
-
-			@Override
-			protected void done() {
-				c.exhausted = true;
-				c.close();
-				openCursors.remove(c);
-				try {
-					get();
-					statusBar.setText(" Todas as linhas carregadas (" + r.model().getRowCount() + ").");
-				} catch (Exception ex) {
-					AppLogger.warning("Falha ao carregar linhas", ex);
-					statusBar.setText(" Erro ao carregar linhas: " + ex.getMessage());
-				}
-				refresh.run();
-			}
-		}.execute();
-	}
-
-	private void closeOpenCursors() {
-		for (ResultCursor c : openCursors) {
-			c.close();
-		}
-		openCursors.clear();
-	}
 
 	/** Fecha cursores abertos e as conexoes JDBC de TODOS os workspaces (ao fechar a janela). */
 	private void closeAllConnections() {
-		closeOpenCursors();
+		resultsController.closeOpenCursors();
 		for (Conexao w : workspaces.values()) {
 			w.mgr.close();
 		}
-	}
-
-	// ---------- Exportacao ----------
-
-	private void maybeShowTabMenu(MouseEvent e) {
-		if (!e.isPopupTrigger()) {
-			return;
-		}
-		int idx = resultTabs.indexAtLocation(e.getX(), e.getY());
-		if (idx < 0) {
-			return;
-		}
-		resultTabs.setSelectedIndex(idx);
-
-		JPopupMenu menu = new JPopupMenu();
-		JMenuItem one = new JMenuItem("Exportar este resultado para Excel...");
-		one.addActionListener(a -> exportSingle(idx));
-		JMenuItem all = new JMenuItem("Exportar todos (uma aba por resultado)...");
-		all.addActionListener(a -> exportAll());
-		menu.add(one);
-		menu.add(all);
-		menu.show(resultTabs, e.getX(), e.getY());
-	}
-
-	private void exportSingle(int idx) {
-		if (idx < 0 || idx >= lastResults.size()) {
-			return;
-		}
-		QueryResult r = lastResults.get(idx);
-		if (r.model() == null) {
-			JOptionPane.showMessageDialog(this, "Esta aba nao possui dados tabulares para exportar.",
-					"Exportar para Excel", JOptionPane.INFORMATION_MESSAGE);
-			return;
-		}
-		File file = chooseSaveFile(r.title());
-		if (file != null) {
-			List<ExcelExporter.TableSheet> sheets = new ArrayList<>();
-			sheets.add(new ExcelExporter.TableSheet(r.title(), r.model()));
-			sheets.add(instructionsSheet(List.of(r)));
-			doExport(sheets, file);
-		}
-	}
-
-	private void exportAll() {
-		List<ExcelExporter.TableSheet> sheets = new ArrayList<>();
-		for (QueryResult r : lastResults) {
-			if (r.model() != null) {
-				sheets.add(new ExcelExporter.TableSheet(r.title(), r.model()));
-			}
-		}
-		if (sheets.isEmpty()) {
-			JOptionPane.showMessageDialog(this, "Nenhum resultado tabular para exportar.", "Exportar para Excel",
-					JOptionPane.INFORMATION_MESSAGE);
-			return;
-		}
-		sheets.add(instructionsSheet(lastResults));
-		File file = chooseSaveFile("resultados");
-		if (file != null) {
-			doExport(sheets, file);
-		}
-	}
-
-	/**
-	 * Monta a aba "Instrucoes SQL" (Resultado x SQL executado), estilo PL/SQL
-	 * Developer.
-	 */
-	private ExcelExporter.TableSheet instructionsSheet(List<QueryResult> results) {
-		DefaultTableModel m = new DefaultTableModel(new Object[] { "Resultado", "Instrucao SQL" }, 0) {
-			@Override
-			public boolean isCellEditable(int r, int c) {
-				return false;
-			}
-		};
-		for (QueryResult r : results) {
-			m.addRow(new Object[] { r.title(), r.sql() });
-		}
-		return new ExcelExporter.TableSheet("Instrucoes SQL", m);
 	}
 
 	File chooseSaveFile(String defaultName) {
@@ -4249,7 +3423,7 @@ public class MainWindow extends JFrame {
 	/**
 	 * Tooltip com o SQL exato executado (para conferir se o WHERE foi incluido).
 	 */
-	private static String sqlTooltip(String sql) {
+	static String sqlTooltip(String sql) {
 		String body = sql.length() > 2000 ? sql.substring(0, 2000) + "..." : sql;
 		String esc = body.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>");
 		return "<html><b>SQL executado:</b><br>" + esc + "</html>";
