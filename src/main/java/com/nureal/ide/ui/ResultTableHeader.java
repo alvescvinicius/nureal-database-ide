@@ -68,7 +68,19 @@ final class ResultTableHeader {
         // duplo-clique sempre acerta a intencao original do usuario.
         boolean[] allColumnsSelectedAtGestureStart = { false };
 
-        header.addMouseListener(new MouseAdapter() {
+        header.addMouseListener(buildMouseListener(header, table, sorter, selection, renderer,
+                dragAnchorColumn, allColumnsSelectedAtGestureStart));
+        header.addMouseMotionListener(buildMouseMotionListener(header, table, selection, renderer, dragAnchorColumn));
+
+        table.setTableHeader(header);
+        ColumnMetadataPopup.install(table, header, metadataSource);
+        return header;
+    }
+
+    private static MouseAdapter buildMouseListener(JTableHeader header, JTable table, ColumnSorter sorter,
+            SelectionManager selection, ColumnHeaderRenderer renderer, int[] dragAnchorColumn,
+            boolean[] allColumnsSelectedAtGestureStart) {
+        return new MouseAdapter() {
             @Override
             public void mousePressed(MouseEvent e) {
                 if (e.getClickCount() == 1) {
@@ -204,8 +216,12 @@ final class ResultTableHeader {
                 renderer.setHighlight(modelColumn);
                 header.repaint();
             }
-        });
-        header.addMouseMotionListener(new MouseMotionAdapter() {
+        };
+    }
+
+    private static MouseMotionAdapter buildMouseMotionListener(JTableHeader header, JTable table,
+            SelectionManager selection, ColumnHeaderRenderer renderer, int[] dragAnchorColumn) {
+        return new MouseMotionAdapter() {
             @Override
             public void mouseMoved(MouseEvent e) {
                 int viewColumn = header.columnAtPoint(e.getPoint());
@@ -238,11 +254,7 @@ final class ResultTableHeader {
                 renderer.setHighlight(modelColumn);
                 header.repaint();
             }
-        });
-
-        table.setTableHeader(header);
-        ColumnMetadataPopup.install(table, header, metadataSource);
-        return header;
+        };
     }
 
     /**

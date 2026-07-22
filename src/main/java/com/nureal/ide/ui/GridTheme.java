@@ -215,7 +215,14 @@ public final class GridTheme {
      */
     static void applyPalette(boolean dark) {
         if (dark) {
-            // ---- Sistema semantico de cores por tipo de dado (ver DESIGN_SYSTEM.md) ----
+            applyDarkPalette();
+        } else {
+            applyLightPalette();
+        }
+    }
+
+    private static void applyDarkPalette() {
+        // ---- Sistema semantico de cores por tipo de dado (ver DESIGN_SYSTEM.md) ----
             // Paleta ESTIMADA a partir da descricao do usuario (nomes de cor,
             // nao hex exatos) — mesmo criterio ja usado para o verde da marca
             // (ver Rodada de brand color): ajustavel depois se surgir um valor
@@ -293,8 +300,10 @@ public final class GridTheme {
             ACCENT_ERROR = new Color(0xF8, 0x71, 0x71);
             ACCENT_SQL = new Color(0x2D, 0xD4, 0xBF);
             ACCENT_TOOL = new Color(0xA7, 0x8B, 0xFA);
-        } else {
-            // ---- Sistema semantico de cores por tipo de dado (tema claro) ----
+    }
+
+    private static void applyLightPalette() {
+        // ---- Sistema semantico de cores por tipo de dado (tema claro) ----
             COLOR_KEYWORD = new Color(0x15, 0x65, 0xC0); // azul institucional
             COLOR_OBJECT_NAME = new Color(0x1B, 0x1F, 0x23); // preto/neutro
             COLOR_COLUMN_NAME = new Color(0x26, 0x32, 0x38);
@@ -365,7 +374,6 @@ public final class GridTheme {
             ACCENT_ERROR = new Color(0xE5, 0x48, 0x4D);
             ACCENT_SQL = new Color(0x0F, 0x76, 0x6E);
             ACCENT_TOOL = new Color(0x7C, 0x3A, 0xED);
-        }
     }
 
     /**
