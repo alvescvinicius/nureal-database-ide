@@ -37,6 +37,7 @@ import java.util.UUID;
 import java.util.Vector;
 import java.util.concurrent.CancellationException;
 import java.util.function.BiConsumer;
+import java.util.function.Supplier;
 
 import javax.swing.AbstractAction;
 import javax.swing.BorderFactory;
@@ -736,7 +737,28 @@ public class MainWindow extends JFrame {
 		gbc.weighty = 1.0;
 		gbc.gridy = 0;
 
-		// --- Botões da Esquerda ---
+		int rowHeight = addRunFormatExplainButtons(mainBar, gbc);
+		addSaveHistoryButtons(mainBar, gbc, rowHeight);
+
+		// --- O ESPAÇADOR INVISÍVEL ---
+		// Ele joga tudo o que vier a partir daqui totalmente para a direita
+		gbc.gridx = 6;
+		gbc.weightx = 1.0;
+		gbc.insets = new Insets(0, 0, 0, 0);
+		mainBar.add(Box.createHorizontalGlue(), gbc);
+
+		addRightIconGroup(mainBar, gbc);
+
+		toolbarBar = mainBar;
+		// initWorkspaces() ja rodou (ver buildEditorArea) quando chegamos aqui,
+		// entao editorTabs ja tem a aba inicial — reflete o estado real dela no
+		// botao Salvar desde o primeiro desenho, em vez de nascer sempre habilitado.
+		updateSaveButtonState();
+		return mainBar;
+	}
+
+	/** Executar/Formatar/menu de opcoes de formatacao/Explicar — grupo da esquerda da barra. Devolve a altura comum das 4. */
+	private int addRunFormatExplainButtons(JPanel mainBar, GridBagConstraints gbc) {
 		runButton = new NButton("Executar", NButton.Kind.PRIMARY);
 		runButton.setIcon(Icons.get(IconType.RUN, 14, Color.WHITE));
 		runButton.setToolTipText("Executar (Ctrl+Enter ou F5)");
@@ -815,7 +837,11 @@ public class MainWindow extends JFrame {
 		gbc.gridx = 3;
 		gbc.insets = new Insets(0, Spacing.MD, 0, 0);
 		mainBar.add(explainButton, gbc);
+		return rowHeight;
+	}
 
+	/** Salvar/Historico — segundo grupo da esquerda, mesma altura calculada pelo grupo anterior. */
+	private void addSaveHistoryButtons(JPanel mainBar, GridBagConstraints gbc, int rowHeight) {
 		// Salvar a aba atual como query (biblioteca gerenciada pelo app — ver
 		// SavedQueryStore): mesmo estilo outline do Formatar, acao secundaria.
 		// Desabilitado quando a aba atual esta vazia (ver updateSaveButtonState) —
@@ -854,14 +880,10 @@ public class MainWindow extends JFrame {
 		gbc.gridx = 5;
 		gbc.insets = new Insets(0, Spacing.SM, 0, 0);
 		mainBar.add(historyButton, gbc);
+	}
 
-		// --- O ESPAÇADOR INVISÍVEL ---
-		// Ele joga tudo o que vier a partir daqui totalmente para a direita
-		gbc.gridx = 6;
-		gbc.weightx = 1.0;
-		gbc.insets = new Insets(0, 0, 0, 0);
-		mainBar.add(Box.createHorizontalGlue(), gbc);
-
+	/** Icones discretos da direita (sidebar/resultados/layout/tema/chat) — ultimo grupo da barra. */
+	private void addRightIconGroup(JPanel mainBar, GridBagConstraints gbc) {
 		// --- Botões da Direita (icones discretos, mesma linguagem visual) ---
 		// Sem separador visivel antes deste grupo (principio do NDS:
 		// "divisorias deixam de ser linhas, passam a ser espaco") — o
@@ -931,13 +953,6 @@ public class MainWindow extends JFrame {
 		// marca visualmente onde ele comeca.
 		gbc.insets = new Insets(0, Spacing.LG, 0, 0);
 		mainBar.add(rightIcons, gbc);
-
-		toolbarBar = mainBar;
-		// initWorkspaces() ja rodou (ver buildEditorArea) quando chegamos aqui,
-		// entao editorTabs ja tem a aba inicial — reflete o estado real dela no
-		// botao Salvar desde o primeiro desenho, em vez de nascer sempre habilitado.
-		updateSaveButtonState();
-		return mainBar;
 	}
 
 	/**
@@ -3050,9 +3065,43 @@ public class MainWindow extends JFrame {
 
 	/** Roda de fato as instrucoes SQL da aba {@code editor} — ver {@link #onRun}. */
 	private void runStatements(SqlEditorPane editor) {
-		final List<String> statements = SqlStatementSplitter.split(editor.currentSql());
-		if (statements.isEmpty()) {
+		final List<String> statements = statementsToRun(editor);
+		if (statements == null) {
 			return;
+		}
+		prepareForExecution(editor, statements);
+
+		SwingWorker<List<QueryResult>, Void> worker = new SwingWorker<>() {
+			@Override
+			protected List<QueryResult> doInBackground() {
+				return executeStatements(statements, this::isCancelled);
+			}
+
+			@Override
+			protected void done() {
+				resultsController.showExecuting(false);
+				runningStatement = null;
+				runWorker = null;
+				runButton.setEnabled(true);
+				try {
+					handleStatementResults(editor, statements, get());
+				} catch (CancellationException ce) {
+					statusBar.setText(" Execucao cancelada.");
+				} catch (Exception ex) {
+					showError("Erro ao executar SQL", ex);
+					statusBar.setText(" Erro na execucao");
+				}
+			}
+		};
+		runWorker = worker;
+		worker.execute();
+	}
+
+	/** Split + validacoes pre-execucao (data sem aspas, confirmacao de instrucoes arriscadas). {@code null} = nao deve executar. */
+	private List<String> statementsToRun(SqlEditorPane editor) {
+		List<String> statements = SqlStatementSplitter.split(editor.currentSql());
+		if (statements.isEmpty()) {
+			return null;
 		}
 		String badDate = null;
 		for (String stmt : statements) {
@@ -3070,12 +3119,17 @@ public class MainWindow extends JFrame {
 							+ "da IDE. Coloque a data entre aspas (ex.: '2026-07-08') e execute de novo.",
 					"Data sem aspas", JOptionPane.ERROR_MESSAGE);
 			statusBar.setText(" Execucao bloqueada: data sem aspas (\"" + badDate + "\").");
-			return;
+			return null;
 		}
 		if (!confirmRiskyStatements(statements)) {
 			statusBar.setText(" Execucao cancelada.");
-			return;
+			return null;
 		}
+		return statements;
+	}
+
+	/** Estado da UI ANTES de disparar o SwingWorker: fecha cursores antigos, reabre resultados, desabilita "Executar". */
+	private void prepareForExecution(SqlEditorPane editor, List<String> statements) {
 		if (activeWorkspace != null) {
 			// Atividade de verdade: reseta a contagem de ociosidade do
 			// keep-alive (ver pingKeepAlive) — acabou de rodar algo, nao
@@ -3091,98 +3145,85 @@ public class MainWindow extends JFrame {
 		boolean usingSelection = editor.hasSelection();
 		statusBar.setText(" Executando " + statements.size() + " instrucao(oes)"
 				+ (usingSelection ? "  —  ATENCAO: rodando apenas a SELECAO" : "") + "...");
+	}
 
-		SwingWorker<List<QueryResult>, Void> worker = new SwingWorker<>() {
-			@Override
-			protected List<QueryResult> doInBackground() {
-				List<QueryResult> results = new ArrayList<>();
-				Connection conn = connectionManager().getConnection();
-				for (int i = 0; i < statements.size(); i++) {
-					if (isCancelled()) {
-						break;
-					}
-					String sql = statements.get(i);
-					int n = i + 1;
-					long t0 = System.nanoTime();
-					Statement st = null;
+	/** Roda cada instrucao em sequencia (thread do SwingWorker) — para na primeira que der erro. */
+	private List<QueryResult> executeStatements(List<String> statements, Supplier<Boolean> isCancelled) {
+		List<QueryResult> results = new ArrayList<>();
+		Connection conn = connectionManager().getConnection();
+		for (int i = 0; i < statements.size(); i++) {
+			if (isCancelled.get()) {
+				break;
+			}
+			String sql = statements.get(i);
+			int n = i + 1;
+			long t0 = System.nanoTime();
+			Statement st = null;
+			try {
+				st = conn.createStatement();
+				// cursor do servidor: busca em lotes do tamanho da pagina
+				st.setFetchSize(PAGE_SIZE);
+				runningStatement = st;
+				boolean hasResultSet = st.execute(sql);
+				long execMs = (System.nanoTime() - t0) / 1_000_000L;
+				results.add(buildStatementResult(st, sql, n, hasResultSet, execMs));
+			} catch (SQLException ex) {
+				if (st != null) {
 					try {
-						st = conn.createStatement();
-						// cursor do servidor: busca em lotes do tamanho da pagina
-						st.setFetchSize(PAGE_SIZE);
-						runningStatement = st;
-						boolean hasResultSet = st.execute(sql);
-						long execMs = (System.nanoTime() - t0) / 1_000_000L;
-						if (hasResultSet) {
-							ResultSet rs = st.getResultSet();
-							ResultTableModel model = createModel(rs);
-							long t1 = System.nanoTime();
-							int read = appendPage(model, rs, PAGE_SIZE);
-							long fetchMs = (System.nanoTime() - t1) / 1_000_000L;
-							boolean hasMore = read == PAGE_SIZE;
-							ResultCursor cursor = null;
-							if (hasMore) {
-								cursor = new ResultCursor(st, rs);
-							} else {
-								rs.close();
-								st.close();
-							}
-							results.add(QueryResult.grid("Resultado " + n, sql, model, execMs, fetchMs, cursor));
-						} else {
-							int updated = st.getUpdateCount();
-							st.close();
-							results.add(QueryResult.message("Comando " + n, sql, updated + " linha(s) afetada(s)",
-									false, execMs));
-						}
-					} catch (SQLException ex) {
-						if (st != null) {
-							try {
-								st.close();
-							} catch (SQLException ignore) {
-								// ignora
-							}
-						}
-						long execMs = (System.nanoTime() - t0) / 1_000_000L;
-						results.add(QueryResult.message("Erro " + n, sql, "Erro: " + ex.getMessage(), true, execMs));
-						break;
-					} finally {
-						runningStatement = null;
+						st.close();
+					} catch (SQLException ignore) {
+						// ignora
 					}
 				}
-				return results;
-			}
-
-			@Override
-			protected void done() {
-				resultsController.showExecuting(false);
+				long execMs = (System.nanoTime() - t0) / 1_000_000L;
+				results.add(QueryResult.message("Erro " + n, sql, "Erro: " + ex.getMessage(), true, execMs));
+				break;
+			} finally {
 				runningStatement = null;
-				runWorker = null;
-				runButton.setEnabled(true);
-				try {
-					List<QueryResult> results = get();
-					// Resultado pertence a ABA que rodou (editor), nao a
-					// "aba selecionada agora" — o usuario pode ter trocado
-					// de aba enquanto a query rodava. So redesenha o painel
-					// de RESULTADOS se aquela aba ainda for a selecionada;
-					// senao, so guarda (ver showResultsForActiveEditor,
-					// chamado quando o usuario voltar pra ela).
-					resultsController.rememberTab(editor, results);
-					if (editor == currentEditor()) {
-						resultsController.showResults(results);
-					}
-					if (ranStructuralDdl(statements, results)) {
-						objectExplorer.refreshObjectTree(false);
-					}
-					logExecutionHistory(editor, results);
-				} catch (CancellationException ce) {
-					statusBar.setText(" Execucao cancelada.");
-				} catch (Exception ex) {
-					showError("Erro ao executar SQL", ex);
-					statusBar.setText(" Erro na execucao");
-				}
 			}
-		};
-		runWorker = worker;
-		worker.execute();
+		}
+		return results;
+	}
+
+	/** Monta o {@link QueryResult} de UMA instrucao ja executada com sucesso (grade de linhas OU contagem afetada). */
+	private QueryResult buildStatementResult(Statement st, String sql, int n, boolean hasResultSet, long execMs)
+			throws SQLException {
+		if (hasResultSet) {
+			ResultSet rs = st.getResultSet();
+			ResultTableModel model = createModel(rs);
+			long t1 = System.nanoTime();
+			int read = appendPage(model, rs, PAGE_SIZE);
+			long fetchMs = (System.nanoTime() - t1) / 1_000_000L;
+			boolean hasMore = read == PAGE_SIZE;
+			ResultCursor cursor = null;
+			if (hasMore) {
+				cursor = new ResultCursor(st, rs);
+			} else {
+				rs.close();
+				st.close();
+			}
+			return QueryResult.grid("Resultado " + n, sql, model, execMs, fetchMs, cursor);
+		}
+		int updated = st.getUpdateCount();
+		st.close();
+		return QueryResult.message("Comando " + n, sql, updated + " linha(s) afetada(s)", false, execMs);
+	}
+
+	/** Trata o resultado final (thread da UI, {@code SwingWorker#done}): guarda na aba, redesenha se ainda ativa, atualiza historico/arvore. */
+	private void handleStatementResults(SqlEditorPane editor, List<String> statements, List<QueryResult> results) {
+		// Resultado pertence a ABA que rodou (editor), nao a "aba
+		// selecionada agora" — o usuario pode ter trocado de aba enquanto a
+		// query rodava. So redesenha o painel de RESULTADOS se aquela aba
+		// ainda for a selecionada; senao, so guarda (ver
+		// showResultsForActiveEditor, chamado quando o usuario voltar pra ela).
+		resultsController.rememberTab(editor, results);
+		if (editor == currentEditor()) {
+			resultsController.showResults(results);
+		}
+		if (ranStructuralDdl(statements, results)) {
+			objectExplorer.refreshObjectTree(false);
+		}
+		logExecutionHistory(editor, results);
 	}
 
 	// ---------- Queries salvas (biblioteca gerenciada pelo app — ver SavedQueryStore) ----------
