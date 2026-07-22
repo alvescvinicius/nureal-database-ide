@@ -119,8 +119,7 @@ final class UserManagementDialog {
         private JTextArea grantsArea;
 
         // Aba "Roles"
-        private final DefaultListModel<String> rolesListModel = new DefaultListModel<>();
-        private JList<String> rolesList;
+        private UserRolesTab rolesTab;
 
         Session(Component parent, DatabaseDialect dialect, List<DbUserInfo> initialUsers, List<String> schemaNames,
                 String currentSchemaName, List<String> currentSchemaTables, DdlAssistantDialog.DdlRunner runner,
@@ -204,7 +203,7 @@ final class UserManagementDialog {
             newPasswordField.setEnabled(has);
             userTabs.setEnabled(has);
             grantsArea.setText("");
-            rolesListModel.clear();
+            rolesTab.clear();
             if (has && userTabs.getSelectedIndex() == grantsTabIndex) {
                 refreshGrants();
             }
@@ -222,7 +221,8 @@ final class UserManagementDialog {
             userTabs.addTab("Privilegios", buildPrivilegesTab());
             grantsTabIndex = userTabs.getTabCount();
             userTabs.addTab("Ver SHOW GRANTS", buildGrantsTab());
-            userTabs.addTab("Roles", buildRolesTab());
+            rolesTab = new UserRolesTab(dialect, queryRunner, runner, dialog, this::selectedUser);
+            userTabs.addTab("Roles", rolesTab.build());
             userTabs.addChangeListener(e -> {
                 if (selectedUser() == null) {
                     return;
@@ -586,130 +586,6 @@ final class UserManagementDialog {
                 grantsArea.setText("");
                 error("Falha ao ler SHOW GRANTS (verifique se a conexao tem privilegio para ver os grants deste usuario)", ex);
             });
-        }
-
-        // ---------- Aba: Roles ----------
-
-        private JComponent buildRolesTab() {
-            JPanel panel = new JPanel(new BorderLayout(0, 8));
-            panel.setBorder(BorderFactory.createEmptyBorder(8, 10, 8, 10));
-
-            JLabel note = new JLabel(
-                    "<html>Requer MySQL 8+. Lista abaixo e melhor esforco: so mostra roles ja atribuidas a algum "
-                            + "usuario (nao ha um jeito portatil de listar roles nunca atribuidas).</html>");
-            Typography.tertiary(note);
-
-            rolesList = new JList<>(rolesListModel);
-            JScrollPane scroll = new JScrollPane(rolesList);
-            scroll.setPreferredSize(new Dimension(300, 220));
-
-            JButton newRole = new JButton("+ Nova role...");
-            JButton deleteRole = new JButton("- Excluir role");
-            JButton refreshRoles = new JButton("Atualizar lista");
-            JButton assign = new JButton("Atribuir ao usuario selecionado");
-            JButton unassign = new JButton("Remover do usuario selecionado");
-            for (JButton b : new JButton[] { newRole, deleteRole, refreshRoles }) {
-                Buttons.styleSecondary(b);
-            }
-            Buttons.stylePrimary(assign);
-            Buttons.styleSecondary(unassign);
-            newRole.addActionListener(a -> onNewRole());
-            deleteRole.addActionListener(a -> onDeleteRole());
-            refreshRoles.addActionListener(a -> refreshRoles());
-            assign.addActionListener(a -> onAssignRole());
-            unassign.addActionListener(a -> onUnassignRole());
-
-            JPanel leftButtons = new JPanel(new GridLayout(3, 1, 0, 4));
-            leftButtons.add(newRole);
-            leftButtons.add(deleteRole);
-            leftButtons.add(refreshRoles);
-
-            JPanel left = new JPanel(new BorderLayout(0, 6));
-            left.add(scroll, BorderLayout.CENTER);
-            left.add(leftButtons, BorderLayout.SOUTH);
-
-            JPanel rightButtons = new JPanel(new GridLayout(2, 1, 0, 6));
-            rightButtons.add(assign);
-            rightButtons.add(unassign);
-            JPanel right = new JPanel(new BorderLayout());
-            right.add(rightButtons, BorderLayout.NORTH);
-
-            JPanel center = new JPanel(new BorderLayout(10, 0));
-            center.add(left, BorderLayout.WEST);
-            center.add(right, BorderLayout.CENTER);
-
-            panel.add(note, BorderLayout.NORTH);
-            panel.add(center, BorderLayout.CENTER);
-            return panel;
-        }
-
-        private void refreshRoles() {
-            queryRunner.query(dialect.knownRolesQuery(), rows -> {
-                rolesListModel.clear();
-                for (Object[] row : rows) {
-                    if (row.length > 0 && row[0] != null) {
-                        rolesListModel.addElement(String.valueOf(row[0]));
-                    }
-                }
-            }, ex -> error("Falha ao listar roles (o servidor pode nao suportar roles — exige MySQL 8+)", ex));
-        }
-
-        private void onNewRole() {
-            String name = JOptionPane.showInputDialog(dialog, "Nome da nova role:", "Nova role",
-                    JOptionPane.PLAIN_MESSAGE);
-            if (name == null || name.isBlank()) {
-                return;
-            }
-            String sql = dialect.createRoleStatement(name.trim());
-            runner.run(List.of(sql), () -> {
-                info("Role \"" + name.trim() + "\" criada.");
-                refreshRoles();
-            }, ex -> error("Falha ao criar a role", ex));
-        }
-
-        private void onDeleteRole() {
-            String role = rolesList.getSelectedValue();
-            if (role == null) {
-                JOptionPane.showMessageDialog(dialog, "Selecione uma role na lista.", "Usuarios e privilegios",
-                        JOptionPane.WARNING_MESSAGE);
-                return;
-            }
-            if (!confirm("Excluir a role \"" + role + "\"? Usuarios que a tinham atribuida perdem os privilegios dela.")) {
-                return;
-            }
-            String sql = dialect.dropRoleStatement(role);
-            runner.run(List.of(sql), () -> {
-                info("Role \"" + role + "\" excluida.");
-                refreshRoles();
-            }, ex -> error("Falha ao excluir a role", ex));
-        }
-
-        private void onAssignRole() {
-            DbUserInfo u = requireSelected();
-            String role = rolesList.getSelectedValue();
-            if (u == null || role == null) {
-                JOptionPane.showMessageDialog(dialog, "Selecione um usuario (lista da esquerda) e uma role.",
-                        "Usuarios e privilegios", JOptionPane.WARNING_MESSAGE);
-                return;
-            }
-            List<String> stmts = List.of(
-                    dialect.grantRoleStatement(role, u.user(), u.host()),
-                    dialect.setDefaultRoleStatement(role, u.user(), u.host()));
-            runner.run(stmts, () -> info("Role \"" + role + "\" atribuida a " + u.label() + " (ja ativa por padrao)."),
-                    ex -> error("Falha ao atribuir a role", ex));
-        }
-
-        private void onUnassignRole() {
-            DbUserInfo u = requireSelected();
-            String role = rolesList.getSelectedValue();
-            if (u == null || role == null) {
-                JOptionPane.showMessageDialog(dialog, "Selecione um usuario (lista da esquerda) e uma role.",
-                        "Usuarios e privilegios", JOptionPane.WARNING_MESSAGE);
-                return;
-            }
-            String sql = dialect.revokeRoleStatement(role, u.user(), u.host());
-            runner.run(List.of(sql), () -> info("Role \"" + role + "\" removida de " + u.label() + "."),
-                    ex -> error("Falha ao remover a role", ex));
         }
 
         // ---------- Novo/excluir usuario ----------
