@@ -66,7 +66,6 @@ final class ViewBuilderDialog {
                 onSuccess).show();
     }
 
-    private static final Pattern IDENTIFIER = Pattern.compile("^[A-Za-z_][A-Za-z0-9_$]*$");
     // Reluctante: para no PRIMEIRO "AS" apos a primeira ocorrencia de "VIEW" —
     // no formato padrao do MySQL (CREATE [ALGORITHM=...] [DEFINER=...] [SQL
     // SECURITY ...] VIEW `nome` AS select...), esse e exatamente o separador
@@ -207,33 +206,23 @@ final class ViewBuilderDialog {
                 SqlFormatter formatter = new SqlFormatter(SqlFormatter.KeywordCase.UPPER, SqlFormatter.Style.STANDARD,
                         false);
                 previewArea.setText(formatter.format(sql) + ";");
-            } catch (ValidationException ex) {
+            } catch (SqlBuilderValidationException ex) {
                 previewArea.setText("-- " + ex.getMessage());
             }
             previewArea.setCaretPosition(0);
         }
 
         private JComponent buildFooter() {
-            JButton close = new JButton("Fechar");
-            close.addActionListener(a -> dialog.dispose());
-            Buttons.styleSecondary(close);
-
             JButton execute = new JButton(editMode ? "Executar CREATE OR REPLACE VIEW" : "Executar CREATE VIEW");
-            Buttons.stylePrimary(execute);
             execute.addActionListener(a -> onExecute());
-
-            JPanel panel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 8));
-            panel.setBorder(BorderFactory.createEmptyBorder(0, 10, 4, 10));
-            panel.add(close);
-            panel.add(execute);
-            return panel;
+            return Buttons.dialogFooter(dialog, execute);
         }
 
         private void onExecute() {
             String sql;
             try {
                 sql = buildStatement();
-            } catch (ValidationException ex) {
+            } catch (SqlBuilderValidationException ex) {
                 JOptionPane.showMessageDialog(dialog, ex.getMessage(), "Nova/editar view", JOptionPane.WARNING_MESSAGE);
                 tabs.setSelectedIndex(0);
                 return;
@@ -254,35 +243,27 @@ final class ViewBuilderDialog {
                     "Nova/editar view", JOptionPane.ERROR_MESSAGE));
         }
 
-        private static final class ValidationException extends RuntimeException {
-            private static final long serialVersionUID = 1L;
-
-            ValidationException(String message) {
-                super(message);
-            }
-        }
-
         private String buildStatement() {
             String select = selectArea.getText().trim();
             if (select.isEmpty()) {
-                throw new ValidationException("Escreva o SELECT que a view vai expor.");
+                throw new SqlBuilderValidationException("Escreva o SELECT que a view vai expor.");
             }
             if (!select.toUpperCase(java.util.Locale.ROOT).startsWith("SELECT")) {
-                throw new ValidationException("O corpo da view deve comecar com SELECT.");
+                throw new SqlBuilderValidationException("O corpo da view deve comecar com SELECT.");
             }
             if (editMode) {
                 return dialect.replaceViewStatement(viewName, select);
             }
             String name = nameField.getText().trim();
             if (name.isEmpty()) {
-                throw new ValidationException("Informe o nome da view.");
+                throw new SqlBuilderValidationException("Informe o nome da view.");
             }
-            if (!IDENTIFIER.matcher(name).matches()) {
-                throw new ValidationException(
+            if (!SqlIdentifiers.isValid(name)) {
+                throw new SqlBuilderValidationException(
                         "Nome de view invalido: \"" + name + "\". Use letras, numeros e _ (nao pode comecar com numero).");
             }
             if (nameTaken != null && nameTaken.test(name)) {
-                throw new ValidationException("Ja existe uma tabela/view chamada \"" + name + "\".");
+                throw new SqlBuilderValidationException("Ja existe uma tabela/view chamada \"" + name + "\".");
             }
             return dialect.createViewStatement(name, select);
         }

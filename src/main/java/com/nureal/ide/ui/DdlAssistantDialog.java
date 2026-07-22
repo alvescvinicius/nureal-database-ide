@@ -117,7 +117,6 @@ final class DdlAssistantDialog {
             "BOOLEAN", "JSON", "BLOB"
     };
     private static final String[] FK_ACTIONS = { "RESTRICT", "CASCADE", "SET NULL", "NO ACTION" };
-    private static final Pattern IDENTIFIER = Pattern.compile("^[A-Za-z_][A-Za-z0-9_$]*$");
     private static final Pattern TYPE_PARTS = Pattern.compile("^\\s*([A-Za-z_]+)\\s*(?:\\(([^)]*)\\))?");
 
     /** Uma execucao do assistente: estado + toda a UI. Instanciada a cada abertura. */
@@ -751,7 +750,7 @@ final class DdlAssistantDialog {
                     sb.append(formatter.format(s)).append(";\n\n");
                 }
                 return sb.toString().trim();
-            } catch (ValidationException ex) {
+            } catch (SqlBuilderValidationException ex) {
                 return "-- " + ex.getMessage();
             }
         }
@@ -759,32 +758,16 @@ final class DdlAssistantDialog {
         // ---------- Rodape ----------
 
         private JComponent buildFooter() {
-            JButton close = new JButton("Fechar");
-            close.addActionListener(a -> dialog.dispose());
-            Buttons.styleSecondary(close);
-
-            // Acao PRIMARIA: mesmo tratamento do botao "Executar" da barra de
-            // ferramentas principal (ver Buttons#stylePrimary) — verde da
-            // marca, sem borda/fill extra do FlatLaf padrao, pra ficar
-            // inequivocamente a acao em destaque do dialogo. Antes
-            // reimplementava o mesmo trecho na mao em vez de chamar o
-            // helper compartilhado.
             JButton execute = new JButton(alterMode ? "Executar ALTER TABLE" : "Executar CREATE TABLE");
-            Buttons.stylePrimary(execute);
             execute.addActionListener(a -> onExecute());
-
-            JPanel panel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 8));
-            panel.setBorder(BorderFactory.createEmptyBorder(0, 10, 4, 10));
-            panel.add(close);
-            panel.add(execute);
-            return panel;
+            return Buttons.dialogFooter(dialog, execute);
         }
 
         private void onExecute() {
             List<String> statements;
             try {
                 statements = buildStatements();
-            } catch (ValidationException ex) {
+            } catch (SqlBuilderValidationException ex) {
                 JOptionPane.showMessageDialog(dialog, ex.getMessage(), "Assistente de DDL",
                         JOptionPane.WARNING_MESSAGE);
                 tabs.setSelectedIndex(0);
@@ -829,14 +812,6 @@ final class DdlAssistantDialog {
 
         // ---------- Coleta/validacao do estado das abas ----------
 
-        private static final class ValidationException extends RuntimeException {
-            private static final long serialVersionUID = 1L;
-
-            ValidationException(String message) {
-                super(message);
-            }
-        }
-
         private List<String> buildStatements() {
             List<NewColumnSpec> newColumns = collectNewColumns();
             List<ForeignKeyInfo> fks = collectForeignKeys(false);
@@ -856,17 +831,17 @@ final class DdlAssistantDialog {
             }
             String tableName = nameField.getText().trim();
             if (tableName.isEmpty()) {
-                throw new ValidationException("Informe o nome da tabela.");
+                throw new SqlBuilderValidationException("Informe o nome da tabela.");
             }
-            if (!IDENTIFIER.matcher(tableName).matches()) {
-                throw new ValidationException(
+            if (!SqlIdentifiers.isValid(tableName)) {
+                throw new SqlBuilderValidationException(
                         "Nome de tabela invalido: \"" + tableName + "\". Use letras, numeros e _ (nao pode comecar com numero).");
             }
             if (tableNameTaken != null && tableNameTaken.test(tableName)) {
-                throw new ValidationException("Ja existe uma tabela chamada \"" + tableName + "\".");
+                throw new SqlBuilderValidationException("Ja existe uma tabela chamada \"" + tableName + "\".");
             }
             if (newColumns.isEmpty()) {
-                throw new ValidationException("Adicione pelo menos uma coluna.");
+                throw new SqlBuilderValidationException("Adicione pelo menos uma coluna.");
             }
             NewTableSpec spec = new NewTableSpec(tableName, newColumns, commentField.getText().trim(), fks, idxs);
             return List.of(dialect.createTableStatement(spec));
@@ -894,13 +869,13 @@ final class DdlAssistantDialog {
                     continue;
                 }
                 if (name.isEmpty()) {
-                    throw new ValidationException("Linha " + (r + 1) + " da grade de colunas: informe o nome.");
+                    throw new SqlBuilderValidationException("Linha " + (r + 1) + " da grade de colunas: informe o nome.");
                 }
-                if (!IDENTIFIER.matcher(name).matches()) {
-                    throw new ValidationException("Nome de coluna invalido: \"" + name + "\".");
+                if (!SqlIdentifiers.isValid(name)) {
+                    throw new SqlBuilderValidationException("Nome de coluna invalido: \"" + name + "\".");
                 }
                 if (!seen.add(name.toLowerCase(Locale.ROOT))) {
-                    throw new ValidationException("Coluna repetida (ou ja existente na tabela): \"" + name + "\".");
+                    throw new SqlBuilderValidationException("Coluna repetida (ou ja existente na tabela): \"" + name + "\".");
                 }
                 columns.add(new NewColumnSpec(name, type.isEmpty() ? "VARCHAR" : type, length, nullable, pk, ai, def,
                         comment));
@@ -1055,7 +1030,7 @@ final class DdlAssistantDialog {
                 }
                 if (!lenient) {
                     if (cols.isEmpty() || refTable.isEmpty() || refCols.isEmpty()) {
-                        throw new ValidationException(
+                        throw new SqlBuilderValidationException(
                                 "Linha " + (r + 1) + " da aba \"Chaves estrangeiras\": preencha coluna(s) local(is), "
                                         + "tabela e coluna(s) referenciada(s).");
                     }

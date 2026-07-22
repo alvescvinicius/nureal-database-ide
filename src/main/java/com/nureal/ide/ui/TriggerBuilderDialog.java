@@ -67,7 +67,6 @@ final class TriggerBuilderDialog {
 
     private static final String[] TIMINGS = { "BEFORE", "AFTER" };
     private static final String[] EVENTS = { "INSERT", "UPDATE", "DELETE" };
-    private static final Pattern IDENTIFIER = Pattern.compile("^[A-Za-z_][A-Za-z0-9_$]*$");
 
     /** Cabecalho padrao do MySQL: "... TRIGGER `nome` BEFORE|AFTER INSERT|UPDATE|DELETE ON `tabela` FOR EACH ROW <resto>". */
     private static final Pattern TRIGGER_HEADER = Pattern.compile(
@@ -288,33 +287,23 @@ final class TriggerBuilderDialog {
                     sb.append(formatter.format(s)).append(";\n\n");
                 }
                 previewArea.setText(sb.toString().trim());
-            } catch (ValidationException ex) {
+            } catch (SqlBuilderValidationException ex) {
                 previewArea.setText("-- " + ex.getMessage());
             }
             previewArea.setCaretPosition(0);
         }
 
         private JComponent buildFooter() {
-            JButton close = new JButton("Fechar");
-            close.addActionListener(a -> dialog.dispose());
-            Buttons.styleSecondary(close);
-
             JButton execute = new JButton(editMode ? "Executar (recriar trigger)" : "Executar CREATE TRIGGER");
-            Buttons.stylePrimary(execute);
             execute.addActionListener(a -> onExecute());
-
-            JPanel panel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 8));
-            panel.setBorder(BorderFactory.createEmptyBorder(0, 10, 4, 10));
-            panel.add(close);
-            panel.add(execute);
-            return panel;
+            return Buttons.dialogFooter(dialog, execute);
         }
 
         private void onExecute() {
             List<String> statements;
             try {
                 statements = buildStatements();
-            } catch (ValidationException ex) {
+            } catch (SqlBuilderValidationException ex) {
                 JOptionPane.showMessageDialog(dialog, ex.getMessage(), "Novo/editar trigger",
                         JOptionPane.WARNING_MESSAGE);
                 tabs.setSelectedIndex(0);
@@ -346,22 +335,14 @@ final class TriggerBuilderDialog {
                     "Novo/editar trigger", JOptionPane.ERROR_MESSAGE));
         }
 
-        private static final class ValidationException extends RuntimeException {
-            private static final long serialVersionUID = 1L;
-
-            ValidationException(String message) {
-                super(message);
-            }
-        }
-
         private List<String> buildStatements() {
             String body = bodyArea.getText().trim();
             if (body.isEmpty()) {
-                throw new ValidationException("Escreva pelo menos um comando no corpo do trigger.");
+                throw new SqlBuilderValidationException("Escreva pelo menos um comando no corpo do trigger.");
             }
             Object tableSelected = tableCombo.getSelectedItem();
             if (tableSelected == null || tableSelected.toString().isBlank()) {
-                throw new ValidationException("Escolha a tabela (ON) do trigger.");
+                throw new SqlBuilderValidationException("Escolha a tabela (ON) do trigger.");
             }
             String table = tableSelected.toString();
             String timing = (String) timingCombo.getSelectedItem();
@@ -373,14 +354,14 @@ final class TriggerBuilderDialog {
             }
             String name = nameField.getText().trim();
             if (name.isEmpty()) {
-                throw new ValidationException("Informe o nome do trigger.");
+                throw new SqlBuilderValidationException("Informe o nome do trigger.");
             }
-            if (!IDENTIFIER.matcher(name).matches()) {
-                throw new ValidationException(
+            if (!SqlIdentifiers.isValid(name)) {
+                throw new SqlBuilderValidationException(
                         "Nome de trigger invalido: \"" + name + "\". Use letras, numeros e _ (nao pode comecar com numero).");
             }
             if (nameTaken != null && nameTaken.test(name)) {
-                throw new ValidationException("Ja existe um trigger chamado \"" + name + "\".");
+                throw new SqlBuilderValidationException("Ja existe um trigger chamado \"" + name + "\".");
             }
             return List.of(dialect.createTriggerStatement(name, timing, event, table, body));
         }

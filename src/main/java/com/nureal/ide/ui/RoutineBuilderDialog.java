@@ -68,8 +68,6 @@ final class RoutineBuilderDialog {
             "VARCHAR", "CHAR", "TEXT", "INT", "BIGINT", "SMALLINT", "TINYINT",
             "DECIMAL", "FLOAT", "DOUBLE", "DATE", "DATETIME", "TIMESTAMP", "TIME", "BOOLEAN", "JSON"
     };
-    private static final java.util.regex.Pattern IDENTIFIER =
-            java.util.regex.Pattern.compile("^[A-Za-z_][A-Za-z0-9_$]*$");
 
     /**
      * Abre o assistente no modo "criar" — {@code initialKind} preseleciona
@@ -295,33 +293,23 @@ final class RoutineBuilderDialog {
                 SqlFormatter formatter = new SqlFormatter(SqlFormatter.KeywordCase.UPPER, SqlFormatter.Style.STANDARD,
                         false);
                 previewArea.setText(formatter.format(sql) + ";");
-            } catch (ValidationException ex) {
+            } catch (SqlBuilderValidationException ex) {
                 previewArea.setText("-- " + ex.getMessage());
             }
             previewArea.setCaretPosition(0);
         }
 
         private JComponent buildFooter() {
-            JButton close = new JButton("Fechar");
-            close.addActionListener(a -> dialog.dispose());
-            Buttons.styleSecondary(close);
-
             JButton execute = new JButton("Executar CREATE");
-            Buttons.stylePrimary(execute);
             execute.addActionListener(a -> onExecute());
-
-            JPanel panel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 8));
-            panel.setBorder(BorderFactory.createEmptyBorder(0, 10, 4, 10));
-            panel.add(close);
-            panel.add(execute);
-            return panel;
+            return Buttons.dialogFooter(dialog, execute);
         }
 
         private void onExecute() {
             String sql;
             try {
                 sql = buildStatement();
-            } catch (ValidationException ex) {
+            } catch (SqlBuilderValidationException ex) {
                 JOptionPane.showMessageDialog(dialog, ex.getMessage(), "Nova procedure/function",
                         JOptionPane.WARNING_MESSAGE);
                 tabs.setSelectedIndex(0);
@@ -344,37 +332,29 @@ final class RoutineBuilderDialog {
                     "Nova procedure/function", JOptionPane.ERROR_MESSAGE));
         }
 
-        private static final class ValidationException extends RuntimeException {
-            private static final long serialVersionUID = 1L;
-
-            ValidationException(String message) {
-                super(message);
-            }
-        }
-
         private String buildStatement() {
             String kind = (String) kindCombo.getSelectedItem();
             String name = nameField.getText().trim();
             if (name.isEmpty()) {
-                throw new ValidationException("Informe o nome da " + ("PROCEDURE".equals(kind) ? "procedure" : "function") + ".");
+                throw new SqlBuilderValidationException("Informe o nome da " + ("PROCEDURE".equals(kind) ? "procedure" : "function") + ".");
             }
-            if (!IDENTIFIER.matcher(name).matches()) {
-                throw new ValidationException("Nome invalido: \"" + name + "\". Use letras, numeros e _ (nao pode comecar com numero).");
+            if (!SqlIdentifiers.isValid(name)) {
+                throw new SqlBuilderValidationException("Nome invalido: \"" + name + "\". Use letras, numeros e _ (nao pode comecar com numero).");
             }
             if (nameTaken != null && nameTaken.test(kind, name)) {
-                throw new ValidationException("Ja existe uma " + ("PROCEDURE".equals(kind) ? "procedure" : "function")
+                throw new SqlBuilderValidationException("Ja existe uma " + ("PROCEDURE".equals(kind) ? "procedure" : "function")
                         + " chamada \"" + name + "\".");
             }
             String body = bodyArea.getText().trim();
             if (body.isEmpty()) {
-                throw new ValidationException("Escreva pelo menos um comando no corpo.");
+                throw new SqlBuilderValidationException("Escreva pelo menos um comando no corpo.");
             }
             boolean isFunction = "FUNCTION".equals(kind);
             List<String> params = collectParams(isFunction);
             if (isFunction) {
                 Object returnType = returnTypeCombo.getSelectedItem();
                 if (returnType == null || returnType.toString().isBlank()) {
-                    throw new ValidationException("Escolha o tipo de retorno (RETURNS).");
+                    throw new SqlBuilderValidationException("Escolha o tipo de retorno (RETURNS).");
                 }
                 return dialect.createFunctionStatement(name, params, returnType.toString(),
                         deterministicCheck.isSelected(), body);
@@ -394,10 +374,10 @@ final class RoutineBuilderDialog {
                     continue;
                 }
                 if (name.isEmpty()) {
-                    throw new ValidationException("Ha um parametro sem nome na aba \"Parametros\".");
+                    throw new SqlBuilderValidationException("Ha um parametro sem nome na aba \"Parametros\".");
                 }
-                if (!IDENTIFIER.matcher(name).matches()) {
-                    throw new ValidationException("Nome de parametro invalido: \"" + name + "\".");
+                if (!SqlIdentifiers.isValid(name)) {
+                    throw new SqlBuilderValidationException("Nome de parametro invalido: \"" + name + "\".");
                 }
                 StringBuilder def = new StringBuilder();
                 // FUNCTION do MySQL nao aceita modo (IN e sempre implicito) —

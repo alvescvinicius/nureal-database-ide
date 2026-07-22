@@ -1,10 +1,14 @@
 package com.nureal.ide.ui;
 
 import java.awt.Color;
+import java.awt.FlowLayout;
 import java.awt.Insets;
 import java.util.function.Supplier;
 
+import javax.swing.BorderFactory;
 import javax.swing.JButton;
+import javax.swing.JDialog;
+import javax.swing.JPanel;
 
 import com.formdev.flatlaf.FlatClientProperties;
 
@@ -119,5 +123,28 @@ public final class Buttons {
     /** Igual ao outro {@link #iconButton}, para uma cor FIXA (nao reativa ao tema, ex.: {@link Color#WHITE}). */
     public static JButton iconButton(IconType type, int size, Color fixedColor) {
         return iconButton(type, size, () -> fixedColor);
+    }
+
+    /**
+     * Rodape padrao dos assistentes de DDL guiados ({@link DdlAssistantDialog},
+     * {@link ViewBuilderDialog}, {@link TriggerBuilderDialog},
+     * {@link RoutineBuilderDialog}): "Fechar" (fecha {@code dialog}) + a acao
+     * primaria do dialogo, no mesmo {@code FlowLayout.RIGHT} — SPEC-0008
+     * Etapa 2 encontrou este bloco de ~12 linhas copiado identico nos 4
+     * arquivos (so o texto do botao primario mudava). {@code primaryAction}
+     * ja deve vir com texto e {@code ActionListener} prontos; este metodo so
+     * aplica {@link #stylePrimary} e monta o painel.
+     */
+    public static JPanel dialogFooter(JDialog dialog, JButton primaryAction) {
+        JButton close = new JButton("Fechar");
+        close.addActionListener(a -> dialog.dispose());
+        styleSecondary(close);
+        stylePrimary(primaryAction);
+
+        JPanel panel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 8));
+        panel.setBorder(BorderFactory.createEmptyBorder(0, 10, 4, 10));
+        panel.add(close);
+        panel.add(primaryAction);
+        return panel;
     }
 }
