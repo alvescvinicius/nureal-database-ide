@@ -92,6 +92,61 @@ final class FkInspectorWindow {
         String table = fk.referencedTable();
         List<String> refCols = fk.referencedColumns();
 
+        FilterBar filterBar = buildFilterBar(refCols, localValues);
+
+        JPanel center = new JPanel(new BorderLayout());
+        JLabel status = new JLabel(" ");
+        JPanel south = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 3));
+        south.setOpaque(true);
+        south.add(status);
+
+        // Cores/bordas de filterBar/south/labels dependem do tema (GridTheme
+        // e FlatLaf.isLafDark()) mas sao setadas com setBackground/setForeground/
+        // setBorder — uma vez CHAMADAS, esses valores ficam CONGELADOS no
+        // componente (Swing nunca reaplica sozinho um valor explicito, so o
+        // que ainda e UIResource/nao-setado — mesma familia de bug ja vista e
+        // corrigida em ResultGrid/SqlEditorPane/GridTheme). Centraliza a
+        // logica aqui pra poder chamar de novo sempre que o L&F mudar (ver o
+        // updateUI() do dialogo abaixo) — sem isto, o inspetor so refletia o
+        // tema atualizado depois de FECHADO E REABERTO (bug relatado pelo
+        // usuario: "eu preciso fechar e abrir de novo... queria que fosse
+        // automatico").
+        Runnable applyChrome = () -> applyChrome(filterBar.panel(), filterBar.filterLabel(), south, status);
+        applyChrome.run();
+
+        JDialog dialog = buildDialog(owner, table, applyChrome);
+        List<JTextField> valueFields = filterBar.valueFields();
+
+        Runnable runQuery = () -> runQuery(dialog, connectionManager, dialect, schema, metadataCache, scale, table,
+                refCols, valueFields, center, status);
+
+        filterBar.search().addActionListener(a -> runQuery.run());
+        filterBar.clear().addActionListener(a -> {
+            for (JTextField f : valueFields) {
+                f.setText("");
+            }
+            runQuery.run();
+        });
+        for (JTextField f : valueFields) {
+            f.addActionListener(a -> runQuery.run());
+        }
+
+        dialog.add(filterBar.panel(), BorderLayout.NORTH);
+        dialog.add(center, BorderLayout.CENTER);
+        dialog.add(south, BorderLayout.SOUTH);
+        dialog.setSize(760, 480);
+        dialog.setLocationRelativeTo(owner);
+        dialog.setResizable(true);
+        dialog.setVisible(true); // MODELESS: nao bloqueia, retorna na hora
+        runQuery.run(); // consulta inicial, ja com o filtro pre-preenchido
+    }
+
+    private record FilterBar(JPanel panel, JLabel filterLabel, List<JTextField> valueFields, JButton search,
+            JButton clear) {
+    }
+
+    /** Barra "coluna = valor" no topo, uma caixa por coluna referenciada, com "Buscar"/"Limpar". */
+    private static FilterBar buildFilterBar(List<String> refCols, List<Object> localValues) {
         List<JTextField> valueFields = new ArrayList<>();
         JPanel filterBar = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 6));
         filterBar.setOpaque(true);
@@ -116,44 +171,45 @@ final class FkInspectorWindow {
         }
         filterBar.add(search);
         filterBar.add(clear);
+        return new FilterBar(filterBar, filterLabel, valueFields, search, clear);
+    }
 
-        JPanel center = new JPanel(new BorderLayout());
-        JLabel status = new JLabel(" ");
-        JPanel south = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 3));
-        south.setOpaque(true);
-        south.add(status);
+    /**
+     * Cores/bordas de filterBar/south/labels dependem do tema (GridTheme e
+     * FlatLaf.isLafDark()) mas sao setadas com setBackground/setForeground/
+     * setBorder — uma vez CHAMADAS, esses valores ficam CONGELADOS no
+     * componente (Swing nunca reaplica sozinho um valor explicito, so o que
+     * ainda e UIResource/nao-setado — mesma familia de bug ja vista e
+     * corrigida em ResultGrid/SqlEditorPane/GridTheme). Chamado de novo
+     * sempre que o L&F mudar (ver {@link #buildDialog}) — sem isto, o
+     * inspetor so refletia o tema atualizado depois de FECHADO E REABERTO
+     * (bug relatado pelo usuario: "eu preciso fechar e abrir de novo...
+     * queria que fosse automatico").
+     */
+    private static void applyChrome(JPanel filterBar, JLabel filterLabel, JPanel south, JLabel status) {
+        // Mesmo fundo "barra de contexto" do breadcrumb do editor SQL (ver
+        // SqlEditorPane#buildBreadcrumbBar).
+        filterBar.setBackground(FlatLaf.isLafDark() ? new Color(0x1A, 0x1B, 0x1E) : new Color(0xEC, 0xEE, 0xF1));
+        filterBar.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, GridTheme.HEADER_BORDER));
+        Typography.tertiary(filterLabel);
+        south.setBackground(GridTheme.HEADER_BACKGROUND);
+        south.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(1, 0, 0, 0, GridTheme.HEADER_BORDER),
+                BorderFactory.createEmptyBorder(0, 4, 0, 4)));
+        Typography.tertiary(status);
+    }
 
-        // Cores/bordas de filterBar/south/labels dependem do tema (GridTheme
-        // e FlatLaf.isLafDark()) mas sao setadas com setBackground/setForeground/
-        // setBorder — uma vez CHAMADAS, esses valores ficam CONGELADOS no
-        // componente (Swing nunca reaplica sozinho um valor explicito, so o
-        // que ainda e UIResource/nao-setado — mesma familia de bug ja vista e
-        // corrigida em ResultGrid/SqlEditorPane/GridTheme). Centraliza a
-        // logica aqui pra poder chamar de novo sempre que o L&F mudar (ver o
-        // updateUI() do dialogo abaixo) — sem isto, o inspetor so refletia o
-        // tema atualizado depois de FECHADO E REABERTO (bug relatado pelo
-        // usuario: "eu preciso fechar e abrir de novo... queria que fosse
-        // automatico").
-        Runnable applyChrome = () -> {
-            // Mesmo fundo "barra de contexto" do breadcrumb do editor SQL (ver
-            // SqlEditorPane#buildBreadcrumbBar).
-            filterBar.setBackground(FlatLaf.isLafDark() ? new Color(0x1A, 0x1B, 0x1E) : new Color(0xEC, 0xEE, 0xF1));
-            filterBar.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, GridTheme.HEADER_BORDER));
-            Typography.tertiary(filterLabel);
-            south.setBackground(GridTheme.HEADER_BACKGROUND);
-            south.setBorder(BorderFactory.createCompoundBorder(
-                    BorderFactory.createMatteBorder(1, 0, 0, 0, GridTheme.HEADER_BORDER),
-                    BorderFactory.createEmptyBorder(0, 4, 0, 4)));
-            Typography.tertiary(status);
-        };
-        applyChrome.run();
-
-        // JDialog NAO e um JComponent (nao tem updateUI() proprio pra
-        // sobrescrever — so o JRootPane dele tem). createRootPane() e o
-        // ponto de extensao padrao do Swing pra isto: chamado UMA vez, na
-        // construcao do proprio JDialog, e o JRootPane devolvido AQUI e quem
-        // recebe o updateUI() em cascata do FlatLaf.updateUI() (que percorre
-        // a arvore de componentes de toda janela aberta).
+    /**
+     * JDialog NAO e um JComponent (nao tem updateUI() proprio pra
+     * sobrescrever — so o JRootPane dele tem). createRootPane() e o ponto de
+     * extensao padrao do Swing pra isto: chamado UMA vez, na construcao do
+     * proprio JDialog, e o JRootPane devolvido AQUI e quem recebe o
+     * updateUI() em cascata do FlatLaf.updateUI() (que percorre a arvore de
+     * componentes de toda janela aberta) — reaplica {@code applyChrome}
+     * sempre que o L&F mudar em qualquer janela aberta (ver
+     * FlatLaf.updateUI() em MainWindow#toggleTheme).
+     */
+    private static JDialog buildDialog(Window owner, String table, Runnable applyChrome) {
         JDialog dialog = new JDialog(owner, "Inspetor: " + table, Dialog.ModalityType.MODELESS) {
             private static final long serialVersionUID = 1L;
 
@@ -165,40 +221,13 @@ final class FkInspectorWindow {
                     @Override
                     public void updateUI() {
                         super.updateUI();
-                        // "applyChrome" ja existe (variavel local efetivamente
-                        // final, definida e chamada ACIMA antes deste dialogo
-                        // ser construido) — reaplica sempre que o L&F mudar em
-                        // qualquer janela aberta (ver FlatLaf.updateUI() em
-                        // MainWindow#toggleTheme).
                         applyChrome.run();
                     }
                 };
             }
         };
         dialog.setLayout(new BorderLayout());
-
-        Runnable runQuery = () -> runQuery(dialog, connectionManager, dialect, schema, metadataCache, scale, table,
-                refCols, valueFields, center, status);
-
-        search.addActionListener(a -> runQuery.run());
-        clear.addActionListener(a -> {
-            for (JTextField f : valueFields) {
-                f.setText("");
-            }
-            runQuery.run();
-        });
-        for (JTextField f : valueFields) {
-            f.addActionListener(a -> runQuery.run());
-        }
-
-        dialog.add(filterBar, BorderLayout.NORTH);
-        dialog.add(center, BorderLayout.CENTER);
-        dialog.add(south, BorderLayout.SOUTH);
-        dialog.setSize(760, 480);
-        dialog.setLocationRelativeTo(owner);
-        dialog.setResizable(true);
-        dialog.setVisible(true); // MODELESS: nao bloqueia, retorna na hora
-        runQuery.run(); // consulta inicial, ja com o filtro pre-preenchido
+        return dialog;
     }
 
     /** Roda (em background) o SELECT atual — com os filtros preenchidos ou sem nenhum — e reconstroi a grade. */

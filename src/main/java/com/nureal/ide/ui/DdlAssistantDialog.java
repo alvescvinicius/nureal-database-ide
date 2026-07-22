@@ -244,43 +244,7 @@ final class DdlAssistantDialog {
             panel.setBorder(BorderFactory.createEmptyBorder(8, 10, 8, 10));
 
             if (alterMode) {
-                // Colunas EXISTENTES: "Coluna"/"Chave"/"Extra" ficam so-leitura (nome
-                // nao muda — ver banner; chave/extra sao preservados por baixo dos
-                // panos ao montar o MODIFY COLUMN, ver collectModifiedColumns());
-                // Tipo/Tamanho/Nulo/Default/Comentario sao editaveis (viram MODIFY
-                // COLUMN se algum valor mudar); "Remover" marca DROP COLUMN.
-                String[] existingHeaders = { "Coluna", "Tipo", "Tamanho", "Nulo", "Chave", "Extra", "Default",
-                        "Comentario", "Remover" };
-                existingColumnsModel = new DefaultTableModel(existingHeaders, 0) {
-                    private static final long serialVersionUID = 1L;
-
-                    @Override
-                    public Class<?> getColumnClass(int columnIndex) {
-                        return (columnIndex == 3 || columnIndex == 8) ? Boolean.class : String.class;
-                    }
-
-                    @Override
-                    public boolean isCellEditable(int row, int column) {
-                        return column != 0 && column != 4 && column != 5;
-                    }
-                };
-                for (ColumnDetail cd : existingDetails.columns()) {
-                    String[] parts = parseType(cd.type());
-                    existingColumnsModel.addRow(new Object[] { cd.name(), parts[0], parts[1], cd.nullable(),
-                            cd.key(), cd.extra(), nullToEmpty(cd.defaultValue()), nullToEmpty(cd.comment()),
-                            Boolean.FALSE });
-                }
-                existingColumnsTable = MetadataTableStyle.createStyledTable(existingColumnsModel);
-                existingColumnsTable.getColumnModel().getColumn(1)
-                        .setCellEditor(new DefaultCellEditor(new JComboBox<>(TYPES)));
-                existingColumnsTable.putClientProperty("terminateEditOnFocusLost", Boolean.TRUE);
-                JScrollPane existingScroll = new JScrollPane(existingColumnsTable);
-                existingScroll.setPreferredSize(new Dimension(880, 140));
-                JPanel existingWrap = new JPanel(new BorderLayout(0, 4));
-                existingWrap.add(new JLabel("Colunas atuais (edite para MODIFY, marque \"Remover\" para DROP):"),
-                        BorderLayout.NORTH);
-                existingWrap.add(existingScroll, BorderLayout.CENTER);
-                panel.add(existingWrap, BorderLayout.NORTH);
+                panel.add(buildExistingColumnsPanel(), BorderLayout.NORTH);
             }
 
             String[] headers = { "Nome", "Tipo", "Tamanho", "Nulo", "PK", "AI", "Default", "Comentario" };
@@ -321,6 +285,63 @@ final class DdlAssistantDialog {
             columnClipboard.bindCopy(table);
             columnClipboard.bindPaste(table);
 
+            JPanel buttons = buildColumnButtonsRow(table);
+
+            JPanel newWrap = new JPanel(new BorderLayout(0, 4));
+            newWrap.add(new JLabel(alterMode ? "Colunas novas a adicionar:" : "Colunas:"), BorderLayout.NORTH);
+            JScrollPane scroll = new JScrollPane(table);
+            scroll.setPreferredSize(new Dimension(880, alterMode ? 200 : 320));
+            newWrap.add(scroll, BorderLayout.CENTER);
+            newWrap.add(buttons, BorderLayout.SOUTH);
+            panel.add(newWrap, BorderLayout.CENTER);
+            return panel;
+        }
+
+        /**
+         * Painel "Colunas atuais" (so no modo alterar): "Coluna"/"Chave"/"Extra"
+         * ficam so-leitura (nome nao muda — ver banner; chave/extra sao
+         * preservados por baixo dos panos ao montar o MODIFY COLUMN, ver
+         * collectModifiedColumns()); Tipo/Tamanho/Nulo/Default/Comentario sao
+         * editaveis (viram MODIFY COLUMN se algum valor mudar); "Remover"
+         * marca DROP COLUMN.
+         */
+        private JComponent buildExistingColumnsPanel() {
+            String[] existingHeaders = { "Coluna", "Tipo", "Tamanho", "Nulo", "Chave", "Extra", "Default",
+                    "Comentario", "Remover" };
+            existingColumnsModel = new DefaultTableModel(existingHeaders, 0) {
+                private static final long serialVersionUID = 1L;
+
+                @Override
+                public Class<?> getColumnClass(int columnIndex) {
+                    return (columnIndex == 3 || columnIndex == 8) ? Boolean.class : String.class;
+                }
+
+                @Override
+                public boolean isCellEditable(int row, int column) {
+                    return column != 0 && column != 4 && column != 5;
+                }
+            };
+            for (ColumnDetail cd : existingDetails.columns()) {
+                String[] parts = parseType(cd.type());
+                existingColumnsModel.addRow(new Object[] { cd.name(), parts[0], parts[1], cd.nullable(),
+                        cd.key(), cd.extra(), nullToEmpty(cd.defaultValue()), nullToEmpty(cd.comment()),
+                        Boolean.FALSE });
+            }
+            existingColumnsTable = MetadataTableStyle.createStyledTable(existingColumnsModel);
+            existingColumnsTable.getColumnModel().getColumn(1)
+                    .setCellEditor(new DefaultCellEditor(new JComboBox<>(TYPES)));
+            existingColumnsTable.putClientProperty("terminateEditOnFocusLost", Boolean.TRUE);
+            JScrollPane existingScroll = new JScrollPane(existingColumnsTable);
+            existingScroll.setPreferredSize(new Dimension(880, 140));
+            JPanel existingWrap = new JPanel(new BorderLayout(0, 4));
+            existingWrap.add(new JLabel("Colunas atuais (edite para MODIFY, marque \"Remover\" para DROP):"),
+                    BorderLayout.NORTH);
+            existingWrap.add(existingScroll, BorderLayout.CENTER);
+            return existingWrap;
+        }
+
+        /** Linha de botoes "+ Coluna"/"- Coluna"/"Duplicar" abaixo da grade de colunas novas. */
+        private JPanel buildColumnButtonsRow(JTable table) {
             JButton addRow = new JButton("+ Coluna");
             addRow.addActionListener(a -> {
                 stopEditing(table);
@@ -365,15 +386,7 @@ final class DdlAssistantDialog {
             buttons.add(addRow);
             buttons.add(removeRow);
             buttons.add(duplicateRow);
-
-            JPanel newWrap = new JPanel(new BorderLayout(0, 4));
-            newWrap.add(new JLabel(alterMode ? "Colunas novas a adicionar:" : "Colunas:"), BorderLayout.NORTH);
-            JScrollPane scroll = new JScrollPane(table);
-            scroll.setPreferredSize(new Dimension(880, alterMode ? 200 : 320));
-            newWrap.add(scroll, BorderLayout.CENTER);
-            newWrap.add(buttons, BorderLayout.SOUTH);
-            panel.add(newWrap, BorderLayout.CENTER);
-            return panel;
+            return buttons;
         }
 
         private static void addDefaultColumnRow(DefaultTableModel model) {
