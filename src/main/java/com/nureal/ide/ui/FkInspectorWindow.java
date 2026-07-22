@@ -25,7 +25,6 @@ import javax.swing.JTextField;
 import javax.swing.SwingWorker;
 import javax.swing.filechooser.FileNameExtensionFilter;
 
-import com.formdev.flatlaf.FlatClientProperties;
 import com.formdev.flatlaf.FlatLaf;
 
 import com.nureal.ide.core.connection.ConnectionManager;
@@ -113,9 +112,7 @@ final class FkInspectorWindow {
         JButton search = new JButton("Buscar");
         JButton clear = new JButton("Limpar (ver todos)");
         for (JButton btn : new JButton[] { search, clear }) {
-            btn.putClientProperty("JButton.buttonType", "roundRect");
-            btn.putClientProperty(FlatClientProperties.STYLE, "arc: 8; borderWidth: 1");
-            btn.setMargin(new java.awt.Insets(4, 10, 4, 10));
+            Buttons.styleSecondary(btn);
         }
         filterBar.add(search);
         filterBar.add(clear);

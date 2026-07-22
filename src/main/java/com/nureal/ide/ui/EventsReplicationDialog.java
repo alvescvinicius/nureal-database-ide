@@ -1,7 +1,6 @@
 package com.nureal.ide.ui;
 
 import com.nureal.ide.core.dialect.DatabaseDialect;
-import com.nureal.ide.ui.components.NSearchField;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
@@ -13,7 +12,6 @@ import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTable;
 import javax.swing.JTabbedPane;
-import javax.swing.RowFilter;
 import javax.swing.table.DefaultTableModel;
 import javax.swing.table.TableRowSorter;
 import java.awt.BorderLayout;
@@ -97,34 +95,11 @@ final class EventsReplicationDialog {
             TableRowSorter<DefaultTableModel> sorter = new TableRowSorter<>(eventsModel);
             table.setRowSorter(sorter);
 
-            NSearchField search = new NSearchField("Filtrar por nome...");
-            search.onTextChange(() -> {
-                String text = search.getText().trim();
-                sorter.setRowFilter(text.isEmpty() ? null
-                        : RowFilter.regexFilter("(?i)" + java.util.regex.Pattern.quote(text), 0));
-            });
-
-            JButton refresh = new JButton("Atualizar");
-            Buttons.styleSecondary(refresh);
-            refresh.addActionListener(a -> refreshEvents());
-
             JLabel note = new JLabel("  Eventos criados com CREATE EVENT — inclui pausados (status DISABLED).");
             Typography.tertiary(note);
 
-            JPanel top = new JPanel(new BorderLayout(6, 0));
-            top.setBorder(BorderFactory.createEmptyBorder(8, 8, 6, 8));
-            top.add(search, BorderLayout.CENTER);
-            JPanel refreshWrap = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
-            refreshWrap.add(refresh);
-            top.add(refreshWrap, BorderLayout.EAST);
-
-            JScrollPane scroll = new JScrollPane(table);
-            scroll.setPreferredSize(new Dimension(760, 420));
-
-            JPanel panel = new JPanel(new BorderLayout());
-            panel.add(top, BorderLayout.NORTH);
-            panel.add(scroll, BorderLayout.CENTER);
-            panel.add(note, BorderLayout.SOUTH);
+            JComponent panel = SearchableTableTab.build(table, sorter, this::refreshEvents,
+                    new Dimension(760, 420), note);
 
             refreshEvents();
             return panel;

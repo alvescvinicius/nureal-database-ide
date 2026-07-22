@@ -3,23 +3,16 @@ package com.nureal.ide.ui;
 import java.awt.BorderLayout;
 import java.awt.Component;
 import java.awt.Dimension;
-import java.awt.FlowLayout;
 import java.awt.Window;
-import javax.swing.BorderFactory;
-import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JDialog;
 import javax.swing.JOptionPane;
-import javax.swing.JPanel;
-import javax.swing.JScrollPane;
 import javax.swing.JTabbedPane;
 import javax.swing.JTable;
-import javax.swing.RowFilter;
 import javax.swing.table.DefaultTableModel;
 import javax.swing.table.TableRowSorter;
 
 import com.nureal.ide.core.dialect.DatabaseDialect;
-import com.nureal.ide.ui.components.NSearchField;
 
 /**
  * Visor de variaveis ({@code SHOW GLOBAL VARIABLES}) e status
@@ -82,30 +75,8 @@ final class ServerStatusDialog {
             TableRowSorter<DefaultTableModel> sorter = new TableRowSorter<>(model);
             table.setRowSorter(sorter);
 
-            NSearchField search = new NSearchField("Filtrar por nome...");
-            search.onTextChange(() -> {
-                String text = search.getText().trim();
-                sorter.setRowFilter(text.isEmpty() ? null
-                        : RowFilter.regexFilter("(?i)" + java.util.regex.Pattern.quote(text), 0));
-            });
-
-            JButton refresh = new JButton("Atualizar");
-            Buttons.styleSecondary(refresh);
-            refresh.addActionListener(a -> loadInto(query, model));
-
-            JPanel top = new JPanel(new BorderLayout(6, 0));
-            top.setBorder(BorderFactory.createEmptyBorder(8, 8, 6, 8));
-            top.add(search, BorderLayout.CENTER);
-            JPanel refreshWrap = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
-            refreshWrap.add(refresh);
-            top.add(refreshWrap, BorderLayout.EAST);
-
-            JScrollPane scroll = new JScrollPane(table);
-            scroll.setPreferredSize(new Dimension(720, 460));
-
-            JPanel panel = new JPanel(new BorderLayout());
-            panel.add(top, BorderLayout.NORTH);
-            panel.add(scroll, BorderLayout.CENTER);
+            JComponent panel = SearchableTableTab.build(table, sorter, () -> loadInto(query, model),
+                    new Dimension(720, 460), null);
 
             loadInto(query, model);
             return panel;
