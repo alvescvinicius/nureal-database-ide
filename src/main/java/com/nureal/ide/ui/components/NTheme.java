@@ -27,9 +27,6 @@ public final class NTheme {
     public static final int SPACE_XS = Spacing.XS;
     public static final int SPACE_SM = Spacing.SM;
     public static final int SPACE_MD = Spacing.MD;
-    public static final int SPACE_LG = Spacing.LG;
-    public static final int SPACE_XL = Spacing.XL;
-    public static final int SPACE_XXL = Spacing.XXL;
 
     /** Raio padrao dos cantos arredondados de superficies (cards, chips etc.). */
     public static final int CARD_ARC = 10;
