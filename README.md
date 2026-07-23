@@ -31,6 +31,10 @@ O que já funciona:
   com cor própria por conexão: mostra sem ambiguidade a qual conexão/banco/
   esquema qualquer instrução da aba ativa será enviada ao Executar — essencial
   com várias conexões abertas ao mesmo tempo
+- **Troca rápida entre conexões ativas**: o card "Conexão Ativa" da barra
+  lateral mostra um ícone com a contagem de conexões conectadas agora (2+);
+  um clique abre um menu com todas elas, para focar em outra sem desconectar
+  as demais
 - **Janela com decoração customizada** (FlatLaf): sem a barra de título nativa
   do Windows — logo da marca, título e os botões de minimizar/maximizar/
   fechar seguem o tema claro/escuro da IDE; arrastar, redimensionar,

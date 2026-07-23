@@ -1707,6 +1707,13 @@ public class MainWindow extends JFrame {
 		// selecionada no rail (unico lugar do app mostrando conexao/host/
 		// engine/status — ver ConnectionStatusCard).
 		connectionCard = new ConnectionStatusCard();
+		connectionCard.setOnSwitchRequested(name -> {
+			Conexao w = workspaces.get(name);
+			if (w != null) {
+				activateWorkspace(w);
+				statusBar.setText(" Workspace: " + name);
+			}
+		});
 		JPanel cardRow = new JPanel(new BorderLayout());
 		cardRow.setOpaque(false);
 		cardRow.setBorder(BorderFactory.createEmptyBorder(Spacing.SM, 0, Spacing.SM, 0));
@@ -2345,22 +2352,33 @@ public class MainWindow extends JFrame {
 		}
 	}
 
-	/** Atualiza as bolinhas (conectados) e o indicador de status do rodape. */
+	/** Atualiza as bolinhas (conectados), o card de conexao ativa e o indicador de status do rodape. */
 	private void refreshConnectionIndicators() {
 		Set<String> connected = new HashSet<>();
+		List<ConnectionStatusCard.ActiveConnection> activeConnections = new ArrayList<>();
 		for (Conexao w : workspaces.values()) {
 			if (w.profile != null && w.mgr.isConnected()) {
 				connected.add(w.name);
+				activeConnections.add(new ConnectionStatusCard.ActiveConnection(w.name, activeConnectionLabel(w)));
 			}
 		}
+		String activeName = (activeWorkspace != null && activeWorkspace.profile != null) ? activeWorkspace.name : null;
 		connectionsPanel.setConnectedNames(connected);
-		connectionsPanel.setActiveName(
-				(activeWorkspace != null && activeWorkspace.profile != null) ? activeWorkspace.name : null);
+		connectionsPanel.setActiveName(activeName);
+		connectionCard.setActiveConnections(activeConnections, activeName);
 		if (activeWorkspace != null && activeWorkspace.profile != null && activeWorkspace.mgr.isConnected()) {
 			setConnectedState(activeWorkspace.profile.label());
 		} else {
 			setDisconnectedState();
 		}
+	}
+
+	/** Rotulo "nome — usuario@host" de uma conexao conectada, pro dropdown de troca rapida (ver ConnectionStatusCard). */
+	private static String activeConnectionLabel(Conexao w) {
+		if (w.profile == null) {
+			return w.name;
+		}
+		return w.name + "  —  " + w.profile.user() + "@" + w.profile.host();
 	}
 
 	/** Agenda um salvamento (debounce) ~1s apos a ultima alteracao. */

@@ -71,6 +71,7 @@ public enum IconType {
     CONNECTION(IconRole.POSITIVE),
     DISCONNECT(IconRole.NEGATIVE),
     STATUS_DOT(IconRole.NEUTRAL), // cor sempre informada pelo chamador (vermelho/amarelo/verde dinamico)
+    SWAP(IconRole.NEUTRAL), // troca rapida entre conexoes ativas (ver ConnectionStatusCard)
 
     // Layout / navegacao da janela
     PANEL_LEFT(IconRole.NEUTRAL),

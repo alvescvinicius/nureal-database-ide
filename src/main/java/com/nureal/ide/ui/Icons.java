@@ -144,6 +144,7 @@ final class Icons {
         m.put(IconType.REFRESH, "refresh.svg");
         m.put(IconType.CONNECTION, "connection.svg");
         m.put(IconType.DISCONNECT, "disconnect.svg");
+        m.put(IconType.SWAP, "swap_horiz.svg");
         m.put(IconType.STATUS_DOT, "status_dot.svg");
         m.put(IconType.PANEL_LEFT, "panel_left.svg");
         m.put(IconType.PANEL_BOTTOM, "panel_bottom.svg");
