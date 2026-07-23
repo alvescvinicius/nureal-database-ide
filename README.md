@@ -31,6 +31,10 @@ O que já funciona:
   com cor própria por conexão: mostra sem ambiguidade a qual conexão/banco/
   esquema qualquer instrução da aba ativa será enviada ao Executar — essencial
   com várias conexões abertas ao mesmo tempo
+- **Janela com decoração customizada** (FlatLaf): sem a barra de título nativa
+  do Windows — logo da marca, título e os botões de minimizar/maximizar/
+  fechar seguem o tema claro/escuro da IDE; arrastar, redimensionar,
+  maximizar em duplo-clique e Aero Snap continuam funcionando normalmente
 - **Assistente de DDL guiado** (menu de contexto: "Nova tabela..." / "Alterar
   tabela..."): cria uma tabela do zero ou adiciona colunas/chaves estrangeiras/
   índices a uma existente (sempre aditivo no modo alterar — nunca MODIFY/DROP),
