@@ -3,6 +3,7 @@ package com.nureal.ide.ui.ai;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Dimension;
+import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
@@ -11,6 +12,7 @@ import java.util.function.Consumer;
 
 import javax.swing.BorderFactory;
 import javax.swing.BoxLayout;
+import javax.swing.ButtonGroup;
 import javax.swing.DefaultComboBoxModel;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
@@ -20,6 +22,7 @@ import javax.swing.JPanel;
 import javax.swing.JScrollBar;
 import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
+import javax.swing.JToggleButton;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
@@ -35,6 +38,30 @@ import com.nureal.ide.ui.components.NToolbar;
 final class ChatPanel extends JPanel {
 
     private static final long serialVersionUID = 1L;
+
+    /**
+     * Presets de prompt (Fase 4 do {@code AI-CHAT-MASTER-PLAN.md}): atalhos
+     * de TEXTO, nunca tools novas — cada um (exceto {@code ASK}, neutro)
+     * reescreve o campo de mensagem NA HORA com a instrucao + o SQL da aba
+     * ativa (ver {@code ChatActions#activeSqlSupplier}), pra que o usuario
+     * VEJA e possa editar o texto final antes de mandar (nunca uma
+     * transformacao escondida so no envio).
+     */
+    private enum Preset {
+        ASK("Perguntar", null),
+        SQL("SQL", "Me ajude com esta consulta SQL:"),
+        EXPLAIN("Explicar", "Explique esta consulta:"),
+        OPTIMIZE("Otimizar", "Sugira otimizacoes (indices, reescrita) para esta consulta:"),
+        DOCUMENT("Documentar", "Documente esta consulta (o que cada parte faz):");
+
+        final String label;
+        final String instruction;
+
+        Preset(String label, String instruction) {
+            this.label = label;
+            this.instruction = instruction;
+        }
+    }
 
     private final JPanel messagesContainer = new JPanel();
     private final JScrollPane scrollPane;
@@ -134,6 +161,7 @@ final class ChatPanel extends JPanel {
 
         JPanel inputWrapper = new JPanel(new BorderLayout(6, 4));
         inputWrapper.setBorder(BorderFactory.createEmptyBorder(6, 6, 6, 6));
+        inputWrapper.add(buildPresetRow(), BorderLayout.NORTH);
         inputWrapper.add(new JScrollPane(input), BorderLayout.CENTER);
         JPanel sendWrapper = new JPanel(new BorderLayout());
         sendWrapper.add(sendButton, BorderLayout.NORTH);
@@ -142,6 +170,43 @@ final class ChatPanel extends JPanel {
 
         add(inputWrapper, BorderLayout.SOUTH);
         setPreferredSize(new Dimension(420, 560));
+    }
+
+    /** Perguntar/SQL/Explicar/Otimizar/Documentar — so um ativo por vez (ver {@link Preset}). */
+    private JPanel buildPresetRow() {
+        JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+        row.setOpaque(false);
+        ButtonGroup group = new ButtonGroup();
+        for (Preset preset : Preset.values()) {
+            JToggleButton button = new JToggleButton(preset.label);
+            button.setSelected(preset == Preset.ASK);
+            button.addActionListener(e -> applyPreset(preset));
+            group.add(button);
+            row.add(button);
+        }
+        return row;
+    }
+
+    /**
+     * Reescreve o campo de mensagem AGORA (nao so no envio) com a instrucao
+     * do preset + o SQL da aba ativa entre crases, se houver — o usuario
+     * ainda pode editar livremente antes de clicar "Enviar", que continua
+     * mandando exatamente o que estiver escrito, sem nenhuma transformacao
+     * adicional (criterio de aceite da Fase 4: nada de "magica" escondida).
+     * {@code ASK} (neutro) nao mexe no que ja estava digitado.
+     */
+    private void applyPreset(Preset preset) {
+        if (preset.instruction == null) {
+            return;
+        }
+        StringBuilder message = new StringBuilder(preset.instruction);
+        String sql = actions.activeSqlSupplier().get();
+        if (sql != null && !sql.isBlank()) {
+            message.append("\n\n```sql\n").append(sql.strip()).append("\n```");
+        }
+        input.setText(message.toString());
+        input.requestFocusInWindow();
+        input.setCaretPosition(input.getText().length());
     }
 
     void setOnSend(Consumer<String> onSend) {

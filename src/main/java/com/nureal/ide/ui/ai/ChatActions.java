@@ -12,9 +12,15 @@ import com.nureal.ide.core.format.SqlFormatter;
  * ({@code MainWindow} pra executar/formatar, o proprio {@link ChatController}
  * pra reenviar uma pergunta ao Agent) — agrupados aqui em vez de crescer a
  * lista de parametros de {@link MessageRenderer#render} a cada novo botao.
+ * <p>
+ * {@code activeSqlSupplier} (Fase 4) alimenta os presets de prompt do rodape
+ * do chat (ver {@link ChatPanel}): SQL da aba de editor ativa (ou a ULTIMA
+ * ativa, se o usuario estiver com a propria aba do Chat em foco — ver
+ * {@code MainWindow#activeOrLastSqlForPresets}), ou {@code null} se nao
+ * houver nenhuma.
  */
 public record ChatActions(Consumer<String> onExecuteSql, Supplier<SqlFormatter> sqlFormatterSupplier,
-        Consumer<String> onExplainSql) {
+        Consumer<String> onExplainSql, Supplier<String> activeSqlSupplier) {
 
-    public static final ChatActions NONE = new ChatActions(sql -> { }, SqlFormatter::new, sql -> { });
+    public static final ChatActions NONE = new ChatActions(sql -> { }, SqlFormatter::new, sql -> { }, () -> null);
 }

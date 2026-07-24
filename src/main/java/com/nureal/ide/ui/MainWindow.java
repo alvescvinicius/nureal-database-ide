@@ -186,6 +186,8 @@ public class MainWindow extends JFrame {
 	 */
 	private Component chatTab;
 	private ChatWindow chatWindow;
+	/** Ultima {@link SqlEditorPane} com foco de verdade (ver o ChangeListener de {@link #editorTabs} em {@link #buildEditorArea}) — usada pelos presets do Chat quando a propria aba do Chat esta selecionada. */
+	private SqlEditorPane lastActiveEditor;
 	private boolean addingTab;
 	private JSplitPane mainSplit;
 	private JSplitPane centerSplit;
@@ -1797,6 +1799,13 @@ public class MainWindow extends JFrame {
 					selectLastRealTab();
 				}
 			} else {
+				if (editorTabs.getSelectedComponent() instanceof SqlEditorPane sep) {
+					// Ultima aba de SQL com foco de verdade — usada pelos presets
+					// do Chat (ver #activeOrLastSqlForPresets) pra achar o SQL
+					// "ativo" mesmo com a PROPRIA aba do Chat selecionada agora
+					// (nesse caso currentEditor() sozinho devolveria null).
+					lastActiveEditor = sep;
+				}
 				scheduleSave();
 				resultsController.showResultsForActiveEditor();
 				updateSaveButtonState();
@@ -2489,7 +2498,8 @@ public class MainWindow extends JFrame {
 		AiCredentialsStore aiCredentials = new AiCredentialsStore();
 		ChatHistoryStore chatHistoryStore = new ChatHistoryStore();
 		Agent agent = buildAiAgent(aiPreferences, aiCredentials, chatHistoryStore);
-		ChatActions actions = new ChatActions(this::runSqlFromChat, this::currentSqlFormatter, sql -> { });
+		ChatActions actions = new ChatActions(this::runSqlFromChat, this::currentSqlFormatter, sql -> { },
+				this::activeOrLastSqlForPresets);
 		chatWindow = new ChatWindow(agent, chatHistoryStore, AI_CONVERSATION_ID,
 				() -> openAiSettings(aiPreferences, aiCredentials), actions);
 		wireChatToolbar(chatWindow, aiPreferences, aiCredentials);
@@ -2623,7 +2633,23 @@ public class MainWindow extends JFrame {
 	}
 
 	private String currentEditorSqlForAi() {
+		return sqlOf(currentEditor());
+	}
+
+	/**
+	 * SQL da aba ATIVA, ou (se a propria aba do Chat estiver selecionada, ver
+	 * {@link #chatTab}) da ULTIMA aba de SQL com foco antes de trocar pro
+	 * Chat — sem isto, os presets de prompt (ver {@code ChatPanel}) nunca
+	 * achariam SQL nenhum, ja que o usuario PRECISA estar na aba do Chat pra
+	 * clicar neles, e {@link #currentEditor()} sozinho devolve {@code null}
+	 * nesse caso.
+	 */
+	private String activeOrLastSqlForPresets() {
 		SqlEditorPane editor = currentEditor();
+		return sqlOf(editor != null ? editor : lastActiveEditor);
+	}
+
+	private static String sqlOf(SqlEditorPane editor) {
 		if (editor == null) {
 			return null;
 		}

@@ -43,7 +43,7 @@ final class ChatController {
         panel.setOnSend(this::sendMessage);
         panel.setOnCancel(this::cancelActive);
         panel.setActions(new ChatActions(externalActions.onExecuteSql(), externalActions.sqlFormatterSupplier(),
-                this::explainSql));
+                this::explainSql, externalActions.activeSqlSupplier()));
         loadHistory();
     }
 
