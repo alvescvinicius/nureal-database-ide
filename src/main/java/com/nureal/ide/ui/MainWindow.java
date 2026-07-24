@@ -1,9 +1,9 @@
 package com.nureal.ide.ui;
 
 import java.awt.BorderLayout;
-import java.awt.CardLayout;
 import java.awt.Color;
 import java.awt.Component;
+import java.awt.Cursor;
 import java.awt.Desktop;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
@@ -11,6 +11,7 @@ import java.awt.Font;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
+import java.awt.Rectangle;
 import java.awt.event.ActionEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
@@ -42,6 +43,7 @@ import java.util.function.Supplier;
 import javax.swing.AbstractAction;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
+import javax.swing.BoxLayout;
 import javax.swing.ButtonGroup;
 import javax.swing.DefaultListCellRenderer;
 import javax.swing.Icon;
@@ -119,7 +121,7 @@ import com.nureal.ide.ui.ai.ChatActions;
 import com.nureal.ide.ui.ai.ChatWindow;
 import com.nureal.ide.ui.ai.IdeContextAccessor;
 import com.nureal.ide.ui.components.NButton;
-import com.nureal.ide.ui.components.NIconRail;
+import com.nureal.ide.ui.components.NSearchField;
 import com.nureal.ide.ui.components.NToast;
 
 /**
@@ -214,12 +216,12 @@ public class MainWindow extends JFrame {
 	private ConnectionsPanel connectionsPanel;
 	private SavedQueriesPanel savedQueriesPanel;
 	private HistoryPanel historyPanel;
-	private NIconRail leftIconRail;
-	private JPanel leftContent;
-	private static final String CARD_CONNECTIONS = "connections";
-	private static final String CARD_OBJECTS = "objects";
-	private static final String CARD_QUERIES = "queries";
-	private static final String CARD_HISTORY = "history";
+	/** Busca unificada da sidebar (Fase 3 do AI-CHAT-MASTER-PLAN.md, Ctrl+K) — ver {@link #buildLeftSide}/{@link #applySidebarFilter}. */
+	private NSearchField sidebarSearch;
+	/** Rotulo "SQL Editors (N)" — mantido em dia por {@link #updateWorkspaceContextBar} (mesmo hook que ja roda a cada aba aberta/fechada). */
+	private JLabel sqlEditorsCountLabel;
+	/** Ancora da secao HISTORICO dentro do painel unico — usada por {@link #showHistoryPanel} pra rolar ate ela. */
+	private JComponent historySectionAnchor;
 	/** Esquema selecionado na conexao ativa — so escrever via {@link #setCurrentSchema}. */
 	private SchemaInfo currentSchema;
 	/**
@@ -1294,7 +1296,7 @@ public class MainWindow extends JFrame {
 
 	/**
 	 * Atalhos globais: Ctrl+B (lateral), Ctrl+J (resultados), Ctrl +/-/0 (zoom da
-	 * UI).
+	 * UI), Ctrl+K (busca da sidebar unificada, ver {@link #buildLeftSide}).
 	 */
 	private void registerWindowShortcuts() {
 		JComponent rp = getRootPane();
@@ -1323,6 +1325,7 @@ public class MainWindow extends JFrame {
 		bindGlobalAction(rp, "control 0", "zoom-ui-reset", this::resetZoom);
 		bindGlobalAction(rp, "control R", "refresh-objects", () -> objectExplorer.refreshObjectTree(true));
 		bindGlobalAction(rp, "control S", "save-query", this::onSaveQuery);
+		bindGlobalAction(rp, "control K", "focus-sidebar-search", this::focusSidebarSearch);
 	}
 
 	private static void bindGlobalAction(JComponent rp, String keyStroke, String name, Runnable action) {
@@ -1671,6 +1674,7 @@ public class MainWindow extends JFrame {
 		if (chatTab != null && chatWindow != null) {
 			chatWindow.setSchemaLabel(chatSchemaLabel());
 		}
+		refreshSqlEditorsCount();
 	}
 
 	/** "Esquema: X" pro badge do topo do Chat (ver ChatPanel), ou rotulo neutro sem conexao/esquema. */
@@ -1686,41 +1690,43 @@ public class MainWindow extends JFrame {
 
 	// ---------- Lado esquerdo ----------
 
+	/**
+	 * Sidebar unificada (Fase 3 do {@code AI-CHAT-MASTER-PLAN.md}): substitui
+	 * o rail de icones + {@code CardLayout} (onde so uma secao ficava visivel
+	 * por vez, estilo activity bar) por uma coluna UNICA, sempre rolavel, com
+	 * os 3 grupos sempre visiveis ao mesmo tempo (CONEXOES, WORKSPACE,
+	 * OBJETOS, FERRAMENTAS) — reversao confirmada explicitamente pelo usuario
+	 * (ver a pergunta obrigatoria do plano, respondida "Sim, confirmo a
+	 * reversao"). {@link ConnectionStatusCard} continua fixo no topo, fora da
+	 * area rolavel, exatamente como antes ("nao mexer" no plano).
+	 * <p>
+	 * CONEXOES e OBJETOS reaproveitam {@link ConnectionsPanel} e
+	 * {@code ObjectExplorerController#buildObjectBrowser} INTEIROS (cada um
+	 * ja desenha seu proprio cabecalho/busca) — nao existia rotulo "CONEXOES"
+	 * na lista de grupos do mockup, mas removê-la perderia funcionalidade
+	 * hoje acessivel via rail, o que o criterio de aceite da Fase 3 proibe
+	 * explicitamente. WORKSPACE e FERRAMENTAS sao grupos NOVOS (sem painel
+	 * proprio existente): WORKSPACE reaproveita {@link SavedQueriesPanel}/
+	 * {@link HistoryPanel} tambem inteiros, mais 3 linhas simples (SQL
+	 * Editors/Favoritos/Chat com IA, ver {@link #sidebarRow}); FERRAMENTAS
+	 * sao 3 linhas simples que delegam pros dialogos ja existentes (hoje so
+	 * acessiveis pelo menu de contexto da raiz do esquema) — "Importar/
+	 * Exportar Dados" do mockup ficou de fora (sem entry point generico:
+	 * hoje so existe import/export por TABELA especifica, nao por esquema),
+	 * mesmo tipo de reducao de escopo documentada na Fase 4.
+	 */
 	private JComponent buildLeftSide() {
 		connectionsPanel = new ConnectionsPanel(connectionStore, this::connectTo, this::disconnectFrom);
 		connectionsPanel.setRowHeight(scaledPx(ConnectionsPanel.DEFAULT_ROW_HEIGHT));
+		capHeight(connectionsPanel, 190);
 		savedQueriesPanel = new SavedQueriesPanel(savedQueryStore, this::openSavedQuery);
+		capHeight(savedQueriesPanel, 170);
 		historyPanel = new HistoryPanel(historyStore, this::openHistoryEntry);
+		capHeight(historyPanel, 170);
 
-		// Rail de icones (NDS) no lugar do antigo par abas+split: "Conexoes",
-		// "Objetos", "Consultas" e "Historico" agora ocupam o MESMO espaco,
-		// um de cada vez (estilo activity bar), em vez de Conexoes/Queries/
-		// Historico em abas com o navegador de objetos sempre visivel
-		// embaixo. Escolha explicita do usuario ao ver o mockup, ciente do
-		// tradeoff de perder a visibilidade simultanea de Conexoes+Objetos.
-		leftContent = new JPanel(new CardLayout());
-		leftContent.add(connectionsPanel, CARD_CONNECTIONS);
-		leftContent.add(objectExplorer.buildObjectBrowser(), CARD_OBJECTS);
-		leftContent.add(savedQueriesPanel, CARD_QUERIES);
-		leftContent.add(historyPanel, CARD_HISTORY);
-
-		// Favoritos/Configuracoes (SPEC-0007): itens PLACEHOLDER — a
-		// funcionalidade ainda nao existe no app (sem "favoritar" query
-		// salva, sem tela de configuracoes unificada), entao aparecem
-		// desabilitados em vez de fingir que funcionam.
-		leftIconRail = new NIconRail()
-				.addItem(CARD_CONNECTIONS, IconType.CONNECTION, "Conexoes")
-				.addItem(CARD_OBJECTS, IconType.DATABASE, "Objetos")
-				.addItem(CARD_QUERIES, IconType.SAVE, "Consultas")
-				.addItem(CARD_HISTORY, IconType.HISTORY, "Historico")
-				.onSelect(this::showLeftCard)
-				.addDisabledItem(IconType.FAVORITE, "Favoritos", "Favoritos — em breve")
-				.addDisabledItem(IconType.SETTINGS, "Config.", "Configuracoes — em breve");
-
-		// Logo compacto no topo da coluna de conteudo (SPEC-0007: Sidebar =
-		// Logo + Navigation Rail + Active Connection Card + Workspace) — o
-		// texto "Nureal" que antes vivia no canto direito da barra inferior
-		// (removida) migrou pra ca, nao foi descartado.
+		// Logo compacto no topo da coluna (SPEC-0007) — o texto "Nureal" que
+		// antes vivia no canto direito da barra inferior (removida) migrou
+		// pra ca, nao foi descartado.
 		JLabel logoIcon = new JLabel(new javax.swing.ImageIcon(Icons.brandImage(18)));
 		JLabel logoText = new JLabel("Nureal");
 		logoText.setFont(logoText.getFont().deriveFont(Font.BOLD, 13f));
@@ -1731,8 +1737,8 @@ public class MainWindow extends JFrame {
 		logoRow.add(logoText);
 
 		// Active Connection Card: SEMPRE visivel, qualquer que seja a secao
-		// selecionada no rail (unico lugar do app mostrando conexao/host/
-		// engine/status — ver ConnectionStatusCard).
+		// visivel/rolada da arvore abaixo (unico lugar do app mostrando
+		// conexao/host/engine/status — ver ConnectionStatusCard).
 		connectionCard = new ConnectionStatusCard();
 		connectionCard.setOnSwitchRequested(name -> {
 			Conexao w = workspaces.get(name);
@@ -1751,21 +1757,173 @@ public class MainWindow extends JFrame {
 		topStack.add(logoRow, BorderLayout.NORTH);
 		topStack.add(cardRow, BorderLayout.SOUTH);
 
+		// Busca unificada (Ctrl+K) — encaminha o texto pro filtro JA
+		// EXISTENTE de cada painel embutido (ver #applySidebarFilter), sem
+		// duplicar logica de filtro nenhuma.
+		sidebarSearch = new NSearchField("Buscar (Ctrl+K)...");
+		sidebarSearch.onTextChange(this::applySidebarFilter);
+		JPanel searchRow = new JPanel(new BorderLayout());
+		searchRow.setOpaque(false);
+		searchRow.setBorder(BorderFactory.createEmptyBorder(0, 0, Spacing.SM, 0));
+		searchRow.add(sidebarSearch, BorderLayout.CENTER);
+
+		sqlEditorsCountLabel = new JLabel("SQL Editors");
+		Typography.secondary(sqlEditorsCountLabel);
+		JComponent sqlEditorsRow = sidebarRow(IconType.EDIT, sqlEditorsCountLabel, true, null,
+				() -> { if (!addQueryTab()) { selectLastRealTab(); } });
+		refreshSqlEditorsCount();
+
+		JComponent workspaceGroup = new JPanel();
+		workspaceGroup.setOpaque(false);
+		workspaceGroup.setLayout(new BoxLayout(workspaceGroup, BoxLayout.Y_AXIS));
+		workspaceGroup.add(groupHeader("WORKSPACE"));
+		workspaceGroup.add(sqlEditorsRow);
+		workspaceGroup.add(savedQueriesPanel);
+		workspaceGroup.add(historyPanel);
+		// Placeholder (SPEC-0007): "Favoritos" ainda nao existe no app (sem
+		// "favoritar" query salva de verdade fora do menu de contexto) —
+		// aparece desabilitado em vez de fingir que funciona.
+		workspaceGroup.add(sidebarRow(IconType.FAVORITE, "Favoritos", false, "Favoritos — em breve", null));
+		workspaceGroup.add(sidebarRow(IconType.CHAT, "Chat com IA", true, null, this::openAiChat));
+
+		JComponent toolsGroup = new JPanel();
+		toolsGroup.setOpaque(false);
+		toolsGroup.setLayout(new BoxLayout(toolsGroup, BoxLayout.Y_AXIS));
+		toolsGroup.add(groupHeader("FERRAMENTAS"));
+		toolsGroup.add(sidebarRow(IconType.BACKUP, "Backup e Restauracao", true, null, objectExplorer::openBackupRestore));
+		toolsGroup.add(sidebarRow(IconType.USERS, "Usuarios e Privilegios", true, null, objectExplorer::openUserManagement));
+		toolsGroup.add(sidebarRow(IconType.MONITOR, "Monitor de Conexao", true, null, objectExplorer::openProcessList));
+
+		historySectionAnchor = historyPanel;
+
+		JPanel column = new JPanel();
+		column.setOpaque(false);
+		column.setLayout(new BoxLayout(column, BoxLayout.Y_AXIS));
+		column.add(searchRow);
+		column.add(connectionsPanel);
+		column.add(workspaceGroup);
+		column.add(objectExplorer.buildObjectBrowser());
+		column.add(toolsGroup);
+
+		JScrollPane scroll = new JScrollPane(column);
+		scroll.setBorder(BorderFactory.createEmptyBorder());
+		scroll.getVerticalScrollBar().setUnitIncrement(16);
+
 		JPanel contentColumn = new JPanel(new BorderLayout());
-		contentColumn.setBorder(BorderFactory.createEmptyBorder(Spacing.SM, Spacing.SM, 0, 0));
+		contentColumn.setBorder(BorderFactory.createEmptyBorder(Spacing.SM, Spacing.SM, 0, Spacing.SM));
 		contentColumn.add(topStack, BorderLayout.NORTH);
-		contentColumn.add(leftContent, BorderLayout.CENTER);
+		contentColumn.add(scroll, BorderLayout.CENTER);
 
 		JPanel container = new JPanel(new BorderLayout());
-		container.add(leftIconRail, BorderLayout.WEST);
 		container.add(contentColumn, BorderLayout.CENTER);
 		container.setPreferredSize(new Dimension(280, 100));
 		return container;
 	}
 
-	/** Troca qual painel da lateral esta visivel (ver {@link #leftIconRail}). */
-	private void showLeftCard(String cardId) {
-		((CardLayout) leftContent.getLayout()).show(leftContent, cardId);
+	/** Trava a altura MAXIMA de um painel embutido na coluna unica (ver {@link #buildLeftSide}) — cada um continua rolando por conta propria se tiver mais itens do que cabem. */
+	private static void capHeight(JComponent c, int maxHeight) {
+		Dimension max = c.getMaximumSize();
+		c.setMaximumSize(new Dimension(max.width, maxHeight));
+		c.setPreferredSize(new Dimension(c.getPreferredSize().width, maxHeight));
+	}
+
+	/** Cabecalho de grupo da arvore unica (ver {@link #buildLeftSide}) — mesma receita de {@link Typography#sectionHeader}, so com respiro proprio. */
+	private JComponent groupHeader(String title) {
+		JLabel label = sectionHeader(title);
+		label.setBorder(BorderFactory.createEmptyBorder(Spacing.MD, Spacing.SM, Spacing.XS, Spacing.SM));
+		return label;
+	}
+
+	/**
+	 * Linha clicavel simples da sidebar unificada (icone + texto) — usada
+	 * pelos itens de WORKSPACE/FERRAMENTAS que nao tem um painel proprio pra
+	 * embutir (ex.: "Chat com IA", "Backup e Restauracao..."). {@code onClick}
+	 * ignorado se {@code enabled} for falso (item placeholder, ver
+	 * "Favoritos" em {@link #buildLeftSide}).
+	 */
+	private JComponent sidebarRow(IconType icon, String text, boolean enabled, String tooltip, Runnable onClick) {
+		JLabel textLabel = new JLabel(text);
+		if (enabled) {
+			Typography.secondary(textLabel);
+		} else {
+			Typography.tertiary(textLabel);
+		}
+		return sidebarRow(icon, textLabel, enabled, tooltip, onClick);
+	}
+
+	/**
+	 * Igual a {@link #sidebarRow(IconType, String, boolean, String, Runnable)},
+	 * mas recebendo o {@link JLabel} pronto — usado pela linha "SQL Editors"
+	 * (ver {@link #buildLeftSide}), cujo texto precisa ser atualizado depois
+	 * (contador de abas, ver {@link #refreshSqlEditorsCount}).
+	 */
+	private JComponent sidebarRow(IconType icon, JLabel textLabel, boolean enabled, String tooltip, Runnable onClick) {
+		JLabel iconLabel = new JLabel();
+		Buttons.bindThemedIcon(iconLabel, icon, 15, () -> enabled ? GridTheme.HEADER_FOREGROUND : GridTheme.MUTED_TEXT);
+		JPanel row = new JPanel(new BorderLayout(Spacing.SM, 0));
+		row.setOpaque(false);
+		row.setBorder(BorderFactory.createEmptyBorder(6, Spacing.SM, 6, Spacing.SM));
+		row.setAlignmentX(Component.LEFT_ALIGNMENT);
+		row.add(iconLabel, BorderLayout.WEST);
+		row.add(textLabel, BorderLayout.CENTER);
+		row.setCursor(Cursor.getPredefinedCursor(enabled ? Cursor.HAND_CURSOR : Cursor.DEFAULT_CURSOR));
+		if (tooltip != null) {
+			row.setToolTipText(tooltip);
+		}
+		if (enabled && onClick != null) {
+			row.addMouseListener(new MouseAdapter() {
+				@Override
+				public void mouseClicked(MouseEvent e) {
+					onClick.run();
+				}
+			});
+		}
+		return row;
+	}
+
+	/**
+	 * Reflete {@link #realTabCount()} no rotulo "SQL Editors (N)" — chamado
+	 * por {@link #updateWorkspaceContextBar} (mesmo hook de toda troca de
+	 * aba) e uma vez direto em {@link #buildLeftSide}, ANTES de
+	 * {@link #editorTabs} existir (a lateral e montada antes da area de
+	 * abas) — guard contra {@code null} cobre esse caso; o rotulo comeca com
+	 * "0" ate a primeira {@link #updateWorkspaceContextBar} de verdade.
+	 */
+	private void refreshSqlEditorsCount() {
+		if (sqlEditorsCountLabel != null && editorTabs != null) {
+			sqlEditorsCountLabel.setText("SQL Editors (" + realTabCount() + ")");
+		}
+	}
+
+	/**
+	 * Encaminha o texto da busca unificada (Ctrl+K) pro filtro JA EXISTENTE
+	 * de cada painel embutido — nenhuma logica de filtro nova, so
+	 * sincronizacao (ver {@code setFilterText} em cada painel/no
+	 * {@code ObjectExplorerController}).
+	 */
+	private void applySidebarFilter() {
+		String text = sidebarSearch.getText();
+		if (connectionsPanel != null) {
+			connectionsPanel.setFilterText(text);
+		}
+		if (savedQueriesPanel != null) {
+			savedQueriesPanel.setFilterText(text);
+		}
+		if (historyPanel != null) {
+			historyPanel.setFilterText(text);
+		}
+		objectExplorer.setFilterText(text);
+	}
+
+	/** Foca a busca unificada da sidebar (Ctrl+K) — reabre a lateral primeiro se estiver escondida (Ctrl+B). */
+	private void focusSidebarSearch() {
+		if (leftSide != null && !leftSide.isVisible()) {
+			toggleSidebar();
+		}
+		if (sidebarSearch != null) {
+			sidebarSearch.requestFocusInWindow();
+			sidebarSearch.selectAll();
+		}
 	}
 
 	// ---------- Editor (abas) ----------
@@ -3482,17 +3640,20 @@ public class MainWindow extends JFrame {
 	// ---------- Historico de execucoes (log automatico — ver ExecutionHistoryStore) ----------
 
 	/**
-	 * Abre a aba "Historico" do painel lateral (botao "Historico" da barra de
-	 * ferramentas) — garante que o painel lateral esteja visivel (reabre se
-	 * o usuario tinha escondido com Ctrl+B) e seleciona a aba certa dentro
-	 * dele.
+	 * Abre a secao "Historico" do painel lateral (botao "Historico" da barra
+	 * de ferramentas) — garante que o painel lateral esteja visivel (reabre
+	 * se o usuario tinha escondido com Ctrl+B) e rola a coluna unica ate a
+	 * secao (Fase 3 do AI-CHAT-MASTER-PLAN.md: todas as secoes ja ficam
+	 * visiveis ao mesmo tempo, entao aqui so falta trazer o Historico pra
+	 * dentro da area visivel, sem trocar de "card" como antes).
 	 */
 	private void showHistoryPanel() {
 		if (leftSide != null && !leftSide.isVisible()) {
 			toggleSidebar();
 		}
-		if (leftIconRail != null && historyPanel != null) {
-			leftIconRail.select(CARD_HISTORY);
+		if (historySectionAnchor != null) {
+			historySectionAnchor.scrollRectToVisible(
+					new Rectangle(0, 0, historySectionAnchor.getWidth(), historySectionAnchor.getHeight()));
 		}
 	}
 

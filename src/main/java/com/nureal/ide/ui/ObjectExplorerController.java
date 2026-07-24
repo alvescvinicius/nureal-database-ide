@@ -222,6 +222,20 @@ final class ObjectExplorerController {
 	}
 
 	/**
+	 * Encaminha o texto da busca unificada da sidebar (Ctrl+K, ver
+	 * {@code MainWindow#buildLeftSide}) para o campo de busca proprio da
+	 * arvore de Objetos — reusa {@link #applyObjectFilter} (disparado pelo
+	 * {@code onTextChange} de {@link #objectSearch}) em vez de duplicar a
+	 * logica de filtro. Sem efeito se nenhum esquema estiver aberto ainda
+	 * (campo desabilitado, ver {@link #populateTree}).
+	 */
+	void setFilterText(String text) {
+		if (objectSearch.isEnabled()) {
+			objectSearch.setText(text);
+		}
+	}
+
+	/**
 	 * Recarrega os metadados do esquema atual (tabelas, views, procedures,
 	 * functions, triggers) sem mudar a conexao nem a aba selecionada. Chamado
 	 * automaticamente apos DDL bem-sucedido e tambem pelo botao de atualizar
@@ -748,7 +762,8 @@ final class ObjectExplorerController {
 		}.execute();
 	}
 
-	private void openUserManagement() {
+	/** Visibilidade de pacote (nao mais private): FERRAMENTAS da sidebar unificada tambem chama (ver {@code MainWindow#buildLeftSide}). */
+	void openUserManagement() {
 		if (owner.activeWorkspace() == null || !owner.activeWorkspace().mgr.isConnected()) {
 			owner.statusBar().setText(" Conecte-se a um servidor antes de gerenciar usuarios.");
 			return;
@@ -792,7 +807,8 @@ final class ObjectExplorerController {
 		});
 	}
 
-	private void openProcessList() {
+	/** Visibilidade de pacote (nao mais private): FERRAMENTAS da sidebar unificada tambem chama ("Monitor de Conexao"). */
+	void openProcessList() {
 		if (owner.activeWorkspace() == null || !owner.activeWorkspace().mgr.isConnected()) {
 			owner.statusBar().setText(" Conecte-se a um servidor antes de ver as sessoes ativas.");
 			return;
@@ -800,6 +816,11 @@ final class ObjectExplorerController {
 		Conexao ws = owner.activeWorkspace();
 		ProcessListDialog.open(owner, owner.dialect(), (sql, onRows, onErr) -> runQuery(ws, sql, onRows, onErr),
 				(statements, onOk, onErr) -> ddlActions.runDdlStatements(ws, statements, onOk, onErr));
+	}
+
+	/** Ponte pacote-privada pra {@link ObjectDataTransfer#openBackupRestore()} — FERRAMENTAS da sidebar nao tem acesso direto a {@link #dataTransfer}. */
+	void openBackupRestore() {
+		dataTransfer.openBackupRestore();
 	}
 
 	private void openServerStatus() {

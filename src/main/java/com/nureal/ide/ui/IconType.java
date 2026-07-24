@@ -54,6 +54,11 @@ public enum IconType {
 
     // Dados / IO
     EXPORT(IconRole.NEUTRAL),
+    BACKUP(IconRole.NEUTRAL),
+
+    // Ferramentas de servidor (sidebar unificada, ver Fase 3 do AI-CHAT-MASTER-PLAN.md)
+    USERS(IconRole.NEUTRAL),
+    MONITOR(IconRole.NEUTRAL),
 
     // Sistema / feedback
     SETTINGS(IconRole.NEUTRAL),

@@ -135,6 +135,9 @@ final class Icons {
         m.put(IconType.PRIMARY_KEY, "primary_key.svg");
         m.put(IconType.FOREIGN_KEY, "foreign_key.svg");
         m.put(IconType.EXPORT, "export.svg");
+        m.put(IconType.BACKUP, "backup.svg");
+        m.put(IconType.USERS, "users.svg");
+        m.put(IconType.MONITOR, "monitor.svg");
         m.put(IconType.SETTINGS, "settings.svg");
         m.put(IconType.HELP, "help.svg");
         m.put(IconType.INFO, "info.svg");

@@ -499,6 +499,16 @@ public class ConnectionsPanel extends JPanel {
         }
     }
 
+    /**
+     * Encaminha o texto da busca unificada da sidebar (Ctrl+K, ver
+     * {@code MainWindow#buildLeftSide}) para {@link #search} — reusa
+     * {@link #applyFilter} (disparado pelo {@code onTextChange} ja
+     * registrado no construtor) em vez de duplicar a logica de filtro.
+     */
+    void setFilterText(String text) {
+        search.setText(text);
+    }
+
     /** Ajusta a altura de cada cartao da lista (usado pelo zoom/modo compacto). */
     public void setRowHeight(int height) {
         list.setFixedCellHeight(height);
