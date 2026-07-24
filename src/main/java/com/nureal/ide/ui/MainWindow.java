@@ -176,6 +176,16 @@ public class MainWindow extends JFrame {
 
 	private JTabbedPane editorTabs;
 	private Component plusTab;
+	/**
+	 * Aba do "Chat com IA" (Fase 2 do AI-CHAT-MASTER-PLAN.md), se estiver
+	 * aberta agora — {@code null} caso contrario. Diferente das abas de SQL
+	 * (uma por {@code Conexao}, reconstruidas a cada troca de workspace por
+	 * {@link #rebuildEditorTabs}), esta aba e UNICA pra sessao inteira do
+	 * app e sobrevive a troca de conexao — {@link #rebuildEditorTabs}
+	 * precisa preserva-la explicitamente.
+	 */
+	private Component chatTab;
+	private ChatWindow chatWindow;
 	private boolean addingTab;
 	private JSplitPane mainSplit;
 	private JSplitPane centerSplit;
@@ -1644,7 +1654,7 @@ public class MainWindow extends JFrame {
 		}
 		for (int i = 0; i < editorTabs.getTabCount(); i++) {
 			Component c = editorTabs.getComponentAt(i);
-			if (c == plusTab) {
+			if (c == plusTab || c == chatTab) {
 				continue;
 			}
 			editorTabs.setIconAt(i, dot);
@@ -1656,6 +1666,20 @@ public class MainWindow extends JFrame {
 			}
 			editorTabs.setToolTipTextAt(i, tabTooltip);
 		}
+		if (chatTab != null && chatWindow != null) {
+			chatWindow.setSchemaLabel(chatSchemaLabel());
+		}
+	}
+
+	/** "Esquema: X" pro badge do topo do Chat (ver ChatPanel), ou rotulo neutro sem conexao/esquema. */
+	private String chatSchemaLabel() {
+		if (activeWorkspace == null || activeWorkspace.profile() == null) {
+			return "Sem conexao";
+		}
+		if (!activeWorkspace.mgr().isConnected()) {
+			return "Desconectado";
+		}
+		return currentSchema != null ? "Esquema: " + currentSchema.name() : activeWorkspace.name();
 	}
 
 	// ---------- Lado esquerdo ----------
@@ -1936,9 +1960,16 @@ public class MainWindow extends JFrame {
 		return true;
 	}
 
-	/** Numero de abas reais (exclui a aba "+"). */
+	/** Numero de abas de SQL (exclui "+" e a aba do Chat, que nao conta pro limite {@code MAX_TABS}). */
 	private int realTabCount() {
-		return editorTabs.getTabCount() - (plusTab != null ? 1 : 0);
+		int count = editorTabs.getTabCount();
+		if (plusTab != null) {
+			count--;
+		}
+		if (chatTab != null) {
+			count--;
+		}
+		return count;
 	}
 
 	private void selectLastRealTab() {
@@ -1960,7 +1991,9 @@ public class MainWindow extends JFrame {
 			return;
 		}
 		final Component target = editorTabs.getComponentAt(idx);
-		if (target == plusTab) {
+		// "Renomear"/"Salvar como query" nao fazem sentido pra aba do Chat —
+		// mesmo tratamento do "+", sem menu de contexto nenhum.
+		if (target == plusTab || target == chatTab) {
 			return;
 		}
 		buildTabContextMenu(target).show(editorTabs, e.getX(), e.getY());
@@ -2059,7 +2092,9 @@ public class MainWindow extends JFrame {
 		if (target == plusTab) {
 			return;
 		}
-		if (realTabCount() <= 1) {
+		// A aba do Chat sempre pode ser fechada (nao e uma aba de SQL, nao
+		// conta pro "manter ao menos uma aba de SQL aberta" abaixo).
+		if (target != chatTab && realTabCount() <= 1) {
 			return;
 		}
 		// Se a aba a fechar e a selecionada, selecione antes uma aba real vizinha,
@@ -2075,6 +2110,12 @@ public class MainWindow extends JFrame {
 		// sem a aba de SQL que os gerou (ver resultsByTab).
 		if (target instanceof SqlEditorPane sep) {
 			resultsController.forgetTab(sep);
+		}
+		if (target == chatTab) {
+			// Reabrir depois (ver openAiChat) cria uma instancia nova, com o
+			// historico persistido carregado de novo do disco — nao perde nada.
+			chatTab = null;
+			chatWindow = null;
 		}
 		scheduleSave();
 	}
@@ -2152,6 +2193,12 @@ public class MainWindow extends JFrame {
 				String title = (t.title() == null || t.title().isBlank()) ? nextQueryTitle() : t.title();
 				addQueryTab(title, t.sql(), t.id(), t.schema());
 			}
+		}
+		if (chatTab != null) {
+			// A aba do Chat nao pertence a nenhum workspace (ver javadoc do
+			// campo) — sobrevive a reconstrucao, sempre reinserida logo apos
+			// as abas de SQL (mesma posicao relativa "antes do +").
+			editorTabs.addTab("Chat com IA", chatTab);
 		}
 		addPlusTab();
 		// Restaura os resultados salvos (indexados pelo ID ESTAVEL da aba, ver
@@ -2425,14 +2472,90 @@ public class MainWindow extends JFrame {
 	/** Uma unica conversa persistente para o MVP — sem seletor de conversas ainda. */
 	private static final String AI_CONVERSATION_ID = "default";
 
+	/**
+	 * Abre (ou foca, se ja aberta) a aba "Chat com IA" dentro de
+	 * {@link #editorTabs} — Fase 2 do {@code AI-CHAT-MASTER-PLAN.md}: era
+	 * uma janela {@code JDialog} flutuante singleton, agora e uma aba mais
+	 * (ver {@link #chatTab}). "Fechar" a aba (ver {@link #closeQueryTab})
+	 * limpa {@link #chatTab}/{@link #chatWindow}; reabrir cria uma instancia
+	 * nova, que recarrega o historico persistido do disco — nada se perde.
+	 */
 	private void openAiChat() {
+		if (chatTab != null) {
+			editorTabs.setSelectedComponent(chatTab);
+			return;
+		}
 		AiPreferences aiPreferences = new AiPreferences();
 		AiCredentialsStore aiCredentials = new AiCredentialsStore();
 		ChatHistoryStore chatHistoryStore = new ChatHistoryStore();
 		Agent agent = buildAiAgent(aiPreferences, aiCredentials, chatHistoryStore);
 		ChatActions actions = new ChatActions(this::runSqlFromChat, this::currentSqlFormatter, sql -> { });
-		ChatWindow.open(this, agent, chatHistoryStore, AI_CONVERSATION_ID,
+		chatWindow = new ChatWindow(agent, chatHistoryStore, AI_CONVERSATION_ID,
 				() -> openAiSettings(aiPreferences, aiCredentials), actions);
+		wireChatToolbar(chatWindow, aiPreferences, aiCredentials);
+
+		chatTab = chatWindow.component();
+		int at = (plusTab != null) ? editorTabs.indexOfComponent(plusTab) : editorTabs.getTabCount();
+		editorTabs.insertTab("Chat com IA", null, chatTab, null, at);
+		editorTabs.setSelectedComponent(chatTab);
+	}
+
+	/**
+	 * Combo de modelo (mostra o atual de imediato; substitui pela lista real
+	 * assim que {@code provider.listModels()} responder, em segundo plano),
+	 * "+ Novo Chat" e o selo de esquema ativo — ver
+	 * {@code ChatPanel#setModelOptions}/{@code #setOnNewChat}/{@code #setSchemaLabel}.
+	 */
+	private void wireChatToolbar(ChatWindow window, AiPreferences aiPreferences, AiCredentialsStore aiCredentials) {
+		AiPreferences.State prefs;
+		try {
+			prefs = aiPreferences.load();
+		} catch (IOException e) {
+			prefs = AiPreferences.State.defaults();
+		}
+		String currentModel = prefs.model();
+		window.setModelOptions(currentModel.isBlank() ? List.of() : List.of(currentModel), currentModel);
+		window.setSchemaLabel(chatSchemaLabel());
+		window.setOnNewChat(window::startNewConversation);
+		window.setOnModelChange(model -> onChatModelChanged(aiPreferences, aiCredentials, model));
+
+		LLMProvider provider = LLMProviderFactory.create(prefs, aiCredentials);
+		new SwingWorker<List<String>, Void>() {
+			@Override
+			protected List<String> doInBackground() {
+				return provider.listModels();
+			}
+
+			@Override
+			protected void done() {
+				try {
+					List<String> models = get();
+					if (!models.isEmpty()) {
+						window.setModelOptions(models, currentModel);
+					}
+				} catch (Exception ignored) {
+					// Falha ao listar (rede/credencial) nao e bloqueante aqui —
+					// o combo continua mostrando so o modelo ja configurado,
+					// que ja funciona; erro de verdade (modelo inexistente)
+					// aparece ao mandar a primeira mensagem, como antes desta fase.
+				}
+			}
+		}.execute();
+	}
+
+	/** Usuario trocou o modelo no combo do chat: persiste e reconstroi o Agent (mesmo caminho de "Configuracoes de IA"). */
+	private void onChatModelChanged(AiPreferences aiPreferences, AiCredentialsStore aiCredentials, String model) {
+		try {
+			AiPreferences.State current = aiPreferences.load();
+			aiPreferences.save(new AiPreferences.State(current.provider(), current.baseUrl(), model,
+					current.temperature(), current.timeoutSeconds(), current.streamingEnabled()));
+		} catch (IOException e) {
+			AppLogger.warning("Falha ao salvar o modelo escolhido no chat", e);
+			return;
+		}
+		if (chatWindow != null) {
+			chatWindow.updateAgent(buildAiAgent(aiPreferences, aiCredentials, new ChatHistoryStore()));
+		}
 	}
 
 	/**
@@ -2448,8 +2571,11 @@ public class MainWindow extends JFrame {
 	}
 
 	private void openAiSettings(AiPreferences aiPreferences, AiCredentialsStore aiCredentials) {
-		AiSettingsDialog.open(this, aiPreferences, aiCredentials,
-				() -> ChatWindow.updateAgent(buildAiAgent(aiPreferences, aiCredentials, new ChatHistoryStore())));
+		AiSettingsDialog.open(this, aiPreferences, aiCredentials, () -> {
+			if (chatWindow != null) {
+				chatWindow.updateAgent(buildAiAgent(aiPreferences, aiCredentials, new ChatHistoryStore()));
+			}
+		});
 	}
 
 	private Agent buildAiAgent(AiPreferences aiPreferences, AiCredentialsStore aiCredentials,
@@ -2621,10 +2747,11 @@ public class MainWindow extends JFrame {
 		resultsController.styleExecutingOverlay();
 		// Mesmo motivo: os cards do chat de IA (MessageRenderer) tem cores de
 		// RSyntaxTextArea/fundo proprias, presas no tema de quando cada
-		// mensagem foi renderizada — sem isto, o chat (janela singleton que
-		// pode ficar aberta atravessando um toggle) mantinha cards do tema
-		// antigo ate a proxima mensagem.
-		ChatWindow.refreshTheme();
+		// mensagem foi renderizada — sem isto, a aba do chat (se estiver
+		// aberta) mantinha cards do tema antigo ate a proxima mensagem.
+		if (chatWindow != null) {
+			chatWindow.refreshTheme();
+		}
 	}
 
 	// ---------- Acoes ----------

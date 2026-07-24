@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -28,7 +29,8 @@ final class ChatController {
 
     private final ChatPanel panel;
     private final ChatHistoryStore historyStore;
-    private final String conversationId;
+    /** Nao {@code final}: {@link #startNewConversation} troca pra um id novo, mesmo controller/painel (ver Fase 2). */
+    private String conversationId;
     private Agent agent;
     private volatile String activeTurnId;
 
@@ -59,6 +61,22 @@ final class ChatController {
     void refreshTheme() {
         panel.clearMessages();
         loadHistory();
+    }
+
+    /**
+     * "+ Novo Chat" (ver {@code ChatPanel}): troca pra um {@code conversationId}
+     * novo (o historico anterior CONTINUA salvo em {@link ChatHistoryStore},
+     * so nao aparece mais nesta janela) e limpa a tela. Cancela um turno em
+     * andamento primeiro — trocar de conversa no meio de uma resposta
+     * deixaria o evento chegando depois tentando atualizar bolhas que nao
+     * existem mais.
+     */
+    void startNewConversation() {
+        if (activeTurnId != null) {
+            cancelActive();
+        }
+        conversationId = UUID.randomUUID().toString();
+        panel.clearMessages();
     }
 
     private void loadHistory() {

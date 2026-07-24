@@ -6,11 +6,14 @@ import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
+import java.util.List;
 import java.util.function.Consumer;
 
 import javax.swing.BorderFactory;
 import javax.swing.BoxLayout;
+import javax.swing.DefaultComboBoxModel;
 import javax.swing.JButton;
+import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
@@ -38,12 +41,18 @@ final class ChatPanel extends JPanel {
     private final JTextArea input = new JTextArea(3, 40);
     private final JButton sendButton = new JButton("Enviar");
     private final JLabel statusLabel = new JLabel(" ");
+    private final JComboBox<String> modelCombo = new JComboBox<>();
+    private final JLabel schemaBadge = new JLabel();
 
     private Consumer<String> onSend = s -> { };
     private Runnable onCancel = () -> { };
     private Runnable onOpenSettings = () -> { };
+    private Runnable onNewChat = () -> { };
+    private Consumer<String> onModelChange = model -> { };
     private ChatActions actions = ChatActions.NONE;
     private boolean sending;
+    /** Suprime {@link #onModelChange} enquanto {@link #setModelOptions} preenche o combo (nao e escolha do usuario). */
+    private boolean populatingModels;
 
     ChatPanel() {
         super(new BorderLayout());
@@ -51,9 +60,35 @@ final class ChatPanel extends JPanel {
         JButton settingsButton = new JButton("⚙", null);
         settingsButton.setToolTipText("Configuracoes de IA (modelo, base URL, streaming...)");
         settingsButton.setHorizontalAlignment(SwingConstants.CENTER);
-        NToolbar topBar = new NToolbar().setTitle("Chat com IA").addSecondaryAction(settingsButton);
-        add(topBar, BorderLayout.NORTH);
         settingsButton.addActionListener(e -> onOpenSettings.run());
+
+        JButton newChatButton = new JButton("+ Novo Chat");
+        newChatButton.setToolTipText("Comeca uma conversa nova (o historico atual continua salvo)");
+        newChatButton.addActionListener(e -> onNewChat.run());
+
+        modelCombo.setToolTipText("Modelo de IA usado nesta conversa");
+        modelCombo.addActionListener(e -> {
+            if (populatingModels) {
+                return;
+            }
+            Object selected = modelCombo.getSelectedItem();
+            if (selected != null) {
+                onModelChange.accept(selected.toString());
+            }
+        });
+
+        schemaBadge.setFont(schemaBadge.getFont().deriveFont(Font.PLAIN, 11f));
+        Color mutedBadge = UIManager.getColor("Label.disabledForeground");
+        if (mutedBadge != null) {
+            schemaBadge.setForeground(mutedBadge);
+        }
+
+        NToolbar topBar = new NToolbar().setTitle("Chat com IA")
+                .addPrimaryAction(schemaBadge)
+                .addPrimaryAction(modelCombo)
+                .addSecondaryAction(newChatButton)
+                .addSecondaryAction(settingsButton);
+        add(topBar, BorderLayout.NORTH);
 
         messagesContainer.setLayout(new BoxLayout(messagesContainer, BoxLayout.Y_AXIS));
         messagesContainer.setOpaque(false);
@@ -121,9 +156,37 @@ final class ChatPanel extends JPanel {
         this.onOpenSettings = onOpenSettings;
     }
 
+    /** Botao "+ Novo Chat" — quem chama decide o novo {@code conversationId} (ver {@code ChatHistoryStore}). */
+    void setOnNewChat(Runnable onNewChat) {
+        this.onNewChat = onNewChat;
+    }
+
+    /** Disparado quando o USUARIO escolhe um modelo diferente no combo (nunca ao popular via {@link #setModelOptions}). */
+    void setOnModelChange(Consumer<String> onModelChange) {
+        this.onModelChange = onModelChange;
+    }
+
     /** Acoes dos cards SQL (Executar/Formatar/Explicar) — ver {@link ChatActions}. */
     void setActions(ChatActions actions) {
         this.actions = actions;
+    }
+
+    /** Preenche o combo de modelo (ex.: ao abrir, ou apos "Listar modelos" nas Configuracoes) e marca o atual. */
+    void setModelOptions(List<String> models, String selected) {
+        populatingModels = true;
+        try {
+            modelCombo.setModel(new DefaultComboBoxModel<>(models.toArray(new String[0])));
+            if (selected != null) {
+                modelCombo.setSelectedItem(selected);
+            }
+        } finally {
+            populatingModels = false;
+        }
+    }
+
+    /** Rotulo do esquema/conexao ativa (ver {@code AgentContext}), ou vazio se nenhuma conexao ativa. */
+    void setSchemaLabel(String label) {
+        schemaBadge.setText(label == null || label.isBlank() ? " " : label);
     }
 
     private void triggerSend() {
