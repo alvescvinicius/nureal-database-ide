@@ -2,9 +2,12 @@ package com.nureal.ide.ui.ai;
 
 import java.awt.BorderLayout;
 import java.awt.Color;
+import java.awt.Dimension;
 import java.awt.Font;
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.List;
 import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -12,18 +15,29 @@ import java.util.regex.Pattern;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
+import javax.swing.JButton;
 import javax.swing.JComponent;
+import javax.swing.JFileChooser;
 import javax.swing.JLabel;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.JScrollPane;
+import javax.swing.JTable;
 import javax.swing.JTextArea;
 import javax.swing.UIManager;
+import javax.swing.filechooser.FileNameExtensionFilter;
+import javax.swing.table.DefaultTableModel;
 
 import org.fife.ui.rsyntaxtextarea.RSyntaxTextArea;
 import org.fife.ui.rsyntaxtextarea.SyntaxConstants;
 import org.fife.ui.rsyntaxtextarea.Theme;
 
+import com.nureal.ide.core.ai.tool.SqlQueryResult;
+import com.nureal.ide.ui.GridExporter;
+import com.nureal.ide.ui.MetadataTableStyle;
 import com.nureal.ide.ui.SqlEditorPane;
 import com.nureal.ide.ui.components.NAccent;
+import com.nureal.ide.ui.components.NButton;
 import com.nureal.ide.ui.components.NCard;
 import com.nureal.ide.ui.components.NCodeBlock;
 import com.nureal.ide.ui.components.NTheme;
@@ -112,6 +126,102 @@ final class MessageRenderer {
         card.addContent(status);
         bubble.add(card);
         return new ToolCard(bubble, status);
+    }
+
+    /**
+     * Card de resultado tabular de {@code ExecuteSqlTool} — substitui o card
+     * de status "pendente" (ver {@link #toolCard}) quando a tool termina com
+     * sucesso (ver {@code ChatPanel.ToolCardHandle#complete}). Tabela no
+     * MESMO visual da grade de resultados (ver {@link MetadataTableStyle}).
+     * "Ver SQL" so expande/colapsa a instrucao ja rodada (nao reexecuta
+     * nada); o bloco expandido reusa {@link NCodeBlock}, entao ja ganha
+     * "Copiar"/"Formatar"/"Executar" de graca, igual a qualquer outro bloco
+     * SQL do chat. "Exportar resultado" reusa {@link GridExporter} — nenhuma
+     * logica de exportacao nova.
+     */
+    static JComponent sqlResultCard(SqlQueryResult data, ChatActions actions) {
+        JPanel bubble = new JPanel();
+        bubble.setLayout(new BoxLayout(bubble, BoxLayout.Y_AXIS));
+        bubble.setOpaque(false);
+        bubble.setBorder(BorderFactory.createEmptyBorder(6, 8, 6, 8));
+
+        NCard card = new NCard(NAccent.SQL, "📊 Resultado");
+
+        DefaultTableModel model = new DefaultTableModel(data.columns().toArray(), 0) {
+            private static final long serialVersionUID = 1L;
+
+            @Override
+            public boolean isCellEditable(int row, int column) {
+                return false;
+            }
+        };
+        for (List<Object> row : data.rows()) {
+            model.addRow(row.toArray());
+        }
+        JTable table = MetadataTableStyle.createStyledTable(model);
+        JScrollPane scroll = new JScrollPane(table);
+        scroll.setAlignmentX(JComponent.LEFT_ALIGNMENT);
+        int rowsShown = Math.max(1, Math.min(data.rows().size(), 8));
+        scroll.setPreferredSize(new Dimension(520, rowsShown * 24 + 28));
+
+        JLabel summary = new JLabel(data.rows().size() + " linha(s)" + (data.truncated() ? " (limitado)" : ""));
+        summary.setFont(summary.getFont().deriveFont(Font.PLAIN, 11f));
+        summary.setForeground(NTheme.mutedColor());
+        summary.setAlignmentX(JComponent.LEFT_ALIGNMENT);
+
+        NCodeBlock sqlBlock = new NCodeBlock(data.sql(), NAccent.SQL, "SQL", SqlEditorPane::styleAsReadOnlySql);
+        sqlBlock.addAction("Formatar",
+                () -> sqlBlock.setCode(actions.sqlFormatterSupplier().get().format(sqlBlock.getCode())));
+        sqlBlock.addAction("Executar", () -> actions.onExecuteSql().accept(sqlBlock.getCode()));
+        sqlBlock.setAlignmentX(JComponent.LEFT_ALIGNMENT);
+        sqlBlock.setVisible(false);
+
+        JButton toggleSql = new NButton("Ver SQL", NButton.Kind.GHOST);
+        JButton exportButton = new NButton("Exportar resultado", NButton.Kind.GHOST);
+        toggleSql.addActionListener(e -> {
+            boolean showing = !sqlBlock.isVisible();
+            sqlBlock.setVisible(showing);
+            toggleSql.setText(showing ? "Ocultar SQL" : "Ver SQL");
+            card.revalidate();
+            card.repaint();
+        });
+        exportButton.addActionListener(e -> exportSqlResult(card, table));
+
+        JPanel actionsRow = new JPanel();
+        actionsRow.setLayout(new BoxLayout(actionsRow, BoxLayout.X_AXIS));
+        actionsRow.setOpaque(false);
+        actionsRow.setAlignmentX(JComponent.LEFT_ALIGNMENT);
+        actionsRow.add(toggleSql);
+        actionsRow.add(exportButton);
+        actionsRow.add(Box.createHorizontalGlue());
+
+        card.addContent(scroll);
+        card.addContent(summary);
+        card.addContent(actionsRow);
+        card.addContent(sqlBlock);
+
+        bubble.add(card);
+        return bubble;
+    }
+
+    private static void exportSqlResult(JComponent parent, JTable table) {
+        JFileChooser fc = new JFileChooser();
+        fc.setDialogTitle("Exportar resultado");
+        fc.setSelectedFile(new File("resultado.csv"));
+        fc.setFileFilter(new FileNameExtensionFilter("CSV (*.csv)", "csv"));
+        if (fc.showSaveDialog(parent) != JFileChooser.APPROVE_OPTION) {
+            return;
+        }
+        File file = fc.getSelectedFile();
+        if (!file.getName().toLowerCase(Locale.ROOT).endsWith(".csv")) {
+            file = new File(file.getParentFile(), file.getName() + ".csv");
+        }
+        try {
+            GridExporter.exportCsv(table, file.toPath());
+        } catch (IOException ex) {
+            JOptionPane.showMessageDialog(parent, "Falha ao exportar resultado:\n" + ex.getMessage(),
+                    "Exportar resultado", JOptionPane.ERROR_MESSAGE);
+        }
     }
 
     /** Titulos ({@code #}..{@code ######}), blocos de admonicao e paragrafos comuns — nessa ordem de deteccao por linha. */

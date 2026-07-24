@@ -111,6 +111,7 @@ import com.nureal.ide.core.ai.context.IdeStateAccessor;
 import com.nureal.ide.core.ai.history.ChatHistoryStore;
 import com.nureal.ide.core.ai.provider.LLMProvider;
 import com.nureal.ide.core.ai.tool.DescribeTableTool;
+import com.nureal.ide.core.ai.tool.ExecuteSqlTool;
 import com.nureal.ide.core.ai.tool.ListTablesTool;
 import com.nureal.ide.core.ai.tool.ToolExecutor;
 import com.nureal.ide.ui.ai.AiSettingsDialog;
@@ -2473,7 +2474,7 @@ public class MainWindow extends JFrame {
 				this::hasEditorSelectionForAi,
 				this::lastExecutionForAi);
 		ToolExecutor toolExecutor = new ToolExecutor(
-				List.of(new ListTablesTool(accessor), new DescribeTableTool(accessor)));
+				List.of(new ListTablesTool(accessor), new DescribeTableTool(accessor), new ExecuteSqlTool(accessor)));
 		ContextProvider contextProvider = new DefaultContextProvider(accessor);
 		return new DefaultAgent(provider, contextProvider, toolExecutor, chatHistoryStore, () -> {
 			try {

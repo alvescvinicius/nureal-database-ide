@@ -115,7 +115,7 @@ final class ChatController {
         } else if (event instanceof AiEvent.ToolCallResult result) {
             ChatPanel.ToolCardHandle card = toolCards.remove(result.call().id());
             if (card != null) {
-                card.complete(result.success(), result.summary());
+                card.complete(result.success(), result.summary(), result.structuredData());
             }
         } else if (event instanceof AiEvent.Completed completed) {
             bubble.finish(completed.response().message().content());
@@ -154,7 +154,13 @@ final class ChatController {
     }
 
     private static String labelForTool(String toolName) {
-        return isMetadataTool(toolName) ? "Consultando metadata..." : "Executando " + toolName + "...";
+        if (isMetadataTool(toolName)) {
+            return "Consultando metadata...";
+        }
+        if ("execute_sql".equals(toolName)) {
+            return "Executando consulta SQL...";
+        }
+        return "Executando " + toolName + "...";
     }
 
     private static boolean isMetadataTool(String toolName) {

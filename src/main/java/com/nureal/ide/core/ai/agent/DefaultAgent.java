@@ -132,7 +132,7 @@ public final class DefaultAgent implements Agent {
                         turn.conversationId, call.id(), turn.context));
                 String toolContent = result.success() ? result.content() : ("Erro: " + result.error());
                 turn.onEvent.accept(new AiEvent.ToolCallResult(requested.requestId(), call, result.success(),
-                        toolContent));
+                        toolContent, result.structuredData()));
                 turn.session.submitToolResult(call.id(), toolContent);
             }
             return;

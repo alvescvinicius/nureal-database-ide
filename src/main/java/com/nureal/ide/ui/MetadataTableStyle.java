@@ -23,7 +23,7 @@ import javax.swing.table.TableModel;
  * o visual cru padrao do Swing/FlatLaf, bem mais pobre que a grade principal
  * e visivelmente "de outro app" dentro da mesma janela.
  */
-final class MetadataTableStyle {
+public final class MetadataTableStyle {
 
     private MetadataTableStyle() {
     }
@@ -36,9 +36,9 @@ final class MetadataTableStyle {
      * corrigida em {@code ResultGrid}$JTable, {@code ConnectionsPanel} etc.).
      * Preferir este metodo a {@code new JTable(model)} + {@link #apply}
      * separados em qualquer tabela de metadados NOVA (ver
-     * {@code DdlAssistantDialog}, unico consumidor hoje).
+     * {@code DdlAssistantDialog}, {@code ui.ai.MessageRenderer}).
      */
-    static JTable createStyledTable(TableModel model) {
+    public static JTable createStyledTable(TableModel model) {
         JTable table = new JTable(model) {
             private static final long serialVersionUID = 1L;
 

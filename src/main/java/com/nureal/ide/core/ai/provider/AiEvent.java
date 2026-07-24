@@ -43,8 +43,13 @@ public sealed interface AiEvent {
      * executar UMA das tools de um {@link ToolCallsRequested} anterior — so pra UI
      * mostrar o resultado (ex.: "12 tabelas encontradas"); a sessao ja recebeu o
      * mesmo resultado por outro caminho (via {@link ConversationSession#submitToolResult}).
+     * {@code structuredData} espelha {@code ToolResult#structuredData} (ex.:
+     * {@code SqlQueryResult} de {@code ExecuteSqlTool}) — {@code null} para
+     * tools que so devolvem texto (ex.: {@code list_tables}); quem consome
+     * (ver {@code ui.ai.MessageRenderer}) decide como renderizar cada tipo.
      */
-    record ToolCallResult(String requestId, ToolCall call, boolean success, String summary) implements AiEvent {
+    record ToolCallResult(String requestId, ToolCall call, boolean success, String summary, Object structuredData)
+            implements AiEvent {
     }
 
     record Failed(String requestId, ProviderException error) implements AiEvent {

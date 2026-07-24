@@ -16,20 +16,20 @@ import java.nio.file.Path;
  * ordenacao e o filtro aplicados no momento — o que o usuario ve na tela e
  * exatamente o que sai no arquivo/clipboard.
  */
-final class GridExporter {
+public final class GridExporter {
 
     private GridExporter() {
     }
 
     /** Exporta TODAS as linhas/colunas visiveis (view) para um arquivo CSV. */
-    static void exportCsv(JTable table, Path file) throws IOException {
+    public static void exportCsv(JTable table, Path file) throws IOException {
         try (Writer w = Files.newBufferedWriter(file, StandardCharsets.UTF_8)) {
             w.write(toCsv(table, allRows(table), allColumns(table), true));
         }
     }
 
     /** Exporta TODAS as linhas/colunas visiveis (view) para um arquivo JSON (array de objetos). */
-    static void exportJson(JTable table, Path file) throws IOException {
+    public static void exportJson(JTable table, Path file) throws IOException {
         try (Writer w = Files.newBufferedWriter(file, StandardCharsets.UTF_8)) {
             w.write(toJson(table, allRows(table), allColumns(table)));
         }

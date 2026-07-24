@@ -21,6 +21,7 @@ import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
 
+import com.nureal.ide.core.ai.tool.SqlQueryResult;
 import com.nureal.ide.ui.components.NToolbar;
 
 /**
@@ -157,7 +158,7 @@ final class ChatPanel extends JPanel {
         messagesContainer.add(card.component());
         messagesContainer.add(javax.swing.Box.createVerticalStrut(2));
         revalidateAndScrollToBottom();
-        return new ToolCardHandle(card.statusLabel());
+        return new ToolCardHandle(card.component(), card.statusLabel());
     }
 
     /** Inicia uma bolha de resposta do assistente que vai crescendo enquanto os chunks chegam. */
@@ -240,33 +241,51 @@ final class ChatPanel extends JPanel {
         }
 
         private void replaceWith(JComponent replacement) {
-            int index = -1;
-            for (int i = 0; i < messagesContainer.getComponentCount(); i++) {
-                if (messagesContainer.getComponent(i) == bubble) {
-                    index = i;
-                    break;
-                }
-            }
-            if (index < 0) {
+            replaceComponent(bubble, replacement);
+        }
+    }
+
+    /**
+     * Alca de um card de tool em execucao — ver {@link #beginToolCard}. Tools
+     * que devolvem so texto (ex.: {@code list_tables}) so atualizam o rotulo
+     * de status; tools com dado tabular reconhecido (ex.: {@code SqlQueryResult}
+     * de {@code ExecuteSqlTool}) trocam o card inteiro pela tabela renderizada
+     * — mesma troca "ao vivo -&gt; final" que {@link LiveBubble#replaceWith} ja
+     * faz pra mensagens do assistente.
+     */
+    final class ToolCardHandle {
+        private final JComponent component;
+        private final JLabel statusLabel;
+
+        private ToolCardHandle(JComponent component, JLabel statusLabel) {
+            this.component = component;
+            this.statusLabel = statusLabel;
+        }
+
+        void complete(boolean success, String summary, Object structuredData) {
+            if (success && structuredData instanceof SqlQueryResult data) {
+                replaceComponent(component, MessageRenderer.sqlResultCard(data, actions));
                 return;
             }
-            messagesContainer.remove(index);
-            messagesContainer.add(replacement, index);
+            statusLabel.setText((success ? "✓ " : "❌ ") + summary);
             revalidateAndScrollToBottom();
         }
     }
 
-    /** Alca de um card de tool em execucao — ver {@link #beginToolCard}. */
-    final class ToolCardHandle {
-        private final JLabel statusLabel;
-
-        private ToolCardHandle(JLabel statusLabel) {
-            this.statusLabel = statusLabel;
+    /** Troca {@code current} por {@code replacement} na mesma posicao da lista de mensagens — usado por {@link LiveBubble}/{@link ToolCardHandle}. */
+    private void replaceComponent(JComponent current, JComponent replacement) {
+        int index = -1;
+        for (int i = 0; i < messagesContainer.getComponentCount(); i++) {
+            if (messagesContainer.getComponent(i) == current) {
+                index = i;
+                break;
+            }
         }
-
-        void complete(boolean success, String summary) {
-            statusLabel.setText((success ? "✓ " : "❌ ") + summary);
-            revalidateAndScrollToBottom();
+        if (index < 0) {
+            return;
         }
+        messagesContainer.remove(index);
+        messagesContainer.add(replacement, index);
+        revalidateAndScrollToBottom();
     }
 }
