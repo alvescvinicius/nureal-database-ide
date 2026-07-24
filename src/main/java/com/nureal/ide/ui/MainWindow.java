@@ -1718,11 +1718,11 @@ public class MainWindow extends JFrame {
 	private JComponent buildLeftSide() {
 		connectionsPanel = new ConnectionsPanel(connectionStore, this::connectTo, this::disconnectFrom);
 		connectionsPanel.setRowHeight(scaledPx(ConnectionsPanel.DEFAULT_ROW_HEIGHT));
-		capHeight(connectionsPanel, 190);
+		capMaxHeight(connectionsPanel, 220);
 		savedQueriesPanel = new SavedQueriesPanel(savedQueryStore, this::openSavedQuery);
-		capHeight(savedQueriesPanel, 170);
+		capMaxHeight(savedQueriesPanel, 180);
 		historyPanel = new HistoryPanel(historyStore, this::openHistoryEntry);
-		capHeight(historyPanel, 170);
+		capMaxHeight(historyPanel, 180);
 
 		// Logo compacto no topo da coluna (SPEC-0007) — o texto "Nureal" que
 		// antes vivia no canto direito da barra inferior (removida) migrou
@@ -1777,22 +1777,22 @@ public class MainWindow extends JFrame {
 		workspaceGroup.setOpaque(false);
 		workspaceGroup.setLayout(new BoxLayout(workspaceGroup, BoxLayout.Y_AXIS));
 		workspaceGroup.add(groupHeader("WORKSPACE"));
-		workspaceGroup.add(sqlEditorsRow);
-		workspaceGroup.add(savedQueriesPanel);
-		workspaceGroup.add(historyPanel);
+		workspaceGroup.add(indent(sqlEditorsRow));
+		workspaceGroup.add(indent(savedQueriesPanel));
+		workspaceGroup.add(indent(historyPanel));
 		// Placeholder (SPEC-0007): "Favoritos" ainda nao existe no app (sem
 		// "favoritar" query salva de verdade fora do menu de contexto) —
 		// aparece desabilitado em vez de fingir que funciona.
-		workspaceGroup.add(sidebarRow(IconType.FAVORITE, "Favoritos", false, "Favoritos — em breve", null));
-		workspaceGroup.add(sidebarRow(IconType.CHAT, "Chat com IA", true, null, this::openAiChat));
+		workspaceGroup.add(indent(sidebarRow(IconType.FAVORITE, "Favoritos", false, "Favoritos — em breve", null)));
+		workspaceGroup.add(indent(sidebarRow(IconType.CHAT, "Chat com IA", true, null, this::openAiChat)));
 
 		JComponent toolsGroup = new JPanel();
 		toolsGroup.setOpaque(false);
 		toolsGroup.setLayout(new BoxLayout(toolsGroup, BoxLayout.Y_AXIS));
 		toolsGroup.add(groupHeader("FERRAMENTAS"));
-		toolsGroup.add(sidebarRow(IconType.BACKUP, "Backup e Restauracao", true, null, objectExplorer::openBackupRestore));
-		toolsGroup.add(sidebarRow(IconType.USERS, "Usuarios e Privilegios", true, null, objectExplorer::openUserManagement));
-		toolsGroup.add(sidebarRow(IconType.MONITOR, "Monitor de Conexao", true, null, objectExplorer::openProcessList));
+		toolsGroup.add(indent(sidebarRow(IconType.BACKUP, "Backup e Restauracao", true, null, objectExplorer::openBackupRestore)));
+		toolsGroup.add(indent(sidebarRow(IconType.USERS, "Usuarios e Privilegios", true, null, objectExplorer::openUserManagement)));
+		toolsGroup.add(indent(sidebarRow(IconType.MONITOR, "Monitor de Conexao", true, null, objectExplorer::openProcessList)));
 
 		historySectionAnchor = historyPanel;
 
@@ -1808,6 +1808,10 @@ public class MainWindow extends JFrame {
 		JScrollPane scroll = new JScrollPane(column);
 		scroll.setBorder(BorderFactory.createEmptyBorder());
 		scroll.getVerticalScrollBar().setUnitIncrement(16);
+		// Sidebar so rola verticalmente — nunca deve aparecer barra horizontal
+		// (o recuo de #indent somado a largura natural de algum item podia
+		// passar 1-2px do viewport e disparar uma sem necessidade nenhuma).
+		scroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
 
 		JPanel contentColumn = new JPanel(new BorderLayout());
 		contentColumn.setBorder(BorderFactory.createEmptyBorder(Spacing.SM, Spacing.SM, 0, Spacing.SM));
@@ -1820,11 +1824,38 @@ public class MainWindow extends JFrame {
 		return container;
 	}
 
-	/** Trava a altura MAXIMA de um painel embutido na coluna unica (ver {@link #buildLeftSide}) — cada um continua rolando por conta propria se tiver mais itens do que cabem. */
-	private static void capHeight(JComponent c, int maxHeight) {
+	/**
+	 * Trava so a altura MAXIMA de um painel embutido na coluna unica (ver
+	 * {@link #buildLeftSide}) — NUNCA forca a preferida: com poucos itens
+	 * (ou nenhum), o BoxLayout usa a altura NATURAL do painel (pequena, sem
+	 * sobrar espaco vazio); so quando o conteudo passa do teto e que o
+	 * painel fica limitado a {@code maxHeight}, com sua PROPRIA JScrollPane
+	 * interna cuidando do resto (rolagem aninhada). Forcar a preferida como
+	 * o teto (versao anterior desta funcao) deixava uma caixa cinza vazia
+	 * enorme sempre que o usuario tinha poucas conexoes/queries/historico —
+	 * exatamente o problema reportado na revisao visual.
+	 */
+	private static void capMaxHeight(JComponent c, int maxHeight) {
 		Dimension max = c.getMaximumSize();
 		c.setMaximumSize(new Dimension(max.width, maxHeight));
-		c.setPreferredSize(new Dimension(c.getPreferredSize().width, maxHeight));
+	}
+
+	/**
+	 * Recuo a esquerda pros sub-itens de um grupo (WORKSPACE/FERRAMENTAS,
+	 * ver {@link #buildLeftSide}) — sem isto, "Consultas Salvas"/"Historico"
+	 * (que desenham seu PROPRIO cabecalho em negrito, mesma receita de
+	 * {@code Typography#sectionHeader} usada por CONEXOES/OBJETOS) pareciam
+	 * grupos de nivel raiz, nao sub-itens de WORKSPACE (achado na revisao
+	 * visual). Preserva a largura de cada componente (BoxLayout ainda
+	 * estica pro resto da coluna); so desloca o conteudo pra dentro.
+	 */
+	private static JComponent indent(JComponent content) {
+		JPanel wrap = new JPanel(new BorderLayout());
+		wrap.setOpaque(false);
+		wrap.setBorder(BorderFactory.createEmptyBorder(0, Spacing.MD, 0, 0));
+		wrap.setAlignmentX(Component.LEFT_ALIGNMENT);
+		wrap.add(content, BorderLayout.CENTER);
+		return wrap;
 	}
 
 	/** Cabecalho de grupo da arvore unica (ver {@link #buildLeftSide}) — mesma receita de {@link Typography#sectionHeader}, so com respiro proprio. */

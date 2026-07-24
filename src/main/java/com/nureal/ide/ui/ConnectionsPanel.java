@@ -167,6 +167,14 @@ public class ConnectionsPanel extends JPanel {
     private JComponent buildList() {
         list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         list.setFixedCellHeight(DEFAULT_ROW_HEIGHT);
+        // Sem isto, JList usa o default de 8 linhas "fantasma" pra calcular a
+        // altura PREFERIDA (Scrollable#getPreferredScrollableViewportSize),
+        // mesmo com a lista vazia ou com so 1-2 itens de verdade — na sidebar
+        // unificada (Fase 3 do AI-CHAT-MASTER-PLAN.md), onde este painel fica
+        // embutido numa coluna com varias secoes, isso sobrava uma caixa cinza
+        // vazia enorme. 5 linhas visiveis por padrao; quem tiver mais rola
+        // dentro do proprio painel (ver MainWindow#capMaxHeight).
+        list.setVisibleRowCount(5);
         // Sem isto, a linha selecionada usava o default do FlatLaf.properties
         // (List.selectionBackground = accent verde SOLIDO, #059669) — bem
         // mais "gritante" que o cinza neutro que a arvore de Objetos e a

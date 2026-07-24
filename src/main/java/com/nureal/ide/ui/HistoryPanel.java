@@ -105,6 +105,11 @@ public class HistoryPanel extends JPanel {
     private JComponent buildList() {
         list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         list.setFixedCellHeight(52);
+        // Sem isto, JList usa o default de 8 linhas "fantasma" pra calcular a
+        // altura preferida mesmo com a lista vazia/curta — na sidebar
+        // unificada (Fase 3 do AI-CHAT-MASTER-PLAN.md) isso sobrava uma caixa
+        // cinza vazia enorme (ver mesmo ajuste em ConnectionsPanel).
+        list.setVisibleRowCount(3);
         // Mesmo cinza neutro de selecao da grade/arvore de Objetos, nao o
         // verde solido default do FlatLaf.properties (List.selectionBackground)
         // — ver o mesmo ajuste em ConnectionsPanel#buildList.
