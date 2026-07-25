@@ -1,6 +1,6 @@
 package com.nureal.ide.ui;
 
-import com.nureal.ide.core.connection.ConnectionManager;
+import com.nureal.ide.core.connection.ConexaoAtivaPort;
 import com.nureal.ide.core.metadata.model.ColumnDetail;
 import com.nureal.ide.core.metadata.model.ForeignKeyInfo;
 import com.nureal.ide.core.metadata.model.IndexInfo;
@@ -22,10 +22,10 @@ import java.util.List;
 final class ColumnMetadataResolver {
 
     private final TableMetadataCache cache;
-    private final ConnectionManager connectionManager;
+    private final ConexaoAtivaPort connectionManager;
     private final String schema;
 
-    ColumnMetadataResolver(TableMetadataCache cache, ConnectionManager connectionManager, String schema) {
+    ColumnMetadataResolver(TableMetadataCache cache, ConexaoAtivaPort connectionManager, String schema) {
         this.cache = cache;
         this.connectionManager = connectionManager;
         this.schema = schema;

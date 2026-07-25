@@ -13,7 +13,7 @@ import java.sql.SQLException;
  * o corpo de open()/getConnection() por um pool (HikariCP) sem alterar quem
  * chama.
  */
-public class ConnectionManager implements AutoCloseable {
+public class ConnectionManager implements ConexaoAtivaPort {
 
     private final DatabaseDialect dialect;
     private Connection connection;
@@ -24,6 +24,7 @@ public class ConnectionManager implements AutoCloseable {
     }
 
     /** Abre uma conexao nova, fechando a anterior se existir. */
+    @Override
     public synchronized void open(ConnectionProfile profile) throws SQLException {
         close();
         this.profile = profile;
@@ -33,7 +34,7 @@ public class ConnectionManager implements AutoCloseable {
                 profile.user(),
                 profile.password());
         try {
-            SessionInitializer.initialize(this.connection);
+            SessionInitializer.initialize(this.connection, dialect);
         } catch (SQLException ex) {
             this.connection.close();
             this.connection = null;
@@ -41,10 +42,12 @@ public class ConnectionManager implements AutoCloseable {
         }
     }
 
+    @Override
     public synchronized Connection getConnection() {
         return connection;
     }
 
+    @Override
     public synchronized boolean isConnected() {
         try {
             return connection != null && !connection.isClosed();
@@ -53,10 +56,12 @@ public class ConnectionManager implements AutoCloseable {
         }
     }
 
+    @Override
     public DatabaseDialect dialect() {
         return dialect;
     }
 
+    @Override
     public ConnectionProfile profile() {
         return profile;
     }

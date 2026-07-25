@@ -1,5 +1,7 @@
 package com.nureal.ide.core.connection;
 
+import com.nureal.ide.compartilhado.persistencia.ArquivoChaveValorUtil;
+import com.nureal.ide.core.security.CredentialCipher;
 import com.nureal.ide.core.security.LocalVault;
 
 import java.io.IOException;
@@ -9,7 +11,6 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.security.GeneralSecurityException;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.List;
 
 /**
@@ -33,7 +34,7 @@ import java.util.List;
  * (texto puro, nao cifrado), ele e lido e migrado automaticamente para o
  * novo formato cifrado no proximo save().
  */
-public class ConnectionStore {
+public class ConnectionStore implements ConnectionRepository {
 
     private static final String DIR_NAME = ".nureal-ide";
     private static final String FILE_NAME = "connections.conf";
@@ -41,7 +42,7 @@ public class ConnectionStore {
     private static final String ENCRYPTED_MAGIC = "NUREAL-ENC-V1";
 
     private final Path file;
-    private final LocalVault vault;
+    private final CredentialCipher vault;
 
     public ConnectionStore() {
         this(Paths.get(System.getProperty("user.home"), DIR_NAME, FILE_NAME));
@@ -51,7 +52,7 @@ public class ConnectionStore {
         this(file, new LocalVault());
     }
 
-    public ConnectionStore(Path file, LocalVault vault) {
+    public ConnectionStore(Path file, CredentialCipher vault) {
         this.file = file;
         this.vault = vault;
     }
@@ -61,6 +62,7 @@ public class ConnectionStore {
     }
 
     /** Le as conexoes (cifradas ou, se ainda no formato antigo, migra ao salvar). Vazio se nao existir. */
+    @Override
     public List<ConnectionProfile> load() throws IOException {
         if (!Files.exists(file)) {
             return new ArrayList<>();
@@ -90,6 +92,7 @@ public class ConnectionStore {
     }
 
     /** Grava todas as conexoes cifradas, criando a pasta se necessario. */
+    @Override
     public void save(List<ConnectionProfile> connections) throws IOException {
         Path parent = file.getParent();
         if (parent != null) {
@@ -106,7 +109,7 @@ public class ConnectionStore {
             sb.append("user=").append(nullToEmpty(c.user())).append('\n');
             sb.append("savePassword=").append(c.savePassword()).append('\n');
             if (c.savePassword() && c.password() != null && !c.password().isEmpty()) {
-                sb.append("password=").append(encodeBase64(c.password())).append('\n');
+                sb.append("password=").append(ArquivoChaveValorUtil.encode(c.password())).append('\n');
             }
             sb.append('\n');
         }
@@ -153,18 +156,6 @@ public class ConnectionStore {
         return result;
     }
 
-    private static String encodeBase64(String plain) {
-        return Base64.getEncoder().encodeToString(plain.getBytes(StandardCharsets.UTF_8));
-    }
-
-    private static String decodeBase64(String encoded) {
-        try {
-            return new String(Base64.getDecoder().decode(encoded), StandardCharsets.UTF_8);
-        } catch (IllegalArgumentException e) {
-            return "";
-        }
-    }
-
     private static String nullToEmpty(String s) {
         return s == null ? "" : s;
     }
@@ -187,7 +178,7 @@ public class ConnectionStore {
                 case "schema" -> schema = value.trim();
                 case "user" -> user = value.trim();
                 case "savePassword" -> savePassword = Boolean.parseBoolean(value.trim());
-                case "password" -> password = decodeBase64(value.trim());
+                case "password" -> password = ArquivoChaveValorUtil.decode(value.trim());
                 default -> { /* ignora chaves desconhecidas */ }
             }
         }

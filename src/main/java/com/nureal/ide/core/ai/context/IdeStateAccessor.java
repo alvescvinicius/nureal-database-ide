@@ -2,9 +2,9 @@ package com.nureal.ide.core.ai.context;
 
 import java.util.Optional;
 
-import com.nureal.ide.core.connection.ConnectionManager;
+import com.nureal.ide.core.connection.ConexaoAtivaPort;
+import com.nureal.ide.core.metadata.MetadataRepository;
 import com.nureal.ide.core.history.ExecutionHistoryStore;
-import com.nureal.ide.core.metadata.MetadataService;
 import com.nureal.ide.core.metadata.model.SchemaInfo;
 
 /**
@@ -20,10 +20,10 @@ import com.nureal.ide.core.metadata.model.SchemaInfo;
  */
 public interface IdeStateAccessor {
 
-    /** Gerenciador da conexao ativa, ou {@code null} se nenhuma aba estiver conectada. */
-    ConnectionManager connectionManager();
+    /** Conexao ativa, ou {@code null} se nenhuma aba estiver conectada. */
+    ConexaoAtivaPort connectionManager();
 
-    MetadataService metadataService();
+    MetadataRepository metadataService();
 
     /** Ultimo schema carregado no cache da aba ativa, ou {@code null} se nunca carregado. */
     SchemaInfo cachedSchema();

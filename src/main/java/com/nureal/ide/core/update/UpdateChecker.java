@@ -32,14 +32,11 @@ import com.nureal.ide.core.json.JsonParser;
  * {@code MainWindow}) e responsavel por rodar numa thread de fundo, nunca na
  * EDT.
  */
-public final class UpdateChecker {
+public final class UpdateChecker implements RepositorioDeReleasesPort {
 
     private static final String REPO = "alvescvinicius/nureal-database-ide";
     private static final String API_URL = "https://api.github.com/repos/" + REPO + "/releases/latest";
     private static final Duration TIMEOUT = Duration.ofSeconds(10);
-
-    private UpdateChecker() {
-    }
 
     /**
      * Busca o release mais recente publicado no GitHub. Lanca {@link IOException}
@@ -48,7 +45,8 @@ public final class UpdateChecker {
      * automatica do startup ignora silenciosamente, ver MainWindow; checagem
      * manual mostra a mensagem ao usuario).
      */
-    public static GithubRelease fetchLatestRelease() throws IOException {
+    @Override
+    public GithubRelease fetchLatestRelease() throws IOException {
         HttpClient client = HttpClient.newBuilder()
                 .connectTimeout(TIMEOUT)
                 .followRedirects(HttpClient.Redirect.NORMAL)

@@ -1,12 +1,13 @@
 package com.nureal.ide.core.queries;
 
+import com.nureal.ide.compartilhado.persistencia.ArquivoChaveValorUtil;
+
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.List;
 import java.util.UUID;
 import java.util.function.UnaryOperator;
@@ -117,13 +118,13 @@ public class SavedQueryStore {
             String value = line.substring(eq + 1);
             switch (key) {
                 case "id" -> id = value.trim();
-                case "title" -> title = decode(value.trim());
-                case "sql" -> sql = decode(value.trim());
+                case "title" -> title = ArquivoChaveValorUtil.decode(value.trim());
+                case "sql" -> sql = ArquivoChaveValorUtil.decode(value.trim());
                 case "connection" -> conn = value.trim().isEmpty() ? null : value.trim();
-                case "created" -> created = parseLong(value.trim());
-                case "updated" -> updated = parseLong(value.trim());
+                case "created" -> created = ArquivoChaveValorUtil.parseLong(value.trim());
+                case "updated" -> updated = ArquivoChaveValorUtil.parseLong(value.trim());
                 case "favorite" -> fav = Boolean.parseBoolean(value.trim());
-                case "group" -> group = value.trim().isEmpty() ? null : decode(value.trim());
+                case "group" -> group = value.trim().isEmpty() ? null : ArquivoChaveValorUtil.decode(value.trim());
                 default -> {
                     // ignora chaves desconhecidas (versoes futuras)
                 }
@@ -153,13 +154,13 @@ public class SavedQueryStore {
         for (Query q : queries) {
             sb.append(HEADER).append('\n');
             sb.append("id=").append(q.id()).append('\n');
-            sb.append("title=").append(encode(q.title())).append('\n');
-            sb.append("sql=").append(encode(q.sql())).append('\n');
+            sb.append("title=").append(ArquivoChaveValorUtil.encode(q.title())).append('\n');
+            sb.append("sql=").append(ArquivoChaveValorUtil.encode(q.sql())).append('\n');
             sb.append("connection=").append(q.connectionName() == null ? "" : q.connectionName()).append('\n');
             sb.append("created=").append(q.createdAt()).append('\n');
             sb.append("updated=").append(q.updatedAt()).append('\n');
             sb.append("favorite=").append(q.favorite()).append('\n');
-            sb.append("group=").append(q.group() == null ? "" : encode(q.group())).append('\n');
+            sb.append("group=").append(q.group() == null ? "" : ArquivoChaveValorUtil.encode(q.group())).append('\n');
             sb.append('\n');
         }
         Files.write(file, sb.toString().getBytes(StandardCharsets.UTF_8));
@@ -210,23 +211,4 @@ public class SavedQueryStore {
         return updated;
     }
 
-    private static String encode(String plain) {
-        return Base64.getEncoder().encodeToString(plain.getBytes(StandardCharsets.UTF_8));
-    }
-
-    private static String decode(String encoded) {
-        try {
-            return new String(Base64.getDecoder().decode(encoded), StandardCharsets.UTF_8);
-        } catch (IllegalArgumentException e) {
-            return "";
-        }
-    }
-
-    private static long parseLong(String s) {
-        try {
-            return Long.parseLong(s);
-        } catch (NumberFormatException e) {
-            return 0L;
-        }
-    }
 }

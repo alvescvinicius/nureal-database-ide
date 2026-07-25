@@ -30,10 +30,7 @@ import java.util.function.Consumer;
  * onLogLine} e deixa a UI mostrar "indeterminado, aguarde" — escopo menor
  * assumido conscientemente.
  */
-public final class MySqlDumpRunner {
-
-    private MySqlDumpRunner() {
-    }
+public final class MySqlDumpRunner implements BackupPort {
 
     /** Credenciais/alvo comuns a backup e restore — nunca passadas como argumento de linha de comando (ver {@link #writeDefaultsFile}). */
     public record ConnectionTarget(String host, int port, String user, String password) {
@@ -62,7 +59,8 @@ public final class MySqlDumpRunner {
      * chamar sempre de uma thread de segundo plano (ver {@code SwingWorker}
      * em {@code BackupRestoreDialog}).
      */
-    public static RunResult backup(BackupOptions opts, Path outputFile, Consumer<String> onLogLine)
+    @Override
+    public RunResult backup(BackupOptions opts, Path outputFile, Consumer<String> onLogLine)
             throws IOException, InterruptedException {
         Path defaultsFile = writeDefaultsFile(opts.target());
         try {
@@ -99,7 +97,8 @@ public final class MySqlDumpRunner {
      * do arquivo (via {@link ProcessBuilder#redirectInput}). Mesma
      * observacao de {@link #backup} sobre bloquear a thread chamadora.
      */
-    public static RunResult restore(RestoreOptions opts, Path inputFile, Consumer<String> onLogLine)
+    @Override
+    public RunResult restore(RestoreOptions opts, Path inputFile, Consumer<String> onLogLine)
             throws IOException, InterruptedException {
         Path defaultsFile = writeDefaultsFile(opts.target());
         try {

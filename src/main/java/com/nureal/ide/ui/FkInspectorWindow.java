@@ -27,7 +27,7 @@ import javax.swing.filechooser.FileNameExtensionFilter;
 
 import com.formdev.flatlaf.FlatLaf;
 
-import com.nureal.ide.core.connection.ConnectionManager;
+import com.nureal.ide.core.connection.ConexaoAtivaPort;
 import com.nureal.ide.core.dialect.DatabaseDialect;
 import com.nureal.ide.core.export.ExcelExporter;
 import com.nureal.ide.core.metadata.model.ForeignKeyInfo;
@@ -75,7 +75,7 @@ final class FkInspectorWindow {
      *                         ordem de {@code fk.columns()}/{@code fk.referencedColumns()}
      *                         (pode conter {@code null} para colunas que o SELECT nao trouxe)
      */
-    static void open(Component ownerComponent, ConnectionManager connectionManager, String schema,
+    static void open(Component ownerComponent, ConexaoAtivaPort connectionManager, String schema,
             TableMetadataCache metadataCache, IntUnaryOperator scale, ForeignKeyInfo fk, List<Object> localValues) {
         if (connectionManager == null || !connectionManager.isConnected()) {
             JOptionPane.showMessageDialog(ownerComponent, "Conexao fechada — nao e possivel abrir o inspetor.",
@@ -231,7 +231,7 @@ final class FkInspectorWindow {
     }
 
     /** Roda (em background) o SELECT atual — com os filtros preenchidos ou sem nenhum — e reconstroi a grade. */
-    private static void runQuery(JDialog dialog, ConnectionManager connectionManager, DatabaseDialect dialect,
+    private static void runQuery(JDialog dialog, ConexaoAtivaPort connectionManager, DatabaseDialect dialect,
             String schema, TableMetadataCache metadataCache, IntUnaryOperator scale, String table,
             List<String> refCols, List<JTextField> valueFields, JPanel center, JLabel status) {
         List<String> conditions = new ArrayList<>();
@@ -257,8 +257,8 @@ final class FkInspectorWindow {
                         ps.setObject(i + 1, values.get(i));
                     }
                     try (ResultSet rs = ps.executeQuery()) {
-                        ResultTableModel model = MainWindow.createModel(rs);
-                        MainWindow.appendPage(model, rs, LIMIT);
+                        ResultTableModel model = SqlExecutionEngine.createModel(rs);
+                        SqlExecutionEngine.appendPage(model, rs, LIMIT);
                         return model;
                     }
                 }

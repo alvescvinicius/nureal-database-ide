@@ -36,7 +36,7 @@ import com.nureal.ide.core.log.AppLogger;
  *     consegue, em teoria, achar a chave e decifrar. A evolucao prevista e
  *     migrar a guarda da chave para o Windows Credential Manager (via DPAPI).
  */
-public final class LocalVault {
+public final class LocalVault implements CredentialCipher {
 
     private static final String DIR_NAME = ".nureal-ide";
     private static final String KEY_FILE_NAME = ".connections.key";
@@ -56,6 +56,7 @@ public final class LocalVault {
     }
 
     /** Cifra um texto; retorna o resultado pronto para gravar (Base64 de IV+ciphertext+tag). */
+    @Override
     public synchronized String encrypt(String plainText) throws GeneralSecurityException, IOException {
         SecretKey key = loadOrCreateKey();
         byte[] iv = new byte[GCM_IV_LENGTH_BYTES];
@@ -72,6 +73,7 @@ public final class LocalVault {
     }
 
     /** Decifra um texto gerado por {@link #encrypt}. */
+    @Override
     public synchronized String decrypt(String base64) throws GeneralSecurityException, IOException {
         byte[] combined;
         try {

@@ -1,6 +1,6 @@
 package com.nureal.ide.ui;
 
-import com.nureal.ide.core.connection.ConnectionManager;
+import com.nureal.ide.core.connection.ConexaoAtivaPort;
 import com.nureal.ide.ui.components.NSearchField;
 
 import javax.swing.JComboBox;
@@ -90,7 +90,7 @@ final class ResultGrid extends JPanel {
      * @param exportExcel      acao "Exportar Excel" (delegada a MainWindow, que ja sabe exportar varias abas)
      * @param scale            funcao de escala de UI (zoom + modo compacto) — mesma usada pelo resto da janela
      */
-    ResultGrid(ResultTableModel model, ConnectionManager connectionManager, String schema,
+    ResultGrid(ResultTableModel model, ConexaoAtivaPort connectionManager, String schema,
             TableMetadataCache metadataCache, Runnable exportExcel, IntUnaryOperator scale) {
         this(model, connectionManager, schema, metadataCache, exportExcel, scale, DEFAULT_ROW_HEIGHT_BASE_PX);
     }
@@ -105,7 +105,7 @@ final class ResultGrid extends JPanel {
      *                        escalam a altura final), os dois se combinam em
      *                        vez de um substituir o outro.
      */
-    ResultGrid(ResultTableModel model, ConnectionManager connectionManager, String schema,
+    ResultGrid(ResultTableModel model, ConexaoAtivaPort connectionManager, String schema,
             TableMetadataCache metadataCache, Runnable exportExcel, IntUnaryOperator scale, int rowHeightBasePx) {
         super(new BorderLayout());
 
@@ -194,7 +194,7 @@ final class ResultGrid extends JPanel {
      * RendererFactory#KEY_METADATA_RESOLVER), o mesmo resolver usado pelo
      * indicador de FK do cabecalho e pelo popup de metadados.
      */
-    private ColumnMetadataResolver installRenderers(ResultTableModel model, ConnectionManager connectionManager,
+    private ColumnMetadataResolver installRenderers(ResultTableModel model, ConexaoAtivaPort connectionManager,
             String schema, TableMetadataCache metadataCache) {
         ColumnMetadataResolver resolver = new ColumnMetadataResolver(metadataCache, connectionManager, schema);
         table.putClientProperty(RendererFactory.KEY_METADATA_RESOLVER, resolver);
@@ -219,7 +219,7 @@ final class ResultGrid extends JPanel {
         table.getColumnModel().getSelectionModel().addListSelectionListener(selectionSummaryListener);
     }
 
-    private void wireContextMenusAndScroll(ResultTableModel model, ConnectionManager connectionManager,
+    private void wireContextMenusAndScroll(ResultTableModel model, ConexaoAtivaPort connectionManager,
             String schema, TableMetadataCache metadataCache, Runnable exportExcel, IntUnaryOperator scale,
             ColumnHeaderRenderer.MetadataSource metadataSource, JTableHeader header, JComponent corner) {
         ResultContextMenu.FilterController filterController = new ResultContextMenu.FilterController() {

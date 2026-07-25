@@ -1,12 +1,13 @@
 package com.nureal.ide.core.history;
 
+import com.nureal.ide.compartilhado.persistencia.ArquivoChaveValorUtil;
+
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
@@ -106,13 +107,13 @@ public class ExecutionHistoryStore {
             String value = line.substring(eq + 1);
             switch (key) {
                 case "id" -> id = value.trim();
-                case "sql" -> sql = decode(value.trim());
+                case "sql" -> sql = ArquivoChaveValorUtil.decode(value.trim());
                 case "connection" -> conn = value.trim().isEmpty() ? null : value.trim();
                 case "schema" -> schema = value.trim().isEmpty() ? null : value.trim();
-                case "executedAt" -> executedAt = parseLong(value.trim());
-                case "durationMs" -> durationMs = parseLong(value.trim());
+                case "executedAt" -> executedAt = ArquivoChaveValorUtil.parseLong(value.trim());
+                case "durationMs" -> durationMs = ArquivoChaveValorUtil.parseLong(value.trim());
                 case "success" -> success = Boolean.parseBoolean(value.trim());
-                case "summary" -> summary = value.trim().isEmpty() ? null : decode(value.trim());
+                case "summary" -> summary = value.trim().isEmpty() ? null : ArquivoChaveValorUtil.decode(value.trim());
                 default -> {
                     // ignora chaves desconhecidas (versoes futuras)
                 }
@@ -142,13 +143,13 @@ public class ExecutionHistoryStore {
         for (Entry e : entries) {
             sb.append(HEADER).append('\n');
             sb.append("id=").append(e.id()).append('\n');
-            sb.append("sql=").append(encode(e.sql())).append('\n');
+            sb.append("sql=").append(ArquivoChaveValorUtil.encode(e.sql())).append('\n');
             sb.append("connection=").append(e.connectionName() == null ? "" : e.connectionName()).append('\n');
             sb.append("schema=").append(e.schema() == null ? "" : e.schema()).append('\n');
             sb.append("executedAt=").append(e.executedAt()).append('\n');
             sb.append("durationMs=").append(e.durationMs()).append('\n');
             sb.append("success=").append(e.success()).append('\n');
-            sb.append("summary=").append(e.resultSummary() == null ? "" : encode(e.resultSummary())).append('\n');
+            sb.append("summary=").append(e.resultSummary() == null ? "" : ArquivoChaveValorUtil.encode(e.resultSummary())).append('\n');
             sb.append('\n');
         }
         Files.write(file, sb.toString().getBytes(StandardCharsets.UTF_8));
@@ -191,23 +192,4 @@ public class ExecutionHistoryStore {
         saveAll(all);
     }
 
-    private static String encode(String plain) {
-        return Base64.getEncoder().encodeToString(plain.getBytes(StandardCharsets.UTF_8));
-    }
-
-    private static String decode(String encoded) {
-        try {
-            return new String(Base64.getDecoder().decode(encoded), StandardCharsets.UTF_8);
-        } catch (IllegalArgumentException e) {
-            return "";
-        }
-    }
-
-    private static long parseLong(String s) {
-        try {
-            return Long.parseLong(s);
-        } catch (NumberFormatException e) {
-            return 0L;
-        }
-    }
 }

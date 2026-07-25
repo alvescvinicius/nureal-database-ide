@@ -20,8 +20,6 @@ import java.awt.event.WindowEvent;
 import java.io.File;
 import java.io.IOException;
 import java.sql.Connection;
-import java.sql.ResultSet;
-import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
@@ -35,10 +33,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.Vector;
 import java.util.concurrent.CancellationException;
 import java.util.function.BiConsumer;
-import java.util.function.Supplier;
 
 import javax.swing.AbstractAction;
 import javax.swing.BorderFactory;
@@ -73,12 +69,12 @@ import javax.swing.UIManager;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import javax.swing.filechooser.FileNameExtensionFilter;
-import javax.swing.table.DefaultTableModel;
 
 import com.formdev.flatlaf.FlatDarkLaf;
 import com.formdev.flatlaf.FlatLaf;
 import com.formdev.flatlaf.FlatLightLaf;
 import com.nureal.ide.core.autocomplete.SqlCompletionProvider;
+import com.nureal.ide.core.connection.ConexaoAtivaPort;
 import com.nureal.ide.core.connection.ConnectionManager;
 import com.nureal.ide.core.connection.ConnectionProfile;
 import com.nureal.ide.core.connection.ConnectionStore;
@@ -89,6 +85,7 @@ import com.nureal.ide.core.format.FormatPreferences;
 import com.nureal.ide.core.format.SqlFormatter;
 import com.nureal.ide.core.log.AppLogger;
 import com.nureal.ide.core.metadata.MetadataCache;
+import com.nureal.ide.core.metadata.MetadataRepository;
 import com.nureal.ide.core.metadata.MetadataService;
 import com.nureal.ide.core.metadata.model.SchemaInfo;
 import com.nureal.ide.core.queries.SavedQueryStore;
@@ -100,6 +97,7 @@ import com.nureal.ide.core.sql.UnquotedDateGuard;
 import com.nureal.ide.core.ui.UiPreferences;
 import com.nureal.ide.core.update.AppVersion;
 import com.nureal.ide.core.update.GithubRelease;
+import com.nureal.ide.core.update.RepositorioDeReleasesPort;
 import com.nureal.ide.core.update.UpdateChecker;
 import com.nureal.ide.core.update.UpdatePreferences;
 import com.nureal.ide.core.ai.agent.Agent;
@@ -145,7 +143,6 @@ public class MainWindow extends JFrame {
 	// ObjectTreeCellRenderer/ResultStatusBar).
 	public static final Color ACCENT = new Color(0x1E9147);
 
-	static final int PAGE_SIZE = 200;
 	private static final int MAX_TABS = 15;
 
 	private static final String SCRATCH = "(sem conexao)";
@@ -174,6 +171,7 @@ public class MainWindow extends JFrame {
 	private final SessionStore sessionStore = new SessionStore();
 	private final SavedQueryStore savedQueryStore = new SavedQueryStore();
 	private final ExecutionHistoryStore historyStore = new ExecutionHistoryStore();
+	private final RepositorioDeReleasesPort releasesRepository = new UpdateChecker();
 	private Timer autosaveTimer;
 
 	private JTabbedPane editorTabs;
@@ -394,7 +392,7 @@ public class MainWindow extends JFrame {
 			String query = dialect.keepAliveQuery();
 			new Thread(() -> {
 				try {
-					ConnectionManager mgr = w.mgr();
+					ConexaoAtivaPort mgr = w.mgr();
 					if (mgr.isConnected()) {
 						try (Statement st = mgr.getConnection().createStatement()) {
 							st.execute(query);
@@ -487,7 +485,7 @@ public class MainWindow extends JFrame {
 		new SwingWorker<GithubRelease, Void>() {
 			@Override
 			protected GithubRelease doInBackground() throws Exception {
-				return UpdateChecker.fetchLatestRelease();
+				return releasesRepository.fetchLatestRelease();
 			}
 
 			@Override
@@ -2542,7 +2540,7 @@ public class MainWindow extends JFrame {
 	 * {@code activeWorkspace} pela 1a vez (nao deveria acontecer na pratica,
 	 * ja que nada mais roda antes disso, mas evita NPE se algo mudar).
 	 */
-	ConnectionManager connectionManager() {
+	ConexaoAtivaPort connectionManager() {
 		return (activeWorkspace != null) ? activeWorkspace.mgr : bootstrapConnectionManager;
 	}
 
@@ -2567,7 +2565,7 @@ public class MainWindow extends JFrame {
 		return dialect;
 	}
 
-	MetadataService metadataService() {
+	MetadataRepository metadataService() {
 		return metadataService;
 	}
 
@@ -2813,7 +2811,7 @@ public class MainWindow extends JFrame {
 
 	/** Rotulo da conexao ativa SEM senha (ver ConnectionProfile — nunca usar toString() nele). */
 	private String activeConnectionLabelForAi() {
-		ConnectionManager mgr = connectionManager();
+		ConexaoAtivaPort mgr = connectionManager();
 		if (mgr == null || !mgr.isConnected() || mgr.profile() == null) {
 			return null;
 		}
@@ -2860,7 +2858,7 @@ public class MainWindow extends JFrame {
 
 	/** Nome/versao do banco conectado (ex.: "MySQL"/"8.4.0") — usado pra resolver o Database Specialist. */
 	private String databaseProductNameForAi() {
-		ConnectionManager mgr = connectionManager();
+		ConexaoAtivaPort mgr = connectionManager();
 		if (mgr == null || !mgr.isConnected()) {
 			return null;
 		}
@@ -2872,7 +2870,7 @@ public class MainWindow extends JFrame {
 	}
 
 	private String databaseVersionForAi() {
-		ConnectionManager mgr = connectionManager();
+		ConexaoAtivaPort mgr = connectionManager();
 		if (mgr == null || !mgr.isConnected()) {
 			return null;
 		}
@@ -3435,7 +3433,8 @@ public class MainWindow extends JFrame {
 		SwingWorker<List<QueryResult>, Void> worker = new SwingWorker<>() {
 			@Override
 			protected List<QueryResult> doInBackground() {
-				return executeStatements(statements, this::isCancelled);
+				return SqlExecutionEngine.executeStatements(connectionManager().getConnection(), statements,
+						this::isCancelled, st -> runningStatement = st);
 			}
 
 			@Override
@@ -3506,68 +3505,6 @@ public class MainWindow extends JFrame {
 		boolean usingSelection = editor.hasSelection();
 		statusBar.setText(" Executando " + statements.size() + " instrucao(oes)"
 				+ (usingSelection ? "  —  ATENCAO: rodando apenas a SELECAO" : "") + "...");
-	}
-
-	/** Roda cada instrucao em sequencia (thread do SwingWorker) — para na primeira que der erro. */
-	private List<QueryResult> executeStatements(List<String> statements, Supplier<Boolean> isCancelled) {
-		List<QueryResult> results = new ArrayList<>();
-		Connection conn = connectionManager().getConnection();
-		for (int i = 0; i < statements.size(); i++) {
-			if (isCancelled.get()) {
-				break;
-			}
-			String sql = statements.get(i);
-			int n = i + 1;
-			long t0 = System.nanoTime();
-			Statement st = null;
-			try {
-				st = conn.createStatement();
-				// cursor do servidor: busca em lotes do tamanho da pagina
-				st.setFetchSize(PAGE_SIZE);
-				runningStatement = st;
-				boolean hasResultSet = st.execute(sql);
-				long execMs = (System.nanoTime() - t0) / 1_000_000L;
-				results.add(buildStatementResult(st, sql, n, hasResultSet, execMs));
-			} catch (SQLException ex) {
-				if (st != null) {
-					try {
-						st.close();
-					} catch (SQLException ignore) {
-						// ignora
-					}
-				}
-				long execMs = (System.nanoTime() - t0) / 1_000_000L;
-				results.add(QueryResult.message("Erro " + n, sql, "Erro: " + ex.getMessage(), true, execMs));
-				break;
-			} finally {
-				runningStatement = null;
-			}
-		}
-		return results;
-	}
-
-	/** Monta o {@link QueryResult} de UMA instrucao ja executada com sucesso (grade de linhas OU contagem afetada). */
-	private QueryResult buildStatementResult(Statement st, String sql, int n, boolean hasResultSet, long execMs)
-			throws SQLException {
-		if (hasResultSet) {
-			ResultSet rs = st.getResultSet();
-			ResultTableModel model = createModel(rs);
-			long t1 = System.nanoTime();
-			int read = appendPage(model, rs, PAGE_SIZE);
-			long fetchMs = (System.nanoTime() - t1) / 1_000_000L;
-			boolean hasMore = read == PAGE_SIZE;
-			ResultCursor cursor = null;
-			if (hasMore) {
-				cursor = new ResultCursor(st, rs);
-			} else {
-				rs.close();
-				st.close();
-			}
-			return QueryResult.grid("Resultado " + n, sql, model, execMs, fetchMs, cursor);
-		}
-		int updated = st.getUpdateCount();
-		st.close();
-		return QueryResult.message("Comando " + n, sql, updated + " linha(s) afetada(s)", false, execMs);
 	}
 
 	/** Trata o resultado final (thread da UI, {@code SwingWorker#done}): guarda na aba, redesenha se ainda ativa, atualiza historico/arvore. */
@@ -3832,141 +3769,6 @@ public class MainWindow extends JFrame {
 		String body = sql.length() > 2000 ? sql.substring(0, 2000) + "..." : sql;
 		String esc = body.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>");
 		return "<html><b>SQL executado:</b><br>" + esc + "</html>";
-	}
-
-	/**
-	 * Cria o modelo (cabecalhos + tipos + origem real + tipo SQL de cada coluna)
-	 * para uma consulta. Visibilidade de pacote (nao mais private): reaproveitado
-	 * por {@link FkInspectorWindow} para montar a grade do Inspetor Flutuante de FK
-	 * com o MESMO caminho usado pelas abas de resultado normais.
-	 */
-	static ResultTableModel createModel(ResultSet rs) throws SQLException {
-		ResultSetMetaData md = rs.getMetaData();
-		int cols = md.getColumnCount();
-		Vector<String> names = new Vector<>();
-		Class<?>[] types = new Class<?>[cols];
-		String[] sourceTables = new String[cols];
-		String[] realColumnNames = new String[cols];
-		String[] sqlTypeNames = new String[cols];
-		ResultTableModel.ColumnJdbcMeta[] jdbcMeta = new ResultTableModel.ColumnJdbcMeta[cols];
-		for (int i = 1; i <= cols; i++) {
-			names.add(md.getColumnLabel(i));
-			types[i - 1] = resolveColumnClass(md, i);
-			// Tabela/coluna "reais" de origem (quando o driver informa) — usadas
-			// so para casar a coluna do resultado com FKs do schema (indicador
-			// no cabecalho). Podem vir vazias para expressoes/funcoes/JOINs
-			// complexos; nesse caso simplesmente nao mostramos o indicador.
-			try {
-				sourceTables[i - 1] = md.getTableName(i);
-				realColumnNames[i - 1] = md.getColumnName(i);
-			} catch (SQLException ignore) {
-				sourceTables[i - 1] = null;
-				realColumnNames[i - 1] = null;
-			}
-			// Nome do tipo SQL real (ex.: "VARCHAR", "BIGINT", "JSON", "TIMESTAMP")
-			// — usado pelo RendererFactory para colorir/alinhar por tipo.
-			try {
-				sqlTypeNames[i - 1] = md.getColumnTypeName(i);
-			} catch (SQLException ignore) {
-				sqlTypeNames[i - 1] = null;
-			}
-			jdbcMeta[i - 1] = readJdbcMeta(md, i);
-		}
-		return new ResultTableModel(names, types, sourceTables, realColumnNames, sqlTypeNames, jdbcMeta);
-	}
-
-	/**
-	 * Le os metadados de coluna que o driver ja entrega junto com o
-	 * ResultSetMetaData (sem nenhuma consulta extra ao banco): nulabilidade,
-	 * precisao, escala, tamanho de exibicao e auto-increment. Cada chamada e
-	 * protegida individualmente porque alguns drivers/tipos lancam SQLException
-	 * para campos que nao fazem sentido (ex.: escala de uma coluna texto) em vez de
-	 * simplesmente devolver 0.
-	 */
-	private static ResultTableModel.ColumnJdbcMeta readJdbcMeta(ResultSetMetaData md, int col) {
-		boolean nullable = true;
-		int precision = 0;
-		int scale = 0;
-		int displaySize = 0;
-		boolean autoIncrement = false;
-		try {
-			nullable = md.isNullable(col) != ResultSetMetaData.columnNoNulls;
-		} catch (SQLException ignore) {
-			// mantem o padrao (nullable)
-		}
-		try {
-			precision = md.getPrecision(col);
-		} catch (SQLException ignore) {
-			// mantem 0
-		}
-		try {
-			scale = md.getScale(col);
-		} catch (SQLException ignore) {
-			// mantem 0
-		}
-		try {
-			displaySize = md.getColumnDisplaySize(col);
-		} catch (SQLException ignore) {
-			// mantem 0
-		}
-		try {
-			autoIncrement = md.isAutoIncrement(col);
-		} catch (SQLException ignore) {
-			// mantem false
-		}
-		return new ResultTableModel.ColumnJdbcMeta(nullable, precision, scale, displaySize, autoIncrement);
-	}
-
-	private static Class<?> resolveColumnClass(ResultSetMetaData md, int col) {
-		try {
-			return Class.forName(md.getColumnClassName(col));
-		} catch (Exception ex) {
-			AppLogger.fine("Nao foi possivel resolver a classe da coluna via metadata; usando Object", ex);
-			return Object.class;
-		}
-	}
-
-	/**
-	 * Anexa ate {@code max} linhas do ResultSet ao modelo; retorna quantas leu.
-	 * Visibilidade de pacote: tambem usado por {@link FkInspectorWindow}.
-	 */
-	static int appendPage(DefaultTableModel model, ResultSet rs, int max) throws SQLException {
-		int cols = model.getColumnCount();
-		int read = 0;
-		while (read < max && rs.next()) {
-			Vector<Object> row = new Vector<>(cols);
-			for (int i = 1; i <= cols; i++) {
-				row.add(rs.getObject(i));
-			}
-			model.addRow(row);
-			read++;
-		}
-		return read;
-	}
-
-	/** Cursor aberto (Statement + ResultSet) para paginacao sob demanda. */
-	static final class ResultCursor {
-		final Statement st;
-		final ResultSet rs;
-		boolean exhausted;
-
-		ResultCursor(Statement st, ResultSet rs) {
-			this.st = st;
-			this.rs = rs;
-		}
-
-		void close() {
-			try {
-				rs.close();
-			} catch (SQLException ignore) {
-				// ignora
-			}
-			try {
-				st.close();
-			} catch (SQLException ignore) {
-				// ignora
-			}
-		}
 	}
 
 	/**

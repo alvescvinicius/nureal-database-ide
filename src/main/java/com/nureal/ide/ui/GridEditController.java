@@ -7,8 +7,6 @@ import javax.swing.SwingUtilities;
 import javax.swing.event.TableModelEvent;
 import java.lang.reflect.InvocationTargetException;
 import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -320,179 +318,14 @@ final class GridEditController {
         if (target == null) {
             return new ApplyResult(0, 0, 0);
         }
-        boolean prevAutoCommit = conn.getAutoCommit();
-        int inserted = 0;
-        int updated = 0;
-        int deleted = 0;
-        try {
-            conn.setAutoCommit(false);
-
-            for (int row : deletedRows) {
-                if (newRows.contains(row)) {
-                    continue; // nunca chegou a existir no banco, nao ha o que excluir
-                }
-                executeDelete(conn, dialect, row);
-                deleted++;
-            }
-
-            for (Map.Entry<Integer, Set<Integer>> e : dirtyCells.entrySet()) {
-                int row = e.getKey();
-                if (newRows.contains(row) || deletedRows.contains(row) || e.getValue().isEmpty()) {
-                    continue;
-                }
-                executeUpdate(conn, dialect, row, e.getValue());
-                updated++;
-            }
-
-            for (int row : newRows) {
-                if (deletedRows.contains(row)) {
-                    continue; // descartada antes de ser salva
-                }
-                if (executeInsert(conn, dialect, row)) {
-                    inserted++;
-                }
-            }
-
-            conn.commit();
-        } catch (SQLException ex) {
-            safeRollback(conn);
-            throw ex;
-        } finally {
-            try {
-                conn.setAutoCommit(prevAutoCommit);
-            } catch (SQLException ignore) {
-                // conexao pode ja ter caido; nada a fazer
-            }
+        SqlGridPersistenceEngine.Resultado r = SqlGridPersistenceEngine.apply(conn, dialect, target, model,
+                deletedRows, newRows, dirtyCells, originalRow);
+        if (!r.generatedKeys().isEmpty()) {
+            int pkCol = target.primaryKeyColumns().get(0);
+            suppressed(() -> r.generatedKeys().forEach((row, value) -> model.setValueAt(value, row, pkCol)));
         }
         reconcileAfterCommit();
-        return new ApplyResult(inserted, updated, deleted);
-    }
-
-    private static void safeRollback(Connection conn) {
-        try {
-            conn.rollback();
-        } catch (SQLException ex) {
-            AppLogger.warning("Falha ao desfazer (rollback) alteracoes da grade", ex);
-        }
-    }
-
-    private void executeDelete(Connection conn, DatabaseDialect dialect, int row) throws SQLException {
-        String sql = "DELETE FROM " + dialect.quoteIdentifier(target.table()) + whereClause(dialect);
-        try (PreparedStatement ps = conn.prepareStatement(sql)) {
-            bindPk(ps, row, 1);
-            ps.executeUpdate();
-        }
-    }
-
-    private void executeUpdate(Connection conn, DatabaseDialect dialect, int row, Set<Integer> dirtyColumns)
-            throws SQLException {
-        List<Integer> cols = new ArrayList<>(dirtyColumns);
-        StringBuilder sql = new StringBuilder("UPDATE ").append(dialect.quoteIdentifier(target.table())).append(" SET ");
-        for (int i = 0; i < cols.size(); i++) {
-            if (i > 0) {
-                sql.append(", ");
-            }
-            sql.append(dialect.quoteIdentifier(model.realColumnName(cols.get(i)))).append(" = ?");
-        }
-        sql.append(whereClause(dialect));
-        try (PreparedStatement ps = conn.prepareStatement(sql.toString())) {
-            int idx = 1;
-            for (int col : cols) {
-                ps.setObject(idx++, model.getValueAt(row, col));
-            }
-            bindPk(ps, row, idx);
-            ps.executeUpdate();
-        }
-    }
-
-    /**
-     * @return {@code true} se havia ao menos uma coluna preenchida (senao nao
-     *         ha o que inserir — linha nova deixada totalmente em branco e so
-     *         descartada em silencio).
-     */
-    private boolean executeInsert(Connection conn, DatabaseDialect dialect, int row) throws SQLException {
-        List<Integer> cols = new ArrayList<>();
-        for (int col : target.editableColumns()) {
-            if (model.getValueAt(row, col) != null) {
-                cols.add(col);
-            }
-        }
-        if (cols.isEmpty()) {
-            return false;
-        }
-        StringBuilder sql = new StringBuilder("INSERT INTO ").append(dialect.quoteIdentifier(target.table())).append(" (");
-        for (int i = 0; i < cols.size(); i++) {
-            if (i > 0) {
-                sql.append(", ");
-            }
-            sql.append(dialect.quoteIdentifier(model.realColumnName(cols.get(i))));
-        }
-        sql.append(") VALUES (");
-        for (int i = 0; i < cols.size(); i++) {
-            sql.append(i > 0 ? ", ?" : "?");
-        }
-        sql.append(')');
-        try (PreparedStatement ps = conn.prepareStatement(sql.toString(), PreparedStatement.RETURN_GENERATED_KEYS)) {
-            for (int i = 0; i < cols.size(); i++) {
-                ps.setObject(i + 1, model.getValueAt(row, cols.get(i)));
-            }
-            ps.executeUpdate();
-            fillGeneratedKey(ps, row);
-        }
-        return true;
-    }
-
-    /**
-     * Se a tabela tem uma UNICA coluna de PK e ela nao foi preenchida pelo
-     * usuario (auto_increment tipico), busca o valor gerado pelo banco e
-     * escreve de volta na celula — evita a linha recem-inserida ficar com a
-     * PK em branco na tela ate a proxima consulta.
-     */
-    private void fillGeneratedKey(PreparedStatement ps, int row) {
-        if (target.primaryKeyColumns().size() != 1) {
-            return;
-        }
-        int pkCol = target.primaryKeyColumns().get(0);
-        if (model.getValueAt(row, pkCol) != null) {
-            return; // usuario ja preencheu a PK na mao
-        }
-        try (ResultSet keys = ps.getGeneratedKeys()) {
-            if (keys.next()) {
-                Object generated = keys.getObject(1);
-                suppressed(() -> model.setValueAt(generated, row, pkCol));
-            }
-        } catch (SQLException ex) {
-            AppLogger.fine("Sem chave gerada para a linha inserida (normal se a PK nao for auto_increment)", ex);
-        }
-    }
-
-    /**
-     * Colunas de chave primaria nunca sao NULL por definicao (e a propria
-     * definicao de PRIMARY KEY em SQL) — sempre "= ?" para cada uma, ligadas
-     * por AND.
-     */
-    private String whereClause(DatabaseDialect dialect) {
-        StringBuilder sb = new StringBuilder(" WHERE ");
-        List<Integer> pkCols = target.primaryKeyColumns();
-        for (int i = 0; i < pkCols.size(); i++) {
-            if (i > 0) {
-                sb.append(" AND ");
-            }
-            sb.append(dialect.quoteIdentifier(model.realColumnName(pkCols.get(i)))).append(" = ?");
-        }
-        return sb.toString();
-    }
-
-    private void bindPk(PreparedStatement ps, int row, int startIndex) throws SQLException {
-        Object[] full = originalRow.get(row);
-        if (full == null) {
-            snapshotRow(row);
-            full = originalRow.get(row);
-        }
-        int idx = startIndex;
-        for (int pkCol : target.primaryKeyColumns()) {
-            ps.setObject(idx++, full[pkCol]);
-        }
+        return new ApplyResult(r.inserted(), r.updated(), r.deleted());
     }
 
     /** Chamado ao final de {@link #apply}, possivelmente de uma thread de fundo — ver {@link #runOnEdt}. */

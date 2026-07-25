@@ -10,6 +10,7 @@ import javax.swing.JFileChooser;
 import javax.swing.JOptionPane;
 import javax.swing.SwingWorker;
 
+import com.nureal.ide.core.backup.BackupPort;
 import com.nureal.ide.core.backup.MySqlDumpRunner;
 import com.nureal.ide.core.csv.CsvUtil;
 import com.nureal.ide.core.metadata.model.ColumnInfo;
@@ -27,6 +28,7 @@ import com.nureal.ide.core.metadata.model.ColumnInfo;
 final class ObjectDataTransfer {
 
     private final MainWindow owner;
+    private final BackupPort backupPort = new MySqlDumpRunner();
 
     ObjectDataTransfer(MainWindow owner) {
         this.owner = owner;
@@ -59,7 +61,7 @@ final class ObjectDataTransfer {
         new SwingWorker<MySqlDumpRunner.RunResult, String>() {
             @Override
             protected MySqlDumpRunner.RunResult doInBackground() throws Exception {
-                return MySqlDumpRunner.backup(options, outputFile, this::publish);
+                return backupPort.backup(options, outputFile, this::publish);
             }
 
             @Override
@@ -89,7 +91,7 @@ final class ObjectDataTransfer {
         new SwingWorker<MySqlDumpRunner.RunResult, String>() {
             @Override
             protected MySqlDumpRunner.RunResult doInBackground() throws Exception {
-                return MySqlDumpRunner.restore(options, inputFile, this::publish);
+                return backupPort.restore(options, inputFile, this::publish);
             }
 
             @Override

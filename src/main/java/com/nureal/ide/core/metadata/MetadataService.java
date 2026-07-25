@@ -27,7 +27,7 @@ import java.util.Set;
  * traz todas as colunas de todas as tabelas do schema; agrupamos em memoria.
  * Em seguida, consultas leves listam views, procedures, functions e triggers.
  */
-public class MetadataService {
+public class MetadataService implements MetadataRepository {
 
     private final DatabaseDialect dialect;
 
@@ -36,6 +36,7 @@ public class MetadataService {
     }
 
     /** Lista os esquemas (databases) acessiveis ao usuario conectado. */
+    @Override
     public List<String> listSchemas(Connection conn) throws SQLException {
         List<String> schemas = new ArrayList<>();
         try (PreparedStatement ps = conn.prepareStatement(dialect.schemasQuery());
@@ -47,6 +48,7 @@ public class MetadataService {
         return schemas;
     }
 
+    @Override
     public SchemaInfo loadSchema(Connection conn, String schema) throws SQLException {
         // 1) Colunas de tudo (tabelas e views) em uma unica consulta.
         Map<String, List<ColumnInfo>> columnsByObject = new LinkedHashMap<>();
@@ -121,6 +123,7 @@ public class MetadataService {
      * (com nulo, chave, default, extra e comentario), indices e chaves
      * estrangeiras. Usado pela tela de propriedades ao abrir um objeto.
      */
+    @Override
     public TableDetails loadTableDetails(Connection conn, String schema, String table)
             throws SQLException {
         return new TableDetails(
@@ -185,6 +188,7 @@ public class MetadataService {
      * usada por {@link #loadForeignKeys}, so que agora a tabela de origem
      * tambem varia por constraint (guardada em {@code fromTable}).
      */
+    @Override
     public List<SchemaForeignKey> loadSchemaForeignKeys(Connection conn, String schema) throws SQLException {
         Map<String, List<String>> cols = new LinkedHashMap<>();
         Map<String, List<String>> refCols = new LinkedHashMap<>();
@@ -224,6 +228,7 @@ public class MetadataService {
      * que e por tabela, caro demais pra rodar uma vez por tabela do schema so
      * pra montar o diagrama.
      */
+    @Override
     public Map<String, Set<String>> loadSchemaPrimaryKeys(Connection conn, String schema) throws SQLException {
         Map<String, Set<String>> byTable = new HashMap<>();
         try (PreparedStatement ps = conn.prepareStatement(dialect.primaryKeysQueryForSchema())) {

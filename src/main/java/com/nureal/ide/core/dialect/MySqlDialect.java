@@ -52,7 +52,15 @@ public class MySqlDialect implements DatabaseDialect {
         return url.toString();
 
     }
-    
+
+    @Override
+    public List<String> sessionInitStatements() {
+        // Nenhuma configuracao de sessao necessaria por enquanto. Exemplo de
+        // uso futuro, caso surja necessidade:
+        // return List.of("SET NAMES utf8mb4", "SET SESSION sql_mode='STRICT_TRANS_TABLES'");
+        return List.of();
+    }
+
     @Override
     public String schemasQuery() {
         return "SELECT SCHEMA_NAME FROM information_schema.SCHEMATA "

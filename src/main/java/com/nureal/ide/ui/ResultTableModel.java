@@ -4,6 +4,8 @@ import java.util.Vector;
 
 import javax.swing.table.DefaultTableModel;
 
+import com.nureal.ide.core.export.TabelaExportavel;
+
 /**
  * Modelo de tabela usado pela grade de resultados — somente leitura por
  * padrao, mas pode virar editavel (ver {@link GridEditController} /
@@ -33,7 +35,7 @@ import javax.swing.table.DefaultTableModel;
  * classe do pacote (ex.: o renderer) nunca era verdadeiro em tempo de
  * execucao. Agora existe uma unica classe, top-level, usada por todos.
  */
-public final class ResultTableModel extends DefaultTableModel {
+public final class ResultTableModel extends DefaultTableModel implements TabelaExportavel {
 
     private static final long serialVersionUID = 1L;
 
@@ -121,6 +123,28 @@ public final class ResultTableModel extends DefaultTableModel {
         }
 
         return sourceTables[column];
+    }
+
+    // ---------- TabelaExportavel (ver core.export.ExcelExporter) ----------
+
+    @Override
+    public int linhas() {
+        return getRowCount();
+    }
+
+    @Override
+    public int colunas() {
+        return getColumnCount();
+    }
+
+    @Override
+    public String nomeColuna(int coluna) {
+        return getColumnName(coluna);
+    }
+
+    @Override
+    public Object valor(int linha, int coluna) {
+        return getValueAt(linha, coluna);
     }
 
     /**

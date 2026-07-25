@@ -45,6 +45,7 @@ import javax.swing.table.DefaultTableModel;
 
 import com.formdev.flatlaf.FlatLaf;
 import com.nureal.ide.core.export.ExcelExporter;
+import com.nureal.ide.core.export.TabelaExportavel;
 import com.nureal.ide.core.metadata.model.ColumnDetail;
 import com.nureal.ide.core.metadata.model.TableDetails;
 
@@ -73,7 +74,7 @@ final class ResultsAreaController {
 	private JPanel executingCard;
 	private List<QueryResult> lastResults = new ArrayList<>();
 	private final Map<SqlEditorPane, List<QueryResult>> resultsByTab = new HashMap<>();
-	private final List<MainWindow.ResultCursor> openCursors = new ArrayList<>();
+	private final List<SqlExecutionEngine.ResultCursor> openCursors = new ArrayList<>();
 
 	ResultsAreaController(MainWindow owner) {
 		this.owner = owner;
@@ -384,11 +385,11 @@ final class ResultsAreaController {
 		ResultGrid grid = new ResultGrid(model, owner.connectionManager(), schemaName, owner.tableMetadataCache(),
 				() -> exportResult(r), owner::scaledPx, owner.resultRowHeightBasePx());
 
-		ResultStatusBar resultStatusBar = new ResultStatusBar(MainWindow.PAGE_SIZE);
+		ResultStatusBar resultStatusBar = new ResultStatusBar(SqlExecutionEngine.PAGE_SIZE);
 		grid.keepSelectionOnFocusTo(resultStatusBar.asComponent());
 		Runnable refresh = () -> resultStatusBar.refresh(r.model().getRowCount(), r.execMs(), r.fetchMs(),
 				r.cursor() != null && !r.cursor().exhausted);
-		resultStatusBar.onLoadMore(() -> loadPage(r, MainWindow.PAGE_SIZE, refresh));
+		resultStatusBar.onLoadMore(() -> loadPage(r, SqlExecutionEngine.PAGE_SIZE, refresh));
 		resultStatusBar.onLoadAll(() -> loadAll(r, refresh));
 		resultStatusBar.onExportThis(() -> exportResult(r));
 		resultStatusBar.onExportAll(this::exportAll);
@@ -579,7 +580,7 @@ final class ResultsAreaController {
 
 	/** Le ate {@code max} linhas do cursor em segundo plano e entao chama {@code refresh}. */
 	private void loadPage(QueryResult r, int max, Runnable refresh) {
-		MainWindow.ResultCursor c = r.cursor();
+		SqlExecutionEngine.ResultCursor c = r.cursor();
 		if (c == null || c.exhausted) {
 			return;
 		}
@@ -627,7 +628,7 @@ final class ResultsAreaController {
 
 	/** Le todas as linhas restantes do cursor em segundo plano. */
 	private void loadAll(QueryResult r, Runnable refresh) {
-		MainWindow.ResultCursor c = r.cursor();
+		SqlExecutionEngine.ResultCursor c = r.cursor();
 		if (c == null || c.exhausted) {
 			return;
 		}
@@ -674,7 +675,7 @@ final class ResultsAreaController {
 	}
 
 	void closeOpenCursors() {
-		for (MainWindow.ResultCursor c : openCursors) {
+		for (SqlExecutionEngine.ResultCursor c : openCursors) {
 			c.close();
 		}
 		openCursors.clear();
@@ -790,6 +791,29 @@ final class ResultsAreaController {
 		for (QueryResult r : results) {
 			m.addRow(new Object[] { r.title(), r.sql() });
 		}
-		return new ExcelExporter.TableSheet("Instrucoes SQL", m);
+		// Adaptador minimo: este modelo e um DefaultTableModel puro (nao um
+		// ResultTableModel), entao nao implementa TabelaExportavel sozinho.
+		TabelaExportavel exportable = new TabelaExportavel() {
+			@Override
+			public int linhas() {
+				return m.getRowCount();
+			}
+
+			@Override
+			public int colunas() {
+				return m.getColumnCount();
+			}
+
+			@Override
+			public String nomeColuna(int coluna) {
+				return m.getColumnName(coluna);
+			}
+
+			@Override
+			public Object valor(int linha, int coluna) {
+				return m.getValueAt(linha, coluna);
+			}
+		};
+		return new ExcelExporter.TableSheet("Instrucoes SQL", exportable);
 	}
 }

@@ -1,8 +1,8 @@
 package com.nureal.ide.ui;
 
-import com.nureal.ide.core.connection.ConnectionManager;
+import com.nureal.ide.core.connection.ConexaoAtivaPort;
 import com.nureal.ide.core.log.AppLogger;
-import com.nureal.ide.core.metadata.MetadataService;
+import com.nureal.ide.core.metadata.MetadataRepository;
 import com.nureal.ide.core.metadata.model.TableDetails;
 
 import javax.swing.SwingWorker;
@@ -19,7 +19,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * carregados sob demanda em segundo plano.
  *
  * Generaliza o antigo "fkCache" que existia so para o indicador de FK do
- * cabecalho: agora a MESMA chamada a {@link MetadataService#loadTableDetails}
+ * cabecalho: agora a MESMA chamada a {@link MetadataRepository#loadTableDetails}
  * tambem alimenta o {@link ColumnMetadataPopup}, sem nenhum round-trip extra
  * ao banco. Cada tabela e carregada no maximo uma vez por sessao (por
  * schema+tabela); chamadas repetidas so leem o cache.
@@ -28,9 +28,9 @@ final class TableMetadataCache {
 
     private final Map<String, TableDetails> cache = new ConcurrentHashMap<>();
     private final Set<String> loading = ConcurrentHashMap.newKeySet();
-    private final MetadataService metadataService;
+    private final MetadataRepository metadataService;
 
-    TableMetadataCache(MetadataService metadataService) {
+    TableMetadataCache(MetadataRepository metadataService) {
         this.metadataService = metadataService;
     }
 
@@ -55,7 +55,7 @@ final class TableMetadataCache {
      * {@code onLoaded} e chamado quando ela terminar (para o chamador
      * reconsultar o cache e atualizar a UI).
      */
-    TableDetails get(ConnectionManager connectionManager, String schema, String table, Runnable onLoaded) {
+    TableDetails get(ConexaoAtivaPort connectionManager, String schema, String table, Runnable onLoaded) {
         String cacheKey = key(schema, table);
         TableDetails cached = cache.get(cacheKey);
         if (cached != null) {
@@ -65,7 +65,7 @@ final class TableMetadataCache {
         return null;
     }
 
-    private void loadAsync(ConnectionManager connectionManager, String schema, String table, Runnable onLoaded) {
+    private void loadAsync(ConexaoAtivaPort connectionManager, String schema, String table, Runnable onLoaded) {
         String cacheKey = key(schema, table);
         if (!loading.add(cacheKey)) {
             return; // ja esta carregando esta tabela

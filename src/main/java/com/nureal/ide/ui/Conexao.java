@@ -5,7 +5,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import com.nureal.ide.core.connection.ConnectionManager;
+import com.nureal.ide.core.connection.ConexaoAtivaPort;
 import com.nureal.ide.core.connection.ConnectionProfile;
 import com.nureal.ide.core.metadata.model.SchemaInfo;
 import com.nureal.ide.core.session.SessionStore;
@@ -17,7 +17,7 @@ import com.nureal.ide.core.session.SessionStore;
 final class Conexao {
 	final String name; // nome da conexao (ou SCRATCH)
 	final ConnectionProfile profile; // null para a conexao sem conexao
-	final ConnectionManager mgr; // gerenciador JDBC proprio
+	final ConexaoAtivaPort mgr; // gerenciador JDBC proprio
 	SchemaInfo schema; // esquema carregado (ou null)
 	List<String> schemaList; // lista de esquemas (schema em branco)
 	List<SessionStore.Tab> tabs = new ArrayList<>();
@@ -48,7 +48,7 @@ final class Conexao {
 	 */
 	private long lastActivityMillis = System.currentTimeMillis();
 
-	Conexao(String name, ConnectionProfile profile, ConnectionManager mgr) {
+	Conexao(String name, ConnectionProfile profile, ConexaoAtivaPort mgr) {
 		this.name = name;
 		this.profile = profile;
 		this.mgr = mgr;
@@ -62,7 +62,7 @@ final class Conexao {
 		return profile;
 	}
 
-	ConnectionManager mgr() {
+	ConexaoAtivaPort mgr() {
 		return mgr;
 	}
 

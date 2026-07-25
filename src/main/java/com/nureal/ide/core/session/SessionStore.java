@@ -1,12 +1,13 @@
 package com.nureal.ide.core.session;
 
+import com.nureal.ide.compartilhado.persistencia.ArquivoChaveValorUtil;
+
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -107,9 +108,9 @@ public class SessionStore {
             String value = line.substring(eq + 1);
             switch (key) {
                 case "name" -> connName = value;
-                case "selected" -> selected = parseInt(value.trim());
+                case "selected" -> selected = ArquivoChaveValorUtil.parseInt(value.trim());
                 case "title" -> title = value.trim();
-                case "sql" -> sql = decode(value.trim());
+                case "sql" -> sql = ArquivoChaveValorUtil.decode(value.trim());
                 case "id" -> id = value.trim();
                 // "schema" e novo (versoes anteriores nao gravam esta chave) —
                 // sessoes antigas simplesmente nao encontram esta linha e a
@@ -166,7 +167,7 @@ public class SessionStore {
             for (Tab t : s.tabs()) {
                 sb.append(TAB_HEADER).append('\n');
                 sb.append("title=").append(nullToEmpty(t.title())).append('\n');
-                sb.append("sql=").append(encode(nullToEmpty(t.sql()))).append('\n');
+                sb.append("sql=").append(ArquivoChaveValorUtil.encode(nullToEmpty(t.sql()))).append('\n');
                 sb.append("id=").append(nullToEmpty(t.id())).append('\n');
                 sb.append("schema=").append(nullToEmpty(t.schema())).append('\n');
             }
@@ -174,26 +175,6 @@ public class SessionStore {
         }
 
         Files.write(file, sb.toString().getBytes(StandardCharsets.UTF_8));
-    }
-
-    private static String encode(String plain) {
-        return Base64.getEncoder().encodeToString(plain.getBytes(StandardCharsets.UTF_8));
-    }
-
-    private static String decode(String encoded) {
-        try {
-            return new String(Base64.getDecoder().decode(encoded), StandardCharsets.UTF_8);
-        } catch (IllegalArgumentException e) {
-            return "";
-        }
-    }
-
-    private static int parseInt(String s) {
-        try {
-            return Integer.parseInt(s);
-        } catch (NumberFormatException e) {
-            return 0;
-        }
     }
 
     private static String nullToEmpty(String s) {

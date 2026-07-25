@@ -4,9 +4,9 @@ import java.util.Optional;
 import java.util.function.Supplier;
 
 import com.nureal.ide.core.ai.context.IdeStateAccessor;
-import com.nureal.ide.core.connection.ConnectionManager;
+import com.nureal.ide.core.connection.ConexaoAtivaPort;
 import com.nureal.ide.core.history.ExecutionHistoryStore;
-import com.nureal.ide.core.metadata.MetadataService;
+import com.nureal.ide.core.metadata.MetadataRepository;
 import com.nureal.ide.core.metadata.model.SchemaInfo;
 
 /**
@@ -19,8 +19,8 @@ import com.nureal.ide.core.metadata.model.SchemaInfo;
  */
 public final class IdeContextAccessor implements IdeStateAccessor {
 
-    private final Supplier<ConnectionManager> connectionManager;
-    private final Supplier<MetadataService> metadataService;
+    private final Supplier<ConexaoAtivaPort> connectionManager;
+    private final Supplier<MetadataRepository> metadataService;
     private final Supplier<SchemaInfo> cachedSchema;
     private final Supplier<String> activeSchemaName;
     private final Supplier<String> connectionLabel;
@@ -30,7 +30,7 @@ public final class IdeContextAccessor implements IdeStateAccessor {
     private final Supplier<Boolean> hasEditorSelection;
     private final Supplier<Optional<ExecutionHistoryStore.Entry>> lastExecution;
 
-    public IdeContextAccessor(Supplier<ConnectionManager> connectionManager, Supplier<MetadataService> metadataService,
+    public IdeContextAccessor(Supplier<ConexaoAtivaPort> connectionManager, Supplier<MetadataRepository> metadataService,
             Supplier<SchemaInfo> cachedSchema, Supplier<String> activeSchemaName, Supplier<String> connectionLabel,
             Supplier<String> databaseProductName, Supplier<String> databaseVersion, Supplier<String> currentEditorSql,
             Supplier<Boolean> hasEditorSelection, Supplier<Optional<ExecutionHistoryStore.Entry>> lastExecution) {
@@ -47,12 +47,12 @@ public final class IdeContextAccessor implements IdeStateAccessor {
     }
 
     @Override
-    public ConnectionManager connectionManager() {
+    public ConexaoAtivaPort connectionManager() {
         return connectionManager.get();
     }
 
     @Override
-    public MetadataService metadataService() {
+    public MetadataRepository metadataService() {
         return metadataService.get();
     }
 

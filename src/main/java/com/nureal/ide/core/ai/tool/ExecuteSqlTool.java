@@ -10,7 +10,7 @@ import java.util.List;
 import java.util.Map;
 
 import com.nureal.ide.core.ai.context.IdeStateAccessor;
-import com.nureal.ide.core.connection.ConnectionManager;
+import com.nureal.ide.core.connection.ConexaoAtivaPort;
 import com.nureal.ide.core.safety.SqlRiskAnalyzer;
 
 /**
@@ -77,7 +77,7 @@ public final class ExecuteSqlTool implements Tool {
                     + "de risco sozinha — rode manualmente no editor SQL, onde a confirmacao aparece.");
         }
 
-        ConnectionManager manager = accessor.connectionManager();
+        ConexaoAtivaPort manager = accessor.connectionManager();
         if (manager == null || !manager.isConnected()) {
             return ToolResult.failure("Nenhuma conexao ativa - conecte a um banco primeiro.");
         }

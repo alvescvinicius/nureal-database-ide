@@ -24,6 +24,14 @@ public interface DatabaseDialect {
     String buildJdbcUrl(ConnectionProfile profile);
 
     /**
+     * Instrucoes SQL executadas uma vez, logo apos a conexao ser aberta, para
+     * configurar a sessao (ex.: charset, fuso horario, modo estrito) — ver
+     * {@code com.nureal.ide.core.connection.SessionInitializer}. Lista vazia
+     * quando o dialeto nao precisa de nenhuma configuracao de sessao.
+     */
+    List<String> sessionInitStatements();
+
+    /**
      * Lista os esquemas (databases) que o usuario pode acessar. Sem parametros;
      * retorna uma coluna com o nome do esquema.
      */

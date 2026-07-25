@@ -8,7 +8,6 @@ import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.util.WorkbookUtil;
 import org.apache.poi.xssf.streaming.SXSSFWorkbook;
 
-import javax.swing.table.TableModel;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -27,7 +26,7 @@ import java.util.Set;
 public final class ExcelExporter {
 
     /** Uma aba a ser escrita: nome + dados. */
-    public record TableSheet(String name, TableModel model) {
+    public record TableSheet(String name, TabelaExportavel model) {
     }
 
     private ExcelExporter() {
@@ -54,21 +53,21 @@ public final class ExcelExporter {
         }
     }
 
-    private static void writeModel(Sheet sheet, TableModel model, CellStyle headerStyle) {
-        int cols = model.getColumnCount();
+    private static void writeModel(Sheet sheet, TabelaExportavel model, CellStyle headerStyle) {
+        int cols = model.colunas();
 
         Row header = sheet.createRow(0);
         for (int c = 0; c < cols; c++) {
             Cell cell = header.createCell(c);
-            cell.setCellValue(model.getColumnName(c));
+            cell.setCellValue(model.nomeColuna(c));
             cell.setCellStyle(headerStyle);
         }
 
-        int rows = model.getRowCount();
+        int rows = model.linhas();
         for (int r = 0; r < rows; r++) {
             Row row = sheet.createRow(r + 1);
             for (int c = 0; c < cols; c++) {
-                Object value = model.getValueAt(r, c);
+                Object value = model.valor(r, c);
                 Cell cell = row.createCell(c);
                 if (value == null) {
                     continue; // celula vazia

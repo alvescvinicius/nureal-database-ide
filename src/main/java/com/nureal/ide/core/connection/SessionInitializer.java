@@ -3,22 +3,30 @@ package com.nureal.ide.core.connection;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 
+import com.nureal.ide.core.dialect.DatabaseDialect;
+
+/**
+ * Roda, uma unica vez logo apos a conexao ser aberta, as instrucoes de
+ * configuracao de sessao que o {@link DatabaseDialect} da conexao declarar
+ * (ver {@link DatabaseDialect#sessionInitStatements()}) — nunca decide por
+ * conta propria o que rodar para cada banco: isso e responsabilidade do
+ * dialeto, o unico ponto de extensao multi-banco do projeto (ver
+ * {@code .specs/04-modulo-dialeto-e-metadados.md}).
+ */
 public final class SessionInitializer {
 
     private SessionInitializer() {
     }
 
-    public static void initialize(Connection connection) throws SQLException {
+    public static void initialize(Connection connection, DatabaseDialect dialect) throws SQLException {
 
         if (connection == null || connection.isClosed()) {
             throw new SQLException("Connection is null or closed.");
         }
 
-        List<String> commands = buildCommands(connection);
+        List<String> commands = dialect.sessionInitStatements();
 
         if (commands.isEmpty()) {
             return;
@@ -30,66 +38,5 @@ public final class SessionInitializer {
             }
         }
     }
-
-    private static List<String> buildCommands(Connection connection) throws SQLException {
-
-        String databaseProduct = connection.getMetaData()
-                .getDatabaseProductName()
-                .toLowerCase(Locale.ROOT);
-
-        List<String> commands = new ArrayList<>();
-
-        switch (databaseProduct) {
-
-            case "mysql":
-                configureMySql(commands);
-                break;
-
-            /*
-             * case "oracle":
-             * configureOracle(commands);
-             * break;
-             * 
-             * case "postgresql":
-             * configurePostgreSql(commands);
-             * break;
-             * 
-             * case "microsoft sql server":
-             * configureSqlServer(commands);
-             * break;
-             */
-
-            default:
-                break;
-        }
-
-        return commands;
-    }
-
-    private static void configureMySql(List<String> commands) {
-
-        /*
-         * Futuras configurações específicas do MySQL.
-         *
-         * Exemplo:
-         *
-         * commands.add("SET NAMES utf8mb4");
-         * commands.add("SET SESSION sql_mode='STRICT_TRANS_TABLES'");
-         */
-    }
-
-    /*
-     * private static void configureOracle(List<String> commands) {
-     * commands.add("ALTER SESSION SET TIME_ZONE = LOCAL");
-     * }
-     * 
-     * private static void configurePostgreSql(List<String> commands) {
-     * commands.add("SET TIME ZONE LOCAL");
-     * }
-     * 
-     * private static void configureSqlServer(List<String> commands) {
-     * // Sem comandos atualmente.
-     * }
-     */
 
 }

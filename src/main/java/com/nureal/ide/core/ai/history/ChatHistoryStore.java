@@ -1,12 +1,13 @@
 package com.nureal.ide.core.ai.history;
 
+import com.nureal.ide.compartilhado.persistencia.ArquivoChaveValorUtil;
+
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
@@ -105,9 +106,9 @@ public class ChatHistoryStore {
             String value = line.substring(eq + 1);
             switch (key) {
                 case "id" -> id = value.trim();
-                case "title" -> title = decode(value.trim());
-                case "createdAt" -> createdAt = parseLong(value.trim());
-                case "updatedAt" -> updatedAt = parseLong(value.trim());
+                case "title" -> title = ArquivoChaveValorUtil.decode(value.trim());
+                case "createdAt" -> createdAt = ArquivoChaveValorUtil.parseLong(value.trim());
+                case "updatedAt" -> updatedAt = ArquivoChaveValorUtil.parseLong(value.trim());
                 default -> {
                     // ignora chaves desconhecidas (versoes futuras)
                 }
@@ -130,7 +131,7 @@ public class ChatHistoryStore {
         if (parts.length != 3) {
             return null;
         }
-        return new StoredMessage(parts[0], decode(parts[2]), parseLong(parts[1]));
+        return new StoredMessage(parts[0], ArquivoChaveValorUtil.decode(parts[2]), ArquivoChaveValorUtil.parseLong(parts[1]));
     }
 
     /** Grava a lista inteira, criando a pasta se necessario. */
@@ -145,12 +146,12 @@ public class ChatHistoryStore {
         for (Conversation c : conversations) {
             sb.append(HEADER).append('\n');
             sb.append("id=").append(c.id()).append('\n');
-            sb.append("title=").append(encode(c.title())).append('\n');
+            sb.append("title=").append(ArquivoChaveValorUtil.encode(c.title())).append('\n');
             sb.append("createdAt=").append(c.createdAt()).append('\n');
             sb.append("updatedAt=").append(c.updatedAt()).append('\n');
             for (StoredMessage m : c.messages()) {
                 sb.append("msg=").append(m.role()).append('|').append(m.timestamp()).append('|')
-                        .append(encode(m.content())).append('\n');
+                        .append(ArquivoChaveValorUtil.encode(m.content())).append('\n');
             }
             sb.append('\n');
         }
@@ -202,23 +203,4 @@ public class ChatHistoryStore {
         saveAll(new ArrayList<>());
     }
 
-    private static String encode(String plain) {
-        return Base64.getEncoder().encodeToString(plain.getBytes(StandardCharsets.UTF_8));
-    }
-
-    private static String decode(String encoded) {
-        try {
-            return new String(Base64.getDecoder().decode(encoded), StandardCharsets.UTF_8);
-        } catch (IllegalArgumentException e) {
-            return "";
-        }
-    }
-
-    private static long parseLong(String s) {
-        try {
-            return Long.parseLong(s);
-        } catch (NumberFormatException e) {
-            return 0L;
-        }
-    }
 }
