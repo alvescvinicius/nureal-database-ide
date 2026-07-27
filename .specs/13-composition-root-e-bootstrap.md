@@ -43,6 +43,10 @@ com.nureal.ide.app/
 
 ## Critério de aceite
 
-- [ ] Nenhuma implementação concreta de infraestrutura é instanciada fora de `ComposicaoRaiz`.
-- [ ] O tempo de inicialização da IDE não piora perceptivelmente em relação ao estado atual.
-- [ ] `MainWindow` recebe suas dependências via construtor.
+- [x] Nenhuma implementação concreta de infraestrutura é instanciada fora de `ComposicaoRaiz`.
+- [x] O tempo de inicialização da IDE não piora perceptivelmente em relação ao estado atual.
+- [x] `MainWindow` recebe suas dependências via construtor.
+
+> **Progresso**: implementado. `ComposicaoRaiz` (`com.nureal.ide.app.ComposicaoRaiz`) construída e injetada a partir de `App.main`, antes de `MainWindow` existir. Constrói os 12 objetos de infraestrutura hoje elegíveis: `DatabaseDialect` (`MySqlDialect`), `bootstrapConnectionManager` (`ConexaoAtivaPort`/`ConnectionManager`, usado só antes da primeira conexão real do usuário existir), `MetadataRepository` (`MetadataService`), `MetadataCache`, `TableMetadataCache` (tornada `public`, antes package-private), `SqlCompletionProvider`, `ConnectionRepository` (`ConnectionStore`), `SessionStore`, `SavedQueryStore`, `ExecutionHistoryStore`, `RepositorioDeReleasesPort` (`UpdateChecker`), `FormatPreferences`. `MainWindow` deixou de instanciar essas 12 dependências em inicializadores de campo — agora recebe `ComposicaoRaiz raiz` no construtor e só faz `this.x = raiz.x()`. `ConnectionsPanel` foi alargado de `ConnectionStore` para o contrato `ConnectionRepository` (só usava `.load()`/`.save()`, ambos no contrato). `App.java` cria `ComposicaoRaiz raiz = new ComposicaoRaiz()` e passa para `new MainWindow(raiz)`. Verificado com `mvn clean test`: 162 testes, 1 falha (pré-existente, `SqlFormatterTest`, não relacionada).
+>
+> Duas exceções documentadas no próprio javadoc de `ComposicaoRaiz`, intencionalmente fora do escopo desta fase: (1) o grafo de objetos do módulo `ia-chat` continua montado lazily dentro de `MainWindow.openAiChat()`, porque depende de preferências que mudam em runtime (troca de modelo/provider) — ver Lacuna 1 em [11-modulo-ia-chat.md](11-modulo-ia-chat.md); (2) os `ConnectionManager` de cada conexão individual do usuário (um por `Conexao`/workspace, criados sob demanda ao conectar) continuam sendo criados fora de `ComposicaoRaiz` — só o `bootstrapConnectionManager` (usado antes de qualquer conexão real existir) é que vem dela.

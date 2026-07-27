@@ -1,6 +1,6 @@
 package com.nureal.ide.ui;
 
-import com.nureal.ide.core.connection.ConnectionProfile;
+import com.nureal.ide.modulos.conexoes.dominio.entidades.ConnectionProfile;
 
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;

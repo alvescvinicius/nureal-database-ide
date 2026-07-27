@@ -1,4 +1,7 @@
 package com.nureal.ide.ui;
+import com.nureal.ide.compartilhado.designsystem.Buttons;
+import com.nureal.ide.compartilhado.designsystem.Typography;
+import com.nureal.ide.compartilhado.designsystem.dialog.DialogShell;
 
 import java.awt.BorderLayout;
 import java.awt.Component;
@@ -19,7 +22,7 @@ import javax.swing.JTable;
 import javax.swing.Timer;
 import javax.swing.table.DefaultTableModel;
 
-import com.nureal.ide.core.dialect.DatabaseDialect;
+import com.nureal.ide.modulos.dialeto.dominio.contratos.DatabaseDialect;
 
 /**
  * Monitor de sessoes do servidor ({@code information_schema.PROCESSLIST}),
@@ -63,28 +66,22 @@ final class ProcessListDialog {
         }
 
         void show() {
-            dialog = new JDialog(owner, "Sessoes ativas do servidor", JDialog.ModalityType.MODELESS);
-            dialog.setLayout(new BorderLayout());
-            dialog.add(buildTable(), BorderLayout.CENTER);
-            dialog.add(buildToolbar(), BorderLayout.NORTH);
+            DialogShell shell = DialogShell.create(owner, "Sessoes ativas do servidor", JDialog.ModalityType.MODELESS);
+            dialog = shell.dialog();
+            shell.center(buildTable());
+            shell.north(buildToolbar());
             // Para o timer de auto-refresh nao continuar rodando em segundo
             // plano (e vazando memoria/tempo de CPU) depois que a janela e
             // fechada — dialogo NAO-MODAL nao bloqueia o resto do app, entao
             // o usuario pode muito bem fechar esta janela sem passar por um
             // botao dedicado.
-            dialog.addWindowListener(new java.awt.event.WindowAdapter() {
-                @Override
-                public void windowClosed(java.awt.event.WindowEvent e) {
-                    if (autoRefreshTimer != null) {
-                        autoRefreshTimer.stop();
-                    }
+            shell.onClosed(() -> {
+                if (autoRefreshTimer != null) {
+                    autoRefreshTimer.stop();
                 }
             });
-            dialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
-            dialog.setSize(920, 520);
-            dialog.setLocationRelativeTo(owner);
             refresh();
-            dialog.setVisible(true);
+            shell.show(920, 520);
         }
 
         private JComponent buildTable() {

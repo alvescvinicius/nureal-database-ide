@@ -5,10 +5,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import com.nureal.ide.core.connection.ConexaoAtivaPort;
-import com.nureal.ide.core.connection.ConnectionProfile;
-import com.nureal.ide.core.metadata.model.SchemaInfo;
-import com.nureal.ide.core.session.SessionStore;
+import com.nureal.ide.modulos.conexoes.dominio.contratos.ConexaoAtivaPort;
+import com.nureal.ide.modulos.conexoes.dominio.entidades.ConnectionProfile;
+import com.nureal.ide.modulos.metadados.dominio.entidades.SchemaInfo;
+import com.nureal.ide.modulos.historico.infraestrutura.SessionStore;
 
 /**
  * Conexao (workspace) de uma conexao: sua sessao JDBC, esquema e abas de SQL

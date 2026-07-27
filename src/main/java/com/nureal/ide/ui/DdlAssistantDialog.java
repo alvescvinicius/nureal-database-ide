@@ -1,4 +1,6 @@
 package com.nureal.ide.ui;
+import com.nureal.ide.compartilhado.designsystem.Buttons;
+import com.nureal.ide.compartilhado.designsystem.Typography;
 
 import java.awt.BorderLayout;
 import java.awt.Component;
@@ -42,17 +44,20 @@ import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 import javax.swing.table.DefaultTableModel;
 
-import com.nureal.ide.core.ddl.NormalizationAdvisor;
-import com.nureal.ide.core.dialect.DatabaseDialect;
+import com.nureal.ide.compartilhado.validacao.SqlIdentifiers;
+import com.nureal.ide.modulos.assistenteddl.aplicacao.ConstruirDdlDeTabelaHandler;
+import com.nureal.ide.modulos.assistenteddl.aplicacao.ConstruirDdlDeTabelaInput;
+import com.nureal.ide.modulos.assistenteddl.aplicacao.ConstruirDdlDeTabelaOutput;
+import com.nureal.ide.modulos.assistenteddl.dominio.NormalizationAdvisor;
+import com.nureal.ide.modulos.dialeto.dominio.contratos.DatabaseDialect;
 import com.nureal.ide.core.format.SqlFormatter;
-import com.nureal.ide.core.metadata.model.ColumnDetail;
-import com.nureal.ide.core.metadata.model.ForeignKeyInfo;
-import com.nureal.ide.core.metadata.model.IndexInfo;
-import com.nureal.ide.core.metadata.model.NewColumnSpec;
-import com.nureal.ide.core.metadata.model.NewTableSpec;
-import com.nureal.ide.core.metadata.model.SchemaInfo;
-import com.nureal.ide.core.metadata.model.TableDetails;
-import com.nureal.ide.core.metadata.model.TableInfo;
+import com.nureal.ide.modulos.metadados.dominio.entidades.ColumnDetail;
+import com.nureal.ide.modulos.metadados.dominio.entidades.ForeignKeyInfo;
+import com.nureal.ide.modulos.metadados.dominio.entidades.IndexInfo;
+import com.nureal.ide.modulos.metadados.dominio.entidades.NewColumnSpec;
+import com.nureal.ide.modulos.metadados.dominio.entidades.SchemaInfo;
+import com.nureal.ide.modulos.metadados.dominio.entidades.TableDetails;
+import com.nureal.ide.modulos.metadados.dominio.entidades.TableInfo;
 
 /**
  * Assistente de DDL guiado: cria uma tabela nova OU adiciona colunas/chaves
@@ -671,7 +676,7 @@ final class DdlAssistantDialog {
 
         private void refreshSuggestions() {
             List<NewColumnSpec> allColumns = collectAllColumnsForAdvisor();
-            List<ForeignKeyInfo> fks = collectForeignKeys(true);
+            List<ForeignKeyInfo> fks = collectForeignKeys(true, new ArrayList<>());
             List<IndexInfo> idxs = collectIndexes(true);
             String tableName = alterMode ? alterTableName : nameField.getText().trim();
             List<String> suggestions = NormalizationAdvisor.analyze(tableName, allColumns, fks, idxs);
@@ -734,24 +739,24 @@ final class DdlAssistantDialog {
 
         /** Monta o DDL final (CREATE ou ALTER) ja formatado, sem executar nada. */
         private String buildDdlPreview() {
-            try {
-                List<String> statements = buildStatements();
-                if (statements.isEmpty()) {
-                    return alterMode
-                            ? "-- Nada a fazer ainda: adicione uma coluna/chave/indice novo, edite uma coluna "
-                                    + "existente ou marque \"Remover\" em alguma grade \"atual\"."
-                            : "-- Adicione ao menos uma coluna na aba \"Colunas\".";
-                }
-                SqlFormatter formatter = new SqlFormatter(SqlFormatter.KeywordCase.UPPER, SqlFormatter.Style.STANDARD,
-                        false);
-                StringBuilder sb = new StringBuilder();
-                for (String s : statements) {
-                    sb.append(formatter.format(s)).append(";\n\n");
-                }
-                return sb.toString().trim();
-            } catch (SqlBuilderValidationException ex) {
-                return "-- " + ex.getMessage();
+            ConstruirDdlDeTabelaOutput output = buildStatements();
+            if (!output.sucesso()) {
+                return "-- " + output.mensagemErro();
             }
+            List<String> statements = output.statements();
+            if (statements.isEmpty()) {
+                return alterMode
+                        ? "-- Nada a fazer ainda: adicione uma coluna/chave/indice novo, edite uma coluna "
+                                + "existente ou marque \"Remover\" em alguma grade \"atual\"."
+                        : "-- Adicione ao menos uma coluna na aba \"Colunas\".";
+            }
+            SqlFormatter formatter = new SqlFormatter(SqlFormatter.KeywordCase.UPPER, SqlFormatter.Style.STANDARD,
+                    false);
+            StringBuilder sb = new StringBuilder();
+            for (String s : statements) {
+                sb.append(formatter.format(s)).append(";\n\n");
+            }
+            return sb.toString().trim();
         }
 
         // ---------- Rodape ----------
@@ -763,15 +768,14 @@ final class DdlAssistantDialog {
         }
 
         private void onExecute() {
-            List<String> statements;
-            try {
-                statements = buildStatements();
-            } catch (SqlBuilderValidationException ex) {
-                JOptionPane.showMessageDialog(dialog, ex.getMessage(), "Assistente de DDL",
+            ConstruirDdlDeTabelaOutput output = buildStatements();
+            if (!output.sucesso()) {
+                JOptionPane.showMessageDialog(dialog, output.mensagemErro(), "Assistente de DDL",
                         JOptionPane.WARNING_MESSAGE);
                 tabs.setSelectedIndex(0);
                 return;
             }
+            List<String> statements = output.statements();
             if (statements.isEmpty()) {
                 JOptionPane.showMessageDialog(dialog,
                         alterMode ? "Adicione, modifique ou marque para remover ao menos uma coluna/chave/indice."
@@ -811,43 +815,47 @@ final class DdlAssistantDialog {
 
         // ---------- Coleta/validacao do estado das abas ----------
 
-        private List<String> buildStatements() {
-            List<NewColumnSpec> newColumns = collectNewColumns();
-            List<ForeignKeyInfo> fks = collectForeignKeys(false);
+        /**
+         * Coleta o formulario e delega a montagem do DDL a
+         * {@link ConstruirDdlDeTabelaHandler} — erros de LINHA (grade de
+         * colunas/FKs) sao detectados aqui mesmo (so quem tem acesso aos
+         * componentes Swing sabe o numero da linha) e viram
+         * {@code DADOS_INCOMPLETOS} direto, sem chegar a chamar o handler;
+         * os demais (nome de tabela vazio/invalido/duplicado, sem colunas)
+         * sao responsabilidade do handler.
+         */
+        private ConstruirDdlDeTabelaOutput buildStatements() {
+            List<String> erros = new ArrayList<>();
+            List<NewColumnSpec> newColumns = collectNewColumns(erros);
+            if (!erros.isEmpty()) {
+                return ConstruirDdlDeTabelaOutput.erro(
+                        ConstruirDdlDeTabelaOutput.ErroDeValidacao.DADOS_INCOMPLETOS, erros.get(0));
+            }
+            List<ForeignKeyInfo> fks = collectForeignKeys(false, erros);
+            if (!erros.isEmpty()) {
+                return ConstruirDdlDeTabelaOutput.erro(
+                        ConstruirDdlDeTabelaOutput.ErroDeValidacao.DADOS_INCOMPLETOS, erros.get(0));
+            }
             List<IndexInfo> idxs = collectIndexes(false);
-            if (alterMode) {
-                // Modify/drop ANTES de add: assim, remover uma FK/indice e criar
-                // outro no lugar (mesmas colunas) na mesma execucao funciona sem
-                // colisao de nome, e uma coluna marcada para remover nunca aparece
-                // por engano nas sugestoes (ver collectAllColumnsForAdvisor, que ja
-                // ignora colunas ausentes de existingDetails so por nao ser mais
-                // usada — aqui o filtro e so no proprio DDL final).
-                List<String> statements = new ArrayList<>();
-                statements.addAll(dialect.alterTableModifyStatements(alterTableName, collectModifiedColumns(),
-                        collectDroppedColumns(), collectDroppedForeignKeys(), collectDroppedIndexes()));
-                statements.addAll(dialect.alterTableAddStatements(alterTableName, newColumns, fks, idxs));
-                return statements;
-            }
-            String tableName = nameField.getText().trim();
-            if (tableName.isEmpty()) {
-                throw new SqlBuilderValidationException("Informe o nome da tabela.");
-            }
-            if (!SqlIdentifiers.isValid(tableName)) {
-                throw new SqlBuilderValidationException(
-                        "Nome de tabela invalido: \"" + tableName + "\". Use letras, numeros e _ (nao pode comecar com numero).");
-            }
-            if (tableNameTaken != null && tableNameTaken.test(tableName)) {
-                throw new SqlBuilderValidationException("Ja existe uma tabela chamada \"" + tableName + "\".");
-            }
-            if (newColumns.isEmpty()) {
-                throw new SqlBuilderValidationException("Adicione pelo menos uma coluna.");
-            }
-            NewTableSpec spec = new NewTableSpec(tableName, newColumns, commentField.getText().trim(), fks, idxs);
-            return List.of(dialect.createTableStatement(spec));
+
+            String tableName = alterMode ? null : nameField.getText().trim();
+            boolean tableNameJaExiste = !alterMode && tableNameTaken != null && tableNameTaken.test(tableName);
+            ConstruirDdlDeTabelaInput input = new ConstruirDdlDeTabelaInput(
+                    alterMode, alterTableName, tableName, tableNameJaExiste,
+                    alterMode ? null : commentField.getText().trim(),
+                    newColumns, fks, idxs,
+                    collectModifiedColumns(), collectDroppedColumns(), collectDroppedForeignKeys(), collectDroppedIndexes());
+            return new ConstruirDdlDeTabelaHandler(dialect).executar(input);
         }
 
-        /** Colunas NOVAS digitadas na grade editavel (ignora linhas em branco), validando nomes. */
-        private List<NewColumnSpec> collectNewColumns() {
+        /**
+         * Colunas NOVAS digitadas na grade editavel (ignora linhas em branco),
+         * validando nomes. Em vez de lancar excecao no primeiro problema (como
+         * antes, via {@code SqlBuilderValidationException}), acrescenta a
+         * mensagem em {@code erros} e para de coletar (mesmo efeito pratico:
+         * so a PRIMEIRA mensagem chega a ser mostrada ao usuario).
+         */
+        private List<NewColumnSpec> collectNewColumns(List<String> erros) {
             List<NewColumnSpec> columns = new ArrayList<>();
             Set<String> seen = new LinkedHashSet<>();
             if (alterMode) {
@@ -868,13 +876,16 @@ final class DdlAssistantDialog {
                     continue;
                 }
                 if (name.isEmpty()) {
-                    throw new SqlBuilderValidationException("Linha " + (r + 1) + " da grade de colunas: informe o nome.");
+                    erros.add("Linha " + (r + 1) + " da grade de colunas: informe o nome.");
+                    return columns;
                 }
                 if (!SqlIdentifiers.isValid(name)) {
-                    throw new SqlBuilderValidationException("Nome de coluna invalido: \"" + name + "\".");
+                    erros.add("Nome de coluna invalido: \"" + name + "\".");
+                    return columns;
                 }
                 if (!seen.add(name.toLowerCase(Locale.ROOT))) {
-                    throw new SqlBuilderValidationException("Coluna repetida (ou ja existente na tabela): \"" + name + "\".");
+                    erros.add("Coluna repetida (ou ja existente na tabela): \"" + name + "\".");
+                    return columns;
                 }
                 columns.add(new NewColumnSpec(name, type.isEmpty() ? "VARCHAR" : type, length, nullable, pk, ai, def,
                         comment));
@@ -1016,7 +1027,7 @@ final class DdlAssistantDialog {
             return new String[] { columnType.toUpperCase(Locale.ROOT), "" };
         }
 
-        private List<ForeignKeyInfo> collectForeignKeys(boolean lenient) {
+        private List<ForeignKeyInfo> collectForeignKeys(boolean lenient, List<String> erros) {
             List<ForeignKeyInfo> out = new ArrayList<>();
             for (int r = 0; r < fkModel.getRowCount(); r++) {
                 List<String> cols = splitCsv(str(fkModel.getValueAt(r, 0)));
@@ -1029,9 +1040,10 @@ final class DdlAssistantDialog {
                 }
                 if (!lenient) {
                     if (cols.isEmpty() || refTable.isEmpty() || refCols.isEmpty()) {
-                        throw new SqlBuilderValidationException(
+                        erros.add(
                                 "Linha " + (r + 1) + " da aba \"Chaves estrangeiras\": preencha coluna(s) local(is), "
                                         + "tabela e coluna(s) referenciada(s).");
+                        return out;
                     }
                 }
                 out.add(new ForeignKeyInfo(null, cols, refTable, refCols,

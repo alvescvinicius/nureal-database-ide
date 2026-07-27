@@ -1,7 +1,9 @@
 package com.nureal.ide.ui;
+import com.nureal.ide.compartilhado.designsystem.Typography;
+import com.nureal.ide.compartilhado.designsystem.GridTheme;
 
-import com.nureal.ide.core.connection.ConexaoAtivaPort;
-import com.nureal.ide.ui.components.NSearchField;
+import com.nureal.ide.modulos.conexoes.dominio.contratos.ConexaoAtivaPort;
+import com.nureal.ide.compartilhado.designsystem.NSearchField;
 
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
@@ -50,6 +52,8 @@ final class ResultGrid extends JPanel {
     private static final int DEFAULT_ROW_HEIGHT_BASE_PX = 22;
 
     private final JTable table;
+    /** Exposto via {@link #scrollPane()} pra quem precisar reagir a rolagem (ver {@code ResultsAreaController}, carregamento automatico de mais linhas). */
+    private JScrollPane scrollPane;
     private final ColumnSorter sorter;
     private final String fingerprint;
     private final JComboBox<String> filterColumnBox = new JComboBox<>();
@@ -266,6 +270,7 @@ final class ResultGrid extends JPanel {
                 selection);
         scroll.setRowHeaderView(rowGutter);
         scroll.setCorner(JScrollPane.UPPER_LEFT_CORNER, corner);
+        this.scrollPane = scroll;
 
         add(buildFilterBar(model), BorderLayout.NORTH);
         add(scroll, BorderLayout.CENTER);
@@ -311,6 +316,11 @@ final class ResultGrid extends JPanel {
 
     JTable table() {
         return table;
+    }
+
+    /** {@link JScrollPane} que envolve a tabela — usado por {@code ResultsAreaController} pra detectar rolagem perto do fim (carregamento automatico de mais linhas). */
+    JScrollPane scrollPane() {
+        return scrollPane;
     }
 
     /** Liga o callback de resumo de selecao (ver campo {@link #onSelectionSummary}). */

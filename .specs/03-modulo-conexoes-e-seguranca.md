@@ -1,5 +1,16 @@
 # Módulo: Conexões e Segurança
 
+> **Progresso**: movimentação física concluída — `core.connection.*` →
+> `modulos.conexoes.{dominio,infraestrutura}`; `core.security.*` →
+> `compartilhado.seguranca` (não para dentro do módulo — `LocalVault`/
+> `CredentialCipher` também são usados por `AiCredentialsStore`, do módulo
+> `ia-chat`, então são genuinamente transversais, não exclusivos de
+> `conexoes`). Verificado por `mvn clean test` — 162 testes, mesma única
+> falha pré-existente. **Pendente**: a extração de casos de uso explícitos
+> (`Conectar`, `TestarConexao`, `SalvarPerfilConexao`) descrita abaixo —
+> hoje `ConnectionManager`/`ConnectionStore` continuam com sua forma
+> original, só fisicamente realocados atrás das interfaces já extraídas.
+
 ## Objetivo
 
 Especificar a migração de `core.connection.*` e `core.security.LocalVault` para o módulo `modulos/conexoes/`, com contratos explícitos entre domínio e infraestrutura de persistência/cifragem.
@@ -19,7 +30,7 @@ Especificar a migração de `core.connection.*` e `core.security.LocalVault` par
 ```
 modulos/conexoes/
   README.md
-  interface/
+  apresentacao/
     ConnectionsPanel.java          (movido de ui/, sem mudança de comportamento)
     ConnectionDialog.java
     ConnectionEditDialog.java      (usa o caso de uso TestarConexao em vez de JDBC direto)

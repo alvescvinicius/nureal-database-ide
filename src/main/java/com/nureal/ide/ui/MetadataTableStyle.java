@@ -1,4 +1,5 @@
 package com.nureal.ide.ui;
+import com.nureal.ide.compartilhado.designsystem.GridTheme;
 
 import java.awt.Component;
 import java.awt.Dimension;
@@ -36,7 +37,7 @@ public final class MetadataTableStyle {
      * corrigida em {@code ResultGrid}$JTable, {@code ConnectionsPanel} etc.).
      * Preferir este metodo a {@code new JTable(model)} + {@link #apply}
      * separados em qualquer tabela de metadados NOVA (ver
-     * {@code DdlAssistantDialog}, {@code ui.ai.MessageRenderer}).
+     * {@code DdlAssistantDialog}, {@code modulos.iachat.apresentacao.MessageRenderer}).
      */
     public static JTable createStyledTable(TableModel model) {
         JTable table = new JTable(model) {

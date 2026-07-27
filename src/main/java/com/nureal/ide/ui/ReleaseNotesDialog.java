@@ -1,4 +1,6 @@
 package com.nureal.ide.ui;
+import com.nureal.ide.compartilhado.designsystem.Buttons;
+import com.nureal.ide.compartilhado.designsystem.Spacing;
 
 import java.awt.BorderLayout;
 import java.awt.Component;
@@ -17,7 +19,7 @@ import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
 
-import com.nureal.ide.core.update.GithubRelease;
+import com.nureal.ide.modulos.atualizacao.dominio.entidades.GithubRelease;
 
 /**
  * Dialogo somente-leitura com as notas de um release do GitHub — aberto pelo

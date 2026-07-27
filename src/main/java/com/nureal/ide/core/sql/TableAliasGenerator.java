@@ -9,9 +9,9 @@ import java.util.Locale;
  * {@code "trade_asset" -> "ta"}) — a mesma convencao pedida explicitamente
  * pelo usuario ao corrigir a primeira versao do gerador de JOIN
  * ({@code MainWindow#insertJoinStatement}), reaproveitada aqui porque o
- * autocomplete inteligente (ver {@code SqlCompletionProvider}) precisa da
+ * autocomplete inteligente (ver {@code SqlCompletionProviderRSyntax}) precisa da
  * MESMA logica ao montar o snippet "tabela alias ON ..." — mas
- * {@code SqlCompletionProvider} vive em {@code core.autocomplete} (sem
+ * {@code SqlCompletionProviderRSyntax} vive em {@code modulos.autocomplete} (sem
  * dependencia de {@code ui}), entao a logica compartilhada mora aqui em vez
  * de em {@code MainWindow}.
  */

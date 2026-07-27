@@ -1,6 +1,6 @@
 package com.nureal.ide.ui;
 
-import com.nureal.ide.core.dialect.DatabaseDialect;
+import com.nureal.ide.modulos.dialeto.dominio.contratos.DatabaseDialect;
 import com.nureal.ide.core.log.AppLogger;
 
 import javax.swing.SwingUtilities;

@@ -1,5 +1,10 @@
 # Módulo: Atualização do Aplicativo
 
+> **Progresso**: concluído por completo — `RepositorioDeReleasesPort`
+> extraído e implementado por `UpdateChecker`; todas as classes movidas
+> fisicamente para `modulos.atualizacao.{dominio,infraestrutura}`. Verificado
+> por `mvn clean test` — 162 testes, mesma única falha pré-existente.
+
 ## Objetivo
 
 Especificar a migração de `core.update.*` para `modulos/atualizacao/`, o módulo mais simples e de menor risco desta lista — bom candidato para validar o processo de migração antes de atacar módulos maiores.
@@ -13,7 +18,7 @@ Especificar a migração de `core.update.*` para `modulos/atualizacao/`, o módu
 ```
 modulos/atualizacao/
   README.md
-  interface/
+  apresentacao/
     UpdateBanner.java                  (movido de ui/, sem mudança)
   aplicacao/
     casos-de-uso/

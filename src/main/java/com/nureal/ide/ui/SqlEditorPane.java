@@ -1,11 +1,17 @@
 package com.nureal.ide.ui;
+import com.nureal.ide.compartilhado.designsystem.IconType;
+import com.nureal.ide.compartilhado.designsystem.IconTheme;
+import com.nureal.ide.compartilhado.designsystem.Icons;
+import com.nureal.ide.compartilhado.designsystem.Buttons;
+import com.nureal.ide.compartilhado.designsystem.Typography;
+import com.nureal.ide.compartilhado.designsystem.GridTheme;
 
 import com.formdev.flatlaf.FlatLaf;
-import com.nureal.ide.core.autocomplete.SqlCompletionProvider;
-import com.nureal.ide.core.editor.EditorUndoManager;
+import com.nureal.ide.modulos.autocomplete.infraestrutura.SqlCompletionProviderRSyntax;
+import com.nureal.ide.modulos.editorsql.infraestrutura.EditorUndoManager;
 import com.nureal.ide.core.format.SqlFormatter;
-import com.nureal.ide.core.metadata.model.SchemaInfo;
-import com.nureal.ide.core.metadata.model.TableInfo;
+import com.nureal.ide.modulos.metadados.dominio.entidades.SchemaInfo;
+import com.nureal.ide.modulos.metadados.dominio.entidades.TableInfo;
 import com.nureal.ide.core.sql.SqlStatementLocator;
 import org.fife.ui.autocomplete.AutoCompletion;
 import org.fife.ui.rsyntaxtextarea.RSyntaxDocument;
@@ -175,28 +181,31 @@ public class SqlEditorPane extends JPanel {
 
     private final ObjectOpenHandler onOpenObject;
 
-    public SqlEditorPane(String tabId, SqlCompletionProvider provider, Runnable onRun,
+    public SqlEditorPane(String tabId, SqlCompletionProviderRSyntax provider, Runnable onRun,
             Supplier<SqlFormatter> formatterSupplier, String fontFamily, Supplier<SchemaInfo> schemaSupplier,
             ObjectOpenHandler onOpenObject, Runnable onNavigateBack) {
         this(tabId, provider, onRun, formatterSupplier, fontFamily, schemaSupplier, onOpenObject, onNavigateBack,
-                null, null, null, null);
+                null, null, null);
     }
 
     /**
-     * Igual ao construtor de 8 argumentos, com mais 3 callbacks NULL-SAFE
+     * Igual ao construtor de 8 argumentos, com mais 2 callbacks NULL-SAFE
      * para a fileira de acoes rapidas do canto direito da barra de contexto
-     * (ver {@link #buildQuickActionRow}): {@code onHistory} (icone de
-     * historico de execucoes), {@code onToggleExpand} (icone de expandir/
-     * recolher o editor) e {@code onMoreOptions} (icone de "mais opcoes",
-     * recebe o proprio botao como ancora para o popup). Qualquer um pode ser
-     * {@code null} — o botao correspondente simplesmente nao e criado. Mais
-     * {@code connectionNameSupplier} (tambem null-safe) para o prefixo de
-     * conexao do breadcrumb — ver {@link #connectionNameSupplier}.
+     * (ver {@link #buildQuickActionRow}): {@code onToggleExpand} (icone de
+     * expandir/recolher o editor) e {@code onMoreOptions} (icone de "mais
+     * opcoes", recebe o proprio botao como ancora para o popup). Qualquer um
+     * pode ser {@code null} — o botao correspondente simplesmente nao e
+     * criado. Mais {@code connectionNameSupplier} (tambem null-safe) para o
+     * prefixo de conexao do breadcrumb — ver {@link #connectionNameSupplier}.
+     * (Ate a revisao de UX que consolidou "Historico" numa aba unica da
+     * sidebar, havia tambem um {@code onHistory} aqui — removido por ser um
+     * duplicado exato do botao "Historico" da barra de ferramentas, ver
+     * {@code MainWindow#addSaveButton}.)
      */
-    public SqlEditorPane(String tabId, SqlCompletionProvider provider, Runnable onRun,
+    public SqlEditorPane(String tabId, SqlCompletionProviderRSyntax provider, Runnable onRun,
             Supplier<SqlFormatter> formatterSupplier, String fontFamily, Supplier<SchemaInfo> schemaSupplier,
             ObjectOpenHandler onOpenObject, Runnable onNavigateBack,
-            Runnable onHistory, Runnable onToggleExpand, Consumer<JComponent> onMoreOptions,
+            Runnable onToggleExpand, Consumer<JComponent> onMoreOptions,
             Supplier<String> connectionNameSupplier) {
         super(new BorderLayout());
 
@@ -223,7 +232,7 @@ public class SqlEditorPane extends JPanel {
         bindNavigationShortcuts(onNavigateBack);
 
         RTextScrollPane scroll = buildScrollPane();
-        add(buildBreadcrumbBar(onRun, onHistory, onToggleExpand, onMoreOptions), BorderLayout.NORTH);
+        add(buildBreadcrumbBar(onRun, onToggleExpand, onMoreOptions), BorderLayout.NORTH);
         add(scroll, BorderLayout.CENTER);
         add(buildFindBar(), BorderLayout.SOUTH);
         installBreadcrumbSync(textArea);
@@ -294,7 +303,7 @@ public class SqlEditorPane extends JPanel {
         textArea.setComponentPopupMenu(buildEditorPopupMenu());
     }
 
-    private void installAutocomplete(SqlCompletionProvider provider) {
+    private void installAutocomplete(SqlCompletionProviderRSyntax provider) {
         AutoCompletion ac = new AutoCompletion(provider);
         ac.setAutoActivationEnabled(true);
         ac.setAutoActivationDelay(200);
@@ -993,7 +1002,7 @@ public class SqlEditorPane extends JPanel {
      * {@link #computeBreadcrumb}. Vazio quando nao ha nada reconhecivel sob o
      * cursor (texto comum, palavra-chave, numero, etc.).
      */
-    private JComponent buildBreadcrumbBar(Runnable onRun, Runnable onHistory, Runnable onToggleExpand,
+    private JComponent buildBreadcrumbBar(Runnable onRun, Runnable onToggleExpand,
             Consumer<JComponent> onMoreOptions) {
         breadcrumbLabel = new JLabel(" ");
         breadcrumbLabel.setForeground(breadcrumbForeground());
@@ -1002,7 +1011,7 @@ public class SqlEditorPane extends JPanel {
         bar.setBorder(BorderFactory.createEmptyBorder(3, 8, 3, 8));
         bar.setBackground(FlatLaf.isLafDark() ? new Color(0x1A, 0x1B, 0x1E) : new Color(0xEC, 0xEE, 0xF1));
         bar.add(breadcrumbLabel, BorderLayout.WEST);
-        bar.add(buildQuickActionRow(onRun, onHistory, onToggleExpand, onMoreOptions), BorderLayout.EAST);
+        bar.add(buildQuickActionRow(onRun, onToggleExpand, onMoreOptions), BorderLayout.EAST);
         this.breadcrumbBar = bar;
         return bar;
     }
@@ -1010,15 +1019,17 @@ public class SqlEditorPane extends JPanel {
     /**
      * Fileira de icones de acao rapida no canto direito da barra de contexto
      * do editor (pedido explicito do usuario, visto nos prints de
-     * referencia): Executar, Historico, Expandir e Mais opcoes — as MESMAS
-     * acoes ja acessiveis por atalho de teclado/barra de ferramentas/menu de
-     * contexto da aba, so mais a mao sem precisar sair do editor. Callbacks
+     * referencia): Executar, Expandir e Mais opcoes — as MESMAS acoes ja
+     * acessiveis por atalho de teclado/barra de ferramentas/menu de contexto
+     * da aba, so mais a mao sem precisar sair do editor. Callbacks
      * {@code null}-safe: nenhum botao e criado para o callback que vier
      * {@code null} (o construtor de 8 argumentos passa todos {@code null},
      * entao quem nao precisar da fileira completa nao ganha nenhum botao
-     * extra alem do Executar, que sempre existe).
+     * extra alem do Executar, que sempre existe). Nao tem mais um botao de
+     * Historico aqui (revisao de UX: era duplicado exato do botao de mesmo
+     * nome na barra de ferramentas — ver {@code MainWindow#addSaveButton}).
      */
-    private JComponent buildQuickActionRow(Runnable onRun, Runnable onHistory, Runnable onToggleExpand,
+    private JComponent buildQuickActionRow(Runnable onRun, Runnable onToggleExpand,
             Consumer<JComponent> onMoreOptions) {
         JPanel row = new JPanel(new FlowLayout(FlowLayout.RIGHT, 2, 0));
         row.setOpaque(false);
@@ -1027,19 +1038,6 @@ public class SqlEditorPane extends JPanel {
         runButton.setToolTipText("Executar (Ctrl+Enter ou F5)");
         runButton.addActionListener(e -> onRun.run());
         row.add(runButton);
-
-        if (onHistory != null) {
-            // Icone via Buttons.bindThemedIcon (nao Icons.get(...) direto no
-            // construtor): sem isto, cada aba de editor aberta ANTES de um
-            // toggleTheme() ficava com este icone congelado na cor do tema
-            // anterior (mesmo bug sistemico corrigido em MainWindow/
-            // ConnectionsPanel, ver Buttons#bindThemedIcon).
-            JButton historyButton = new JButton();
-            Buttons.bindThemedIcon(historyButton, IconType.HISTORY, 13, () -> GridTheme.MUTED_TEXT);
-            historyButton.setToolTipText("Ver historico de execucoes desta conexao");
-            historyButton.addActionListener(e -> onHistory.run());
-            row.add(historyButton);
-        }
 
         if (onToggleExpand != null) {
             JButton expandButton = new JButton();

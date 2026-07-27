@@ -1,5 +1,5 @@
 # Package Organization
 
-core.ai/{agent,provider,context,tool,prompt,config,event,model,memory}
+modulos.iachat/{agent,provider,context,tool,prompt,config,history,specialist}
 
 ui.ai/{chat,renderer,settings}

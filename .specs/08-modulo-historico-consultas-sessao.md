@@ -1,5 +1,16 @@
 # Módulo: Histórico, Consultas Salvas e Sessão
 
+> **Progresso**: `ArquivoChaveValorUtil` (codec Base64 + parseLong/parseInt)
+> extraído para `compartilhado.persistencia` e usado pelas três stores —
+> concluído. Movimentação física das três classes para
+> `modulos.historico.infraestrutura` — concluída. **Pendente**: extração dos
+> contratos (`HistoricoRepository`, `ConsultaSalvaRepository`,
+> `SessaoRepository`) e das entidades para `dominio/`, e a unificação do
+> parser de blocos completo (não feita — `SessionStore` tem formato aninhado
+> incompatível com o formato flat de `ExecutionHistoryStore`/`SavedQueryStore`,
+> ver README do módulo). Verificado por `mvn clean test` — 162 testes, mesma
+> única falha pré-existente.
+
 ## Objetivo
 
 Especificar a unificação de `core.history.ExecutionHistoryStore`, `core.queries.SavedQueryStore` e `core.session.SessionStore` — três implementações quase idênticas de persistência em arquivo — em um único módulo com uma infraestrutura de armazenamento compartilhada.
@@ -13,7 +24,7 @@ As três classes reimplementam, cada uma independentemente, o mesmo formato chav
 ```
 modulos/historico-e-consultas/
   README.md
-  interface/
+  apresentacao/
     HistoryPanel.java                  (movido de ui/, sem mudança)
     SavedQueriesPanel.java             (movido de ui/, sem mudança)
   aplicacao/

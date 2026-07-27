@@ -4,7 +4,7 @@ import java.util.Vector;
 
 import javax.swing.table.DefaultTableModel;
 
-import com.nureal.ide.core.export.TabelaExportavel;
+import com.nureal.ide.modulos.backupexportacao.dominio.contratos.TabelaExportavel;
 
 /**
  * Modelo de tabela usado pela grade de resultados — somente leitura por
@@ -125,7 +125,7 @@ public final class ResultTableModel extends DefaultTableModel implements TabelaE
         return sourceTables[column];
     }
 
-    // ---------- TabelaExportavel (ver core.export.ExcelExporter) ----------
+    // ---------- TabelaExportavel (ver modulos.backupexportacao.infraestrutura.ExcelExporter) ----------
 
     @Override
     public int linhas() {

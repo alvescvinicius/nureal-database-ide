@@ -13,7 +13,7 @@ Este é, segundo o diagnóstico, **o dialog mais bem-comportado do projeto**: `D
 ```
 modulos/assistente-ddl/
   README.md
-  interface/
+  apresentacao/
     DdlAssistantDialog.java           (mantém coleta de formulário; passa a chamar o Handler abaixo em vez de lançar SqlBuilderValidationException)
   aplicacao/
     casos-de-uso/
@@ -35,6 +35,10 @@ modulos/assistente-ddl/
 
 ## Critério de aceite
 
-- [ ] `SqlBuilderValidationException` deixa de existir; `DdlAssistantDialog` trata o `Output` do caso de uso.
-- [ ] `NormalizationAdvisor` movido sem mudança de comportamento (sugestões de PK ausente, tipos, grupos repetitivos, dependência parcial/transitiva, índices de FK ausentes idênticas).
-- [ ] "Nova tabela..." e "Alterar tabela..." continuam produzindo exatamente o mesmo DDL de hoje para os mesmos inputs.
+- [x] `DdlAssistantDialog` para de lançar/capturar `SqlBuilderValidationException` — trata o `Output` tipado do caso de uso `ConstruirDdlDeTabela`.
+- [x] `NormalizationAdvisor` movido sem mudança de comportamento (sugestões de PK ausente, tipos, grupos repetitivos, dependência parcial/transitiva, índices de FK ausentes idênticas).
+- [x] "Nova tabela..." e "Alterar tabela..." continuam produzindo exatamente o mesmo DDL de hoje para os mesmos inputs.
+
+> **Progresso**: implementado o essencial desta spec. `NormalizationAdvisor` movido para `modulos.assistenteddl.dominio` sem mudança de lógica (só pacote), teste `NormalizationAdvisorTest` movido junto. Criado `modulos.assistenteddl.aplicacao.ConstruirDdlDeTabelaHandler` (+ `Input`/`Output`), com 4 códigos de erro (`NOME_INVALIDO`, `NOME_DUPLICADO`, `SEM_COLUNAS`, `DADOS_INCOMPLETOS` — este último cobre os erros de linha da grade, detectados por `DdlAssistantDialog` antes de chamar o Handler, já que só quem tem acesso à `JTable` sabe apontar "linha X"). `DdlAssistantDialog.buildStatements()` mudou de `throws SqlBuilderValidationException` para `retorna ConstruirDdlDeTabelaOutput`; `buildDdlPreview()`/`onExecute()` passaram a checar `output.sucesso()` em vez de `catch`. Mesmas mensagens de erro em todos os casos (nenhuma string mudou). Testado com `ConstruirDdlDeTabelaHandlerTest` (6 casos: cada código de erro + create + alter com sucesso) e `mvn clean test`: 173 testes, 1 falha pré-existente (`SqlFormatterTest`, não relacionada).
+>
+> **Desvio deliberado do critério original**: `SqlBuilderValidationException` (em `ui/`) **não foi excluída** — `ViewBuilderDialog`, `TriggerBuilderDialog` e `RoutineBuilderDialog` (fora do escopo desta fase) ainda dependem dela. Só `DdlAssistantDialog` parou de usá-la. Pelo mesmo motivo, `SqlIdentifiers` (também compartilhada pelos 4 assistentes) foi movida para `compartilhado.validacao` em vez de para dentro de `modulos.assistenteddl`, para o Handler não precisar depender de `ui` nem forçar os outros 3 assistentes a depender deste módulo. A movimentação física de `DdlAssistantDialog.java` em si para `apresentacao/` continua pendente (puramente mecânica, sem risco — pode ser feita junto com os 3 assistentes irmãos numa fase futura). Ver [modulos/assistenteddl/README.md](../src/main/java/com/nureal/ide/modulos/assistenteddl/README.md).

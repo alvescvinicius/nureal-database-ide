@@ -10,7 +10,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import com.nureal.ide.core.dialect.DatabaseDialect;
+import com.nureal.ide.modulos.dialeto.dominio.contratos.DatabaseDialect;
 import com.nureal.ide.core.log.AppLogger;
 
 /**

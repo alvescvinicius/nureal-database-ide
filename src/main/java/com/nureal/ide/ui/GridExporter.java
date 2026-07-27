@@ -10,7 +10,7 @@ import java.nio.file.Path;
 /**
  * Exportacao de CSV e JSON da grade de resultados — sem nenhuma dependencia
  * externa nova (Excel ja tem seu proprio exportador em
- * {@code core.export.ExcelExporter}; aqui e so texto puro).
+ * {@code modulos.backupexportacao.infraestrutura.ExcelExporter}; aqui e so texto puro).
  *
  * Sempre le atraves do {@link JTable} (indices de VIEW), portanto respeita a
  * ordenacao e o filtro aplicados no momento — o que o usuario ve na tela e

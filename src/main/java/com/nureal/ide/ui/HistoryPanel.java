@@ -1,11 +1,17 @@
 package com.nureal.ide.ui;
+import com.nureal.ide.compartilhado.designsystem.Buttons;
+import com.nureal.ide.compartilhado.designsystem.IconType;
+import com.nureal.ide.compartilhado.designsystem.Typography;
+import com.nureal.ide.compartilhado.designsystem.GridTheme;
 
-import com.nureal.ide.core.history.ExecutionHistoryStore;
-import com.nureal.ide.core.history.ExecutionHistoryStore.Entry;
+import com.nureal.ide.modulos.historico.infraestrutura.ExecutionHistoryStore;
+import com.nureal.ide.modulos.historico.infraestrutura.ExecutionHistoryStore.Entry;
 import com.nureal.ide.core.log.AppLogger;
-import com.nureal.ide.ui.components.NSearchField;
+import com.nureal.ide.compartilhado.designsystem.NSearchField;
 
 import javax.swing.BorderFactory;
+import javax.swing.Box;
+import javax.swing.BoxLayout;
 import javax.swing.DefaultListCellRenderer;
 import javax.swing.DefaultListModel;
 import javax.swing.JComponent;
@@ -19,8 +25,10 @@ import javax.swing.JScrollPane;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingConstants;
 import java.awt.BorderLayout;
+import java.awt.CardLayout;
 import java.awt.Color;
 import java.awt.Component;
+import java.awt.GridBagLayout;
 import java.awt.Toolkit;
 import java.awt.datatransfer.StringSelection;
 import java.awt.event.MouseAdapter;
@@ -55,6 +63,10 @@ public class HistoryPanel extends JPanel {
     private final DefaultListModel<Entry> model = new DefaultListModel<>();
     private final JList<Entry> list = new JList<>(model);
     private final NSearchField search = new NSearchField("Buscar no historico...");
+    /** Alterna entre a lista e o estado vazio — mesma receita de {@link ConnectionsPanel#buildEmptyState}. */
+    private final JPanel listCards = new JPanel(new CardLayout());
+    private JLabel emptyTitle;
+    private JLabel emptySub;
 
     private List<Entry> all = new ArrayList<>();
     private String activeConnection; // null = workspace "sem conexao" (SCRATCH)
@@ -88,17 +100,19 @@ public class HistoryPanel extends JPanel {
         }
     }
 
+    /**
+     * Sem titulo "HISTORICO" aqui: este painel agora vive dentro de uma aba
+     * da sidebar (ver {@code MainWindow#buildLeftSide}) cujo ROTULO da
+     * propria aba ja diz "Historico" — repetir o nome dentro do conteudo
+     * seria a MESMA duplicacao de marca ja corrigida no logo do topo da
+     * coluna (revisao de UX).
+     */
     private JComponent buildHeader() {
-        // Ver Typography#sectionHeader: MESMA receita de "OBJETOS"/"CONEXOES"/
-        // "QUERIES SALVAS" — ponto unico, sem copia colada.
-        JLabel title = Typography.sectionHeader("HISTORICO");
-
         search.onTextChange(this::applyFilter);
 
         JPanel header = new JPanel(new BorderLayout(0, 6));
         header.setOpaque(false);
-        header.add(title, BorderLayout.NORTH);
-        header.add(search, BorderLayout.SOUTH);
+        header.add(search, BorderLayout.CENTER);
         return header;
     }
 
@@ -138,7 +152,62 @@ public class HistoryPanel extends JPanel {
 
         JScrollPane sp = new JScrollPane(list);
         sp.setBorder(BorderFactory.createEmptyBorder());
-        return sp;
+
+        listCards.add(sp, "list");
+        listCards.add(buildEmptyState(), "empty");
+        return listCards;
+    }
+
+    /**
+     * Estado vazio: nenhuma execucao registrada ainda, OU a busca nao
+     * encontrou nada — mesma composicao (icone 40px reativo ao tema + titulo
+     * + subtitulo) que {@link ConnectionsPanel#buildEmptyState()} usa, para
+     * manter um UNICO "idioma" de estado vazio em toda a sidebar (antes esta
+     * lista simplesmente ficava em branco quando vazia).
+     */
+    private JComponent buildEmptyState() {
+        JLabel icon = new JLabel();
+        Buttons.bindThemedIcon(icon, IconType.HISTORY, 40, () -> GridTheme.MUTED_TEXT);
+        icon.setAlignmentX(Component.CENTER_ALIGNMENT);
+
+        emptyTitle = new JLabel();
+        emptyTitle.setFont(emptyTitle.getFont().deriveFont(13f));
+        Typography.primary(emptyTitle);
+        emptyTitle.setAlignmentX(Component.CENTER_ALIGNMENT);
+
+        emptySub = new JLabel();
+        Typography.tertiary(emptySub);
+        emptySub.setAlignmentX(Component.CENTER_ALIGNMENT);
+
+        JPanel box = new JPanel();
+        box.setOpaque(false);
+        box.setLayout(new BoxLayout(box, BoxLayout.Y_AXIS));
+        box.add(icon);
+        box.add(Box.createVerticalStrut(10));
+        box.add(emptyTitle);
+        box.add(Box.createVerticalStrut(2));
+        box.add(emptySub);
+
+        JPanel center = new JPanel(new GridBagLayout());
+        center.setOpaque(false);
+        center.add(box);
+        return center;
+    }
+
+    /** Mostra a lista ou o estado vazio, com o texto certo pro caso (sem historico ainda vs. busca sem resultado). */
+    private void updateEmptyState(boolean empty) {
+        ((CardLayout) listCards.getLayout()).show(listCards, empty ? "empty" : "list");
+        if (!empty || emptyTitle == null) {
+            return;
+        }
+        String query = search.getText() == null ? "" : search.getText().trim();
+        if (query.isEmpty()) {
+            emptyTitle.setText("Nenhuma execucao ainda");
+            emptySub.setText("O historico aparece aqui apos rodar uma consulta");
+        } else {
+            emptyTitle.setText("Nenhum resultado");
+            emptySub.setText("Nada bate com \"" + query + "\"");
+        }
     }
 
     private void maybeMenu(MouseEvent e) {
@@ -257,6 +326,7 @@ public class HistoryPanel extends JPanel {
         for (Entry e : filtered) {
             model.addElement(e);
         }
+        updateEmptyState(filtered.isEmpty());
     }
 
     private static String relativeTime(long epochMillis) {

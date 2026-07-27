@@ -1,9 +1,9 @@
 package com.nureal.ide.ui;
 
-import com.nureal.ide.core.connection.ConexaoAtivaPort;
+import com.nureal.ide.modulos.conexoes.dominio.contratos.ConexaoAtivaPort;
 import com.nureal.ide.core.log.AppLogger;
-import com.nureal.ide.core.metadata.MetadataRepository;
-import com.nureal.ide.core.metadata.model.TableDetails;
+import com.nureal.ide.modulos.metadados.dominio.contratos.MetadataRepository;
+import com.nureal.ide.modulos.metadados.dominio.entidades.TableDetails;
 
 import javax.swing.SwingWorker;
 import java.sql.Connection;
@@ -24,13 +24,13 @@ import java.util.concurrent.ConcurrentHashMap;
  * ao banco. Cada tabela e carregada no maximo uma vez por sessao (por
  * schema+tabela); chamadas repetidas so leem o cache.
  */
-final class TableMetadataCache {
+public final class TableMetadataCache {
 
     private final Map<String, TableDetails> cache = new ConcurrentHashMap<>();
     private final Set<String> loading = ConcurrentHashMap.newKeySet();
     private final MetadataRepository metadataService;
 
-    TableMetadataCache(MetadataRepository metadataService) {
+    public TableMetadataCache(MetadataRepository metadataService) {
         this.metadataService = metadataService;
     }
 

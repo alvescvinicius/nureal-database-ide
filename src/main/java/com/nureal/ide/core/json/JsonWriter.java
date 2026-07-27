@@ -6,7 +6,7 @@ import java.util.Map;
 /**
  * Escritor de JSON minimo, contraparte do {@link JsonParser} (que so le).
  * Existe para montar o corpo das requisicoes HTTP ao Ollama (ver
- * {@code core.ai.provider.OllamaProvider}) sem adicionar uma dependencia
+ * {@code modulos.iachat.infraestrutura.provider.OllamaProvider}) sem adicionar uma dependencia
  * nova ao projeto (Jackson/Gson) — mesma filosofia do {@code JsonParser}.
  *
  * Aceita apenas os tipos que {@link JsonParser#parse} devolve: {@code Map},

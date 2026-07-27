@@ -1,5 +1,12 @@
 # Módulo: Backup e Exportação
 
+> **Progresso**: concluído por completo — `BackupPort`/`TabelaExportavel`
+> extraídos e implementados; `MySqlDumpRunner`/`ExcelExporter`/`CsvUtil`
+> movidos fisicamente para `modulos.backupexportacao.{dominio,infraestrutura}`
+> (pacote sem hífen — Java não aceita `-` em identificador; ver README do
+> módulo). Verificado por `mvn clean test` — 162 testes, mesma única falha
+> pré-existente.
+
 ## Objetivo
 
 Especificar a migração de `core.backup.MySqlDumpRunner`, `core.export.ExcelExporter` e `core.csv.CsvUtil` para `modulos/backup-e-exportacao/`.
@@ -17,7 +24,7 @@ Especificar a migração de `core.backup.MySqlDumpRunner`, `core.export.ExcelExp
 ```
 modulos/backup-e-exportacao/
   README.md
-  interface/
+  apresentacao/
     BackupRestoreDialog.java           (movido, sem mudança de fluxo)
   aplicacao/
     casos-de-uso/

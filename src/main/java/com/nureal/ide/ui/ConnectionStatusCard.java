@@ -1,4 +1,9 @@
 package com.nureal.ide.ui;
+import com.nureal.ide.compartilhado.designsystem.IconType;
+import com.nureal.ide.compartilhado.designsystem.Icons;
+import com.nureal.ide.compartilhado.designsystem.Buttons;
+import com.nureal.ide.compartilhado.designsystem.Typography;
+import com.nureal.ide.compartilhado.designsystem.GridTheme;
 
 import java.awt.BorderLayout;
 import java.awt.Color;
@@ -12,9 +17,9 @@ import javax.swing.JMenuItem;
 import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
 
-import com.nureal.ide.ui.components.NAccent;
-import com.nureal.ide.ui.components.NBadge;
-import com.nureal.ide.ui.components.NCard;
+import com.nureal.ide.compartilhado.designsystem.NAccent;
+import com.nureal.ide.compartilhado.designsystem.NBadge;
+import com.nureal.ide.compartilhado.designsystem.NCard;
 
 /**
  * Card "Conexao Ativa" da sidebar (SPEC-0007 "Sidebar Workspace"): unico

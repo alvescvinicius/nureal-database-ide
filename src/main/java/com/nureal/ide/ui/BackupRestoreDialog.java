@@ -1,9 +1,11 @@
 package com.nureal.ide.ui;
+import com.nureal.ide.compartilhado.designsystem.Buttons;
+import com.nureal.ide.compartilhado.designsystem.GridTheme;
 
-import com.nureal.ide.core.backup.MySqlDumpRunner.BackupOptions;
-import com.nureal.ide.core.backup.MySqlDumpRunner.ConnectionTarget;
-import com.nureal.ide.core.backup.MySqlDumpRunner.RestoreOptions;
-import com.nureal.ide.core.backup.MySqlDumpRunner.RunResult;
+import com.nureal.ide.modulos.backupexportacao.infraestrutura.MySqlDumpRunner.BackupOptions;
+import com.nureal.ide.modulos.backupexportacao.infraestrutura.MySqlDumpRunner.ConnectionTarget;
+import com.nureal.ide.modulos.backupexportacao.infraestrutura.MySqlDumpRunner.RestoreOptions;
+import com.nureal.ide.modulos.backupexportacao.infraestrutura.MySqlDumpRunner.RunResult;
 
 import javax.swing.BorderFactory;
 import javax.swing.ButtonGroup;

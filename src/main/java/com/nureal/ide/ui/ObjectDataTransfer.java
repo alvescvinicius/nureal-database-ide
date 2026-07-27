@@ -10,10 +10,10 @@ import javax.swing.JFileChooser;
 import javax.swing.JOptionPane;
 import javax.swing.SwingWorker;
 
-import com.nureal.ide.core.backup.BackupPort;
-import com.nureal.ide.core.backup.MySqlDumpRunner;
-import com.nureal.ide.core.csv.CsvUtil;
-import com.nureal.ide.core.metadata.model.ColumnInfo;
+import com.nureal.ide.modulos.backupexportacao.dominio.contratos.BackupPort;
+import com.nureal.ide.modulos.backupexportacao.infraestrutura.MySqlDumpRunner;
+import com.nureal.ide.modulos.backupexportacao.dominio.CsvUtil;
+import com.nureal.ide.modulos.metadados.dominio.entidades.ColumnInfo;
 
 /**
  * Backup/restauracao (mysqldump) e importacao de CSV — extraido do

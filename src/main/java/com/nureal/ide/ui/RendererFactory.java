@@ -1,4 +1,5 @@
 package com.nureal.ide.ui;
+import com.nureal.ide.compartilhado.designsystem.GridTheme;
 
 import com.nureal.ide.core.sql.SqlTypeKind;
 

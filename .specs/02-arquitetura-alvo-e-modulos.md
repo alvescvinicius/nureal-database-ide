@@ -45,7 +45,7 @@ Todo módulo em `modulos/<nome>/` segue exatamente a estrutura de [05-Projetos/0
 ```
 modulos/<nome-do-modulo>/
   README.md
-  interface/            # painéis/dialogs Swing deste módulo (ex.: ConnectionsPanel)
+  apresentacao/            # painéis/dialogs Swing deste módulo (ex.: ConnectionsPanel)
   aplicacao/
     casos-de-uso/
       <caso-de-uso>/

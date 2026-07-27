@@ -22,6 +22,7 @@ import org.fife.ui.rsyntaxtextarea.folding.FoldParserManager;
 
 import com.formdev.flatlaf.FlatDarkLaf;
 import com.formdev.flatlaf.FlatLaf;
+import com.nureal.ide.app.ComposicaoRaiz;
 import com.nureal.ide.core.log.AppLogger;
 import com.nureal.ide.ui.MainWindow;
 import com.nureal.ide.ui.SqlFoldParser;
@@ -63,7 +64,12 @@ public class App {
         // clicavel do app, sem precisar setCursor(...) em cada botao individualmente.
         installHandCursorOnButtons();
 
-        SwingUtilities.invokeLater(() -> new MainWindow().setVisible(true));
+        // Composition root: constroi as implementacoes concretas de
+        // infraestrutura dos modulos ANTES de MainWindow existir (ver
+        // .specs/13-composition-root-e-bootstrap.md) — MainWindow so recebe
+        // os objetos prontos, nunca os constroi sozinha.
+        ComposicaoRaiz raiz = new ComposicaoRaiz();
+        SwingUtilities.invokeLater(() -> new MainWindow(raiz).setVisible(true));
     }
 
     /**

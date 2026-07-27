@@ -1,4 +1,12 @@
 package com.nureal.ide.ui;
+import com.nureal.ide.compartilhado.designsystem.IconType;
+import com.nureal.ide.compartilhado.designsystem.Icons;
+import com.nureal.ide.compartilhado.designsystem.Buttons;
+import com.nureal.ide.compartilhado.designsystem.Typography;
+import com.nureal.ide.compartilhado.designsystem.GridTheme;
+import com.nureal.ide.compartilhado.designsystem.Spacing;
+
+import com.nureal.ide.app.ComposicaoRaiz;
 
 import java.awt.BorderLayout;
 import java.awt.Color;
@@ -73,54 +81,52 @@ import javax.swing.filechooser.FileNameExtensionFilter;
 import com.formdev.flatlaf.FlatDarkLaf;
 import com.formdev.flatlaf.FlatLaf;
 import com.formdev.flatlaf.FlatLightLaf;
-import com.nureal.ide.core.autocomplete.SqlCompletionProvider;
-import com.nureal.ide.core.connection.ConexaoAtivaPort;
-import com.nureal.ide.core.connection.ConnectionManager;
-import com.nureal.ide.core.connection.ConnectionProfile;
-import com.nureal.ide.core.connection.ConnectionStore;
-import com.nureal.ide.core.dialect.DatabaseDialect;
-import com.nureal.ide.core.dialect.MySqlDialect;
-import com.nureal.ide.core.export.ExcelExporter;
+import com.nureal.ide.modulos.autocomplete.infraestrutura.SqlCompletionProviderRSyntax;
+import com.nureal.ide.modulos.conexoes.dominio.contratos.ConexaoAtivaPort;
+import com.nureal.ide.modulos.conexoes.dominio.contratos.ConnectionRepository;
+import com.nureal.ide.modulos.conexoes.infraestrutura.ConnectionManager;
+import com.nureal.ide.modulos.conexoes.dominio.entidades.ConnectionProfile;
+import com.nureal.ide.modulos.dialeto.dominio.contratos.DatabaseDialect;
+import com.nureal.ide.modulos.backupexportacao.infraestrutura.ExcelExporter;
 import com.nureal.ide.core.format.FormatPreferences;
 import com.nureal.ide.core.format.SqlFormatter;
 import com.nureal.ide.core.log.AppLogger;
-import com.nureal.ide.core.metadata.MetadataCache;
-import com.nureal.ide.core.metadata.MetadataRepository;
-import com.nureal.ide.core.metadata.MetadataService;
-import com.nureal.ide.core.metadata.model.SchemaInfo;
-import com.nureal.ide.core.queries.SavedQueryStore;
-import com.nureal.ide.core.history.ExecutionHistoryStore;
+import com.nureal.ide.modulos.metadados.infraestrutura.MetadataCache;
+import com.nureal.ide.modulos.metadados.dominio.contratos.MetadataRepository;
+import com.nureal.ide.modulos.metadados.dominio.entidades.SchemaInfo;
+import com.nureal.ide.modulos.historico.infraestrutura.SavedQueryStore;
+import com.nureal.ide.modulos.historico.infraestrutura.ExecutionHistoryStore;
 import com.nureal.ide.core.safety.SqlRiskAnalyzer;
-import com.nureal.ide.core.session.SessionStore;
+import com.nureal.ide.modulos.historico.infraestrutura.SessionStore;
 import com.nureal.ide.core.sql.SqlStatementSplitter;
 import com.nureal.ide.core.sql.UnquotedDateGuard;
 import com.nureal.ide.core.ui.UiPreferences;
-import com.nureal.ide.core.update.AppVersion;
-import com.nureal.ide.core.update.GithubRelease;
-import com.nureal.ide.core.update.RepositorioDeReleasesPort;
-import com.nureal.ide.core.update.UpdateChecker;
-import com.nureal.ide.core.update.UpdatePreferences;
-import com.nureal.ide.core.ai.agent.Agent;
-import com.nureal.ide.core.ai.agent.DefaultAgent;
-import com.nureal.ide.core.ai.config.AiCredentialsStore;
-import com.nureal.ide.core.ai.config.AiPreferences;
-import com.nureal.ide.core.ai.config.LLMProviderFactory;
-import com.nureal.ide.core.ai.context.ContextProvider;
-import com.nureal.ide.core.ai.context.DefaultContextProvider;
-import com.nureal.ide.core.ai.context.IdeStateAccessor;
-import com.nureal.ide.core.ai.history.ChatHistoryStore;
-import com.nureal.ide.core.ai.provider.LLMProvider;
-import com.nureal.ide.core.ai.tool.DescribeTableTool;
-import com.nureal.ide.core.ai.tool.ExecuteSqlTool;
-import com.nureal.ide.core.ai.tool.ListTablesTool;
-import com.nureal.ide.core.ai.tool.ToolExecutor;
-import com.nureal.ide.ui.ai.AiSettingsDialog;
-import com.nureal.ide.ui.ai.ChatActions;
-import com.nureal.ide.ui.ai.ChatWindow;
-import com.nureal.ide.ui.ai.IdeContextAccessor;
-import com.nureal.ide.ui.components.NButton;
-import com.nureal.ide.ui.components.NSearchField;
-import com.nureal.ide.ui.components.NToast;
+import com.nureal.ide.modulos.atualizacao.infraestrutura.AppVersion;
+import com.nureal.ide.modulos.atualizacao.dominio.entidades.GithubRelease;
+import com.nureal.ide.modulos.atualizacao.dominio.contratos.RepositorioDeReleasesPort;
+import com.nureal.ide.modulos.atualizacao.infraestrutura.UpdateChecker;
+import com.nureal.ide.modulos.atualizacao.infraestrutura.UpdatePreferences;
+import com.nureal.ide.modulos.iachat.dominio.contratos.Agent;
+import com.nureal.ide.modulos.iachat.aplicacao.DefaultAgent;
+import com.nureal.ide.modulos.iachat.infraestrutura.AiCredentialsStore;
+import com.nureal.ide.modulos.iachat.infraestrutura.AiPreferences;
+import com.nureal.ide.modulos.iachat.infraestrutura.LLMProviderFactory;
+import com.nureal.ide.modulos.iachat.dominio.contratos.ContextProvider;
+import com.nureal.ide.modulos.iachat.aplicacao.DefaultContextProvider;
+import com.nureal.ide.modulos.iachat.dominio.contratos.IdeStateAccessor;
+import com.nureal.ide.modulos.iachat.infraestrutura.ChatHistoryStore;
+import com.nureal.ide.modulos.iachat.dominio.contratos.LLMProvider;
+import com.nureal.ide.modulos.iachat.infraestrutura.tool.DescribeTableTool;
+import com.nureal.ide.modulos.iachat.infraestrutura.tool.ExecuteSqlTool;
+import com.nureal.ide.modulos.iachat.infraestrutura.tool.ListTablesTool;
+import com.nureal.ide.modulos.iachat.aplicacao.ToolExecutor;
+import com.nureal.ide.modulos.iachat.apresentacao.AiSettingsDialog;
+import com.nureal.ide.modulos.iachat.apresentacao.ChatActions;
+import com.nureal.ide.modulos.iachat.apresentacao.ChatWindow;
+import com.nureal.ide.modulos.iachat.apresentacao.IdeContextAccessor;
+import com.nureal.ide.compartilhado.designsystem.NButton;
+import com.nureal.ide.compartilhado.designsystem.NSearchField;
+import com.nureal.ide.compartilhado.designsystem.NToast;
 
 /**
  * Janela principal no estilo de uma IDE moderna (FlatLaf): top bar com acao de
@@ -132,7 +138,7 @@ public class MainWindow extends JFrame {
 
 	private static final long serialVersionUID = 1L;
 	// Publica (nao so pacote-visivel): reaproveitada por ResultStatusBar para o
-	// icone do botao "Exportar" e por com.nureal.ide.ui.components.NButton
+	// icone do botao "Exportar" e por com.nureal.ide.compartilhado.designsystem.NButton
 	// (Nureal Design System) — evita duplicar o mesmo valor de cor em outra
 	// classe/pacote.
 	// Verde institucional da marca Nureal (ver logo) — era 0x059669 (um verde-
@@ -140,14 +146,20 @@ public class MainWindow extends JFrame {
 	// identidade visual (ver DESIGN_SYSTEM.md, secao 2). Unico ponto de
 	// verdade: qualquer lugar que precisar do verde da marca reusa ACCENT, nunca
 	// um literal proprio (ja auditado — ver Buttons/ConnectionsPanel/
-	// ObjectTreeCellRenderer/ResultStatusBar).
-	public static final Color ACCENT = new Color(0x1E9147);
+	// ObjectTreeCellRenderer/ResultStatusBar). Delega a GridTheme.BRAND_GREEN
+	// (movida para compartilhado.designsystem na migracao NDS): um componente
+	// de design system nunca pode depender de MainWindow, entao a constante em
+	// si teve que migrar pra la; ACCENT continua aqui, com o MESMO valor, para
+	// nao quebrar os consumidores existentes.
+	public static final Color ACCENT = GridTheme.BRAND_GREEN;
 
 	private static final int MAX_TABS = 15;
+	/** Largura padrao (pixels) do dock do Chat de IA na 1a abertura — ver {@link #setChatDockVisible}. */
+	private static final int CHAT_DOCK_DEFAULT_WIDTH = 380;
 
 	private static final String SCRATCH = "(sem conexao)";
 
-	private final DatabaseDialect dialect = new MySqlDialect();
+	private final DatabaseDialect dialect;
 	/**
 	 * Usado SO para criar a conexao SCRATCH em {@code initWorkspaces()}, antes
 	 * de {@code activeWorkspace} existir — depois disso, {@code activeWorkspace}
@@ -155,42 +167,50 @@ public class MainWindow extends JFrame {
 	 * sempre devolve {@code activeWorkspace.mgr} a partir dai. Nao usar
 	 * diretamente fora de {@code initWorkspaces()}.
 	 */
-	private final ConnectionManager bootstrapConnectionManager = new ConnectionManager(dialect);
+	private final ConexaoAtivaPort bootstrapConnectionManager;
 	private final Map<String, Conexao> workspaces = new LinkedHashMap<>();
 	private Conexao activeWorkspace;
 	private Map<String, SessionStore.Session> savedSessions = new LinkedHashMap<>();
-	private final MetadataService metadataService = new MetadataService(dialect);
-	private final MetadataCache metadataCache = new MetadataCache();
+	private final MetadataRepository metadataService;
+	private final MetadataCache metadataCache;
 	// Cache de metadados de tabela (colunas/PK/indices/FKs) para a grade de
 	// resultados — indicador de FK no cabecalho e popup/menu de metadados de
 	// coluna; compartilhado por TODAS as grades da sessao (ver ResultGrid),
 	// evita repetir loadTableDetails() para a mesma tabela a cada resultado.
-	private final TableMetadataCache tableMetadataCache = new TableMetadataCache(metadataService);
-	private final SqlCompletionProvider completionProvider = new SqlCompletionProvider(dialect.keywords());
-	private final ConnectionStore connectionStore = new ConnectionStore();
-	private final SessionStore sessionStore = new SessionStore();
-	private final SavedQueryStore savedQueryStore = new SavedQueryStore();
-	private final ExecutionHistoryStore historyStore = new ExecutionHistoryStore();
-	private final RepositorioDeReleasesPort releasesRepository = new UpdateChecker();
+	private final TableMetadataCache tableMetadataCache;
+	private final SqlCompletionProviderRSyntax completionProvider;
+	private final ConnectionRepository connectionStore;
+	private final SessionStore sessionStore;
+	private final SavedQueryStore savedQueryStore;
+	private final ExecutionHistoryStore historyStore;
+	private final RepositorioDeReleasesPort releasesRepository;
 	private Timer autosaveTimer;
 
 	private JTabbedPane editorTabs;
 	private Component plusTab;
-	/**
-	 * Aba do "Chat com IA" (Fase 2 do AI-CHAT-MASTER-PLAN.md), se estiver
-	 * aberta agora — {@code null} caso contrario. Diferente das abas de SQL
-	 * (uma por {@code Conexao}, reconstruidas a cada troca de workspace por
-	 * {@link #rebuildEditorTabs}), esta aba e UNICA pra sessao inteira do
-	 * app e sobrevive a troca de conexao — {@link #rebuildEditorTabs}
-	 * precisa preserva-la explicitamente.
-	 */
-	private Component chatTab;
 	private ChatWindow chatWindow;
-	/** Ultima {@link SqlEditorPane} com foco de verdade (ver o ChangeListener de {@link #editorTabs} em {@link #buildEditorArea}) — usada pelos presets do Chat quando a propria aba do Chat esta selecionada. */
+	/** Mesma instancia usada pelo {@link #chatWindow} — reaproveitada ao reconstruir o Agent (troca de modelo/configuracao), em vez de uma nova a cada vez (ver {@link #onChatModelChanged}/{@link #openAiSettings}). */
+	private ChatHistoryStore chatHistoryStore;
+	/** Ultima {@link SqlEditorPane} com foco de verdade (ver o ChangeListener de {@link #editorTabs} em {@link #buildEditorArea}) — usada pelos presets do Chat quando nenhuma aba de SQL esta com foco no momento (ex.: o Chat acabou de ser aberto). */
 	private SqlEditorPane lastActiveEditor;
 	private boolean addingTab;
 	private JSplitPane mainSplit;
 	private JSplitPane centerSplit;
+	/**
+	 * Split MAIS externo da janela: {@link #mainSplit} (sidebar+editor+
+	 * resultados) a esquerda, {@link #chatDock} a direita — pedido explicito
+	 * do usuario na revisao de UX ("chat abrindo em aba do editor ao inves
+	 * de abrir uma janela na direita"). Antes o Chat era uma aba a mais
+	 * dentro de {@link #editorTabs} (Fase 2 do AI-CHAT-MASTER-PLAN.md);
+	 * agora e um painel proprio, sempre no mesmo lugar, que nao compete por
+	 * espaco com as abas de SQL nem exige fechar o editor pra ver o chat e
+	 * vice-versa.
+	 */
+	private JSplitPane chatSplit;
+	/** Painel fixo do lado direito que hospeda {@link #chatWindow} quando aberto — vazio e colapsado (largura 0) quando nao ha chat aberto. */
+	private JComponent chatDock;
+	/** Ultima largura (pixels, a partir da borda esquerda) do dock do chat — restaurada ao reabrir, mesmo principio de {@link #sidebarLoc}/{@link #resultsLoc}. */
+	private int chatDockLoc = -1;
 	private JComponent leftSide;
 	private JComponent resultsArea;
 	private JComponent editorAreaPanel;
@@ -218,13 +238,13 @@ public class MainWindow extends JFrame {
 	private NSearchField sidebarSearch;
 	/** Rotulo "SQL Editors (N)" — mantido em dia por {@link #updateWorkspaceContextBar} (mesmo hook que ja roda a cada aba aberta/fechada). */
 	private JLabel sqlEditorsCountLabel;
-	/** Ancora da secao HISTORICO dentro do painel unico — usada por {@link #showHistoryPanel} pra rolar ate ela. */
-	private JComponent historySectionAnchor;
+	/** As 4 abas da sidebar (Objetos/SQL/Salvas/Historico, ver {@link #buildLeftSide}) — usada por {@link #showHistoryPanel} pra selecionar a aba de Historico. */
+	private JTabbedPane sideTabs;
 	/** Esquema selecionado na conexao ativa — so escrever via {@link #setCurrentSchema}. */
 	private SchemaInfo currentSchema;
 	/**
 	 * Modelo de mensagens transitorias — nunca fica visivel em layout nenhum
-	 * (SPEC-0007: barra inferior eliminada). {@link com.nureal.ide.ui.components.NToast}
+	 * (SPEC-0007: barra inferior eliminada). {@link com.nureal.ide.compartilhado.designsystem.NToast}
 	 * escuta este JLabel (evento "text", ja disparado sozinho por
 	 * {@code JLabel#setText}) e mostra a mensagem numa bolha flutuante que
 	 * some sozinha — nenhum dos ~80 lugares que chamam
@@ -290,7 +310,7 @@ public class MainWindow extends JFrame {
 	private int keepAliveIntervalMs = UiPreferences.DEFAULT_KEEP_ALIVE_SECONDS * 1000;
 	private javax.swing.Timer keepAliveTimer;
 
-	// ---------- Atualizacao automatica (ver com.nureal.ide.core.update) ----------
+	// ---------- Atualizacao automatica (ver com.nureal.ide.modulos.atualizacao) ----------
 
 	/**
 	 * Faixa discreta no topo da janela (ver {@link UpdateBanner}) — construida
@@ -304,11 +324,23 @@ public class MainWindow extends JFrame {
 
 	// ---------- Formatacao de SQL (presets) e fonte do editor ----------
 
-	private final FormatPreferences formatPrefsStore = new FormatPreferences();
+	private final FormatPreferences formatPrefsStore;
 	private FormatPreferences.State formatState = FormatPreferences.State.defaults();
 
-	public MainWindow() {
+	public MainWindow(ComposicaoRaiz raiz) {
 		super("Nureal Database IDE");
+		this.dialect = raiz.dialect();
+		this.bootstrapConnectionManager = raiz.bootstrapConnectionManager();
+		this.metadataService = raiz.metadataService();
+		this.metadataCache = raiz.metadataCache();
+		this.tableMetadataCache = raiz.tableMetadataCache();
+		this.completionProvider = raiz.completionProvider();
+		this.connectionStore = raiz.connectionStore();
+		this.sessionStore = raiz.sessionStore();
+		this.savedQueryStore = raiz.savedQueryStore();
+		this.historyStore = raiz.historyStore();
+		this.releasesRepository = raiz.releasesRepository();
+		this.formatPrefsStore = raiz.formatPrefsStore();
 		setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
 		setIconImages(Icons.brandImages());
 		setSize(1280, 800);
@@ -715,7 +747,20 @@ public class MainWindow extends JFrame {
 				sidebarOnRight ? leftSide : centerSplit);
 		mainSplit.setResizeWeight(sidebarOnRight ? 0.78 : 0.22);
 		mainSplit.setBorder(BorderFactory.createEmptyBorder());
-		add(mainSplit, BorderLayout.CENTER);
+
+		// Dock do Chat de IA: painel proprio na borda direita da janela,
+		// SEMPRE no mesmo lugar (ver javadoc de #chatSplit) — comeca vazio e
+		// colapsado (dividerSize 0), so ganha conteudo e largura de verdade
+		// quando o usuario abre o chat pela 1a vez (ver #openAiChat).
+		chatDock = new JPanel(new BorderLayout());
+		chatDock.setOpaque(false);
+		chatDock.setVisible(false);
+
+		chatSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, mainSplit, chatDock);
+		chatSplit.setResizeWeight(1.0);
+		chatSplit.setBorder(BorderFactory.createEmptyBorder());
+		chatSplit.setDividerSize(0);
+		add(chatSplit, BorderLayout.CENTER);
 
 		// SPEC-0007 "Sidebar Workspace": barra inferior eliminada — todo
 		// espaco que ela ocupava volta pro editor/grid. Status (statusBar)
@@ -751,7 +796,7 @@ public class MainWindow extends JFrame {
 		gbc.gridy = 0;
 
 		int rowHeight = addRunFormatExplainButtons(mainBar, gbc);
-		addSaveHistoryButtons(mainBar, gbc, rowHeight);
+		addSaveButton(mainBar, gbc, rowHeight);
 
 		// --- O ESPAÇADOR INVISÍVEL ---
 		// Ele joga tudo o que vier a partir daqui totalmente para a direita
@@ -853,8 +898,16 @@ public class MainWindow extends JFrame {
 		return rowHeight;
 	}
 
-	/** Salvar/Historico — segundo grupo da esquerda, mesma altura calculada pelo grupo anterior. */
-	private void addSaveHistoryButtons(JPanel mainBar, GridBagConstraints gbc, int rowHeight) {
+	/**
+	 * Salvar — segundo grupo da esquerda, mesma altura calculada pelo grupo
+	 * anterior. Ate aqui tinha tambem um botao "Historico" (revisao de UX:
+	 * era um duplicado exato do icone de mesmo nome em toda aba de SQL —
+	 * ver {@code SqlEditorPane#buildQuickActionRow} — os dois chamavam
+	 * {@link #showHistoryPanel()}); removido daqui e de la porque a aba
+	 * "Historico" da barra lateral (ver {@link #buildLeftSide}) ja e o
+	 * unico lugar dedicado, sem precisar de mais nenhum atalho.
+	 */
+	private void addSaveButton(JPanel mainBar, GridBagConstraints gbc, int rowHeight) {
 		// Salvar a aba atual como query (biblioteca gerenciada pelo app — ver
 		// SavedQueryStore): mesmo estilo outline do Formatar, acao secundaria.
 		// Desabilitado quando a aba atual esta vazia (ver updateSaveButtonState) —
@@ -876,23 +929,6 @@ public class MainWindow extends JFrame {
 		gbc.gridx = 4;
 		gbc.insets = new Insets(0, Spacing.MD, 0, 0);
 		mainBar.add(saveQueryButton, gbc);
-
-		// Historico de execucoes (ver ExecutionHistoryStore/HistoryPanel): abre a
-		// aba "Historico" do painel lateral, ja filtrada pela conexao ativa —
-		// mesmo grupo visual/posicao do Salvar, por ser tambem uma acao sobre a
-		// query da aba atual (rever/re-rodar o que ja foi executado).
-		JButton historyButton = new NButton("Historico", NButton.Kind.SECONDARY);
-		Buttons.bindThemedIcon(historyButton, IconType.HISTORY, 13, () -> GridTheme.MUTED_TEXT);
-		historyButton.setToolTipText("Ver historico de execucoes desta conexao");
-		historyButton.addActionListener(e -> showHistoryPanel());
-		historyButton.setIconTextGap(6);
-		historyButton.setMargin(new Insets(Spacing.XS, Spacing.MD, Spacing.XS, Spacing.MD));
-		Dimension historyDim = historyButton.getPreferredSize();
-		historyButton.setPreferredSize(new Dimension(historyDim.width, rowHeight));
-
-		gbc.gridx = 5;
-		gbc.insets = new Insets(0, Spacing.SM, 0, 0);
-		mainBar.add(historyButton, gbc);
 	}
 
 	/** Icones discretos da direita (sidebar/resultados/layout/tema/chat) — ultimo grupo da barra. */
@@ -929,9 +965,9 @@ public class MainWindow extends JFrame {
 		themeButton.setToolTipText("Alternar tema claro/escuro");
 		themeButton.addActionListener(e -> toggleTheme());
 
-		// Chat com IA (Ollama local) — janela nao-modal propria (ver
-		// com.nureal.ide.ui.ai.ChatWindow), mesma linguagem visual discreta
-		// dos outros icones do grupo da direita.
+		// Chat com IA (Ollama local) — abre o dock proprio na borda direita
+		// da janela (ver #openAiChat/#chatDock), mesma linguagem visual
+		// discreta dos outros icones do grupo da direita.
 		JButton chatButton = Buttons.iconButton(IconType.CHAT, 16, () -> GridTheme.MUTED_TEXT);
 		chatButton.setToolTipText("Chat com IA (Ollama local)");
 		chatButton.addActionListener(e -> openAiChat());
@@ -1196,8 +1232,17 @@ public class MainWindow extends JFrame {
 	 * editor.
 	 */
 	private void toggleResults() {
+		setResultsVisible(!resultsArea.isVisible());
+		focusEditor();
+	}
+
+	/** Mecanica pura de mostrar/esconder Resultados (ver {@link #toggleResults}), SEM mover o foco. */
+	private void setResultsVisible(boolean visible) {
+		if (resultsArea.isVisible() == visible) {
+			return;
+		}
 		boolean horizontalSplit = centerSplit.getOrientation() == JSplitPane.VERTICAL_SPLIT;
-		if (resultsArea.isVisible()) {
+		if (!visible) {
 			resultsLoc = centerSplit.getDividerLocation();
 			resultsArea.setVisible(false);
 			centerSplit.setDividerSize(0);
@@ -1213,7 +1258,6 @@ public class MainWindow extends JFrame {
 			}
 		}
 		centerSplit.revalidate();
-		focusEditor();
 	}
 
 	/**
@@ -1344,12 +1388,11 @@ public class MainWindow extends JFrame {
 	 */
 	private void toggleSidebarSide() {
 		sidebarOnRight = !sidebarOnRight;
-		remove(mainSplit);
 		mainSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, sidebarOnRight ? centerSplit : leftSide,
 				sidebarOnRight ? leftSide : centerSplit);
 		mainSplit.setResizeWeight(sidebarOnRight ? 0.78 : 0.22);
 		mainSplit.setBorder(BorderFactory.createEmptyBorder());
-		add(mainSplit, BorderLayout.CENTER);
+		chatSplit.setLeftComponent(mainSplit);
 		sidebarLoc = -1;
 		revalidate();
 		repaint();
@@ -1657,7 +1700,7 @@ public class MainWindow extends JFrame {
 		}
 		for (int i = 0; i < editorTabs.getTabCount(); i++) {
 			Component c = editorTabs.getComponentAt(i);
-			if (c == plusTab || c == chatTab) {
+			if (c == plusTab) {
 				continue;
 			}
 			editorTabs.setIconAt(i, dot);
@@ -1669,7 +1712,7 @@ public class MainWindow extends JFrame {
 			}
 			editorTabs.setToolTipTextAt(i, tabTooltip);
 		}
-		if (chatTab != null && chatWindow != null) {
+		if (chatWindow != null) {
 			chatWindow.setSchemaLabel(chatSchemaLabel());
 		}
 		refreshSqlEditorsCount();
@@ -1716,23 +1759,14 @@ public class MainWindow extends JFrame {
 	private JComponent buildLeftSide() {
 		connectionsPanel = new ConnectionsPanel(connectionStore, this::connectTo, this::disconnectFrom);
 		connectionsPanel.setRowHeight(scaledPx(ConnectionsPanel.DEFAULT_ROW_HEIGHT));
+		// So Conexoes precisa de teto (fica sempre visivel, ACIMA das 4 abas
+		// — ver mais abaixo): Queries Salvas/Historico agora sao conteudo de
+		// aba, cada uma ocupa a altura TODA da sidebar quando selecionada, em
+		// vez de dividir espaco fixo com as outras (nao fazem mais sentido
+		// com teto de altura).
 		capMaxHeight(connectionsPanel, 220);
 		savedQueriesPanel = new SavedQueriesPanel(savedQueryStore, this::openSavedQuery);
-		capMaxHeight(savedQueriesPanel, 180);
 		historyPanel = new HistoryPanel(historyStore, this::openHistoryEntry);
-		capMaxHeight(historyPanel, 180);
-
-		// Logo compacto no topo da coluna (SPEC-0007) — o texto "Nureal" que
-		// antes vivia no canto direito da barra inferior (removida) migrou
-		// pra ca, nao foi descartado.
-		JLabel logoIcon = new JLabel(new javax.swing.ImageIcon(Icons.brandImage(18)));
-		JLabel logoText = new JLabel("Nureal");
-		logoText.setFont(logoText.getFont().deriveFont(Font.BOLD, 13f));
-		logoText.setForeground(ACCENT);
-		JPanel logoRow = new JPanel(new FlowLayout(FlowLayout.LEFT, Spacing.SM, 0));
-		logoRow.setOpaque(false);
-		logoRow.add(logoIcon);
-		logoRow.add(logoText);
 
 		// Active Connection Card: SEMPRE visivel, qualquer que seja a secao
 		// visivel/rolada da arvore abaixo (unico lugar do app mostrando
@@ -1750,10 +1784,14 @@ public class MainWindow extends JFrame {
 		cardRow.setBorder(BorderFactory.createEmptyBorder(Spacing.SM, 0, Spacing.SM, 0));
 		cardRow.add(connectionCard, BorderLayout.CENTER);
 
+		// Sem logo/nome "Nureal" duplicado aqui: a barra de titulo customizada
+		// (FlatLaf.setDefaultLookAndFeelDecorated, ver App#main) ja mostra o
+		// icone e "Nureal Database IDE" no topo da janela — repetir a marca
+		// bem abaixo dela, de novo, so ocupava espaco vertical do paine de
+		// conexoes sem agregar informacao nova (pedido explicito do usuario).
 		JPanel topStack = new JPanel(new BorderLayout());
 		topStack.setOpaque(false);
-		topStack.add(logoRow, BorderLayout.NORTH);
-		topStack.add(cardRow, BorderLayout.SOUTH);
+		topStack.add(cardRow, BorderLayout.CENTER);
 
 		// Busca unificada (Ctrl+K) — encaminha o texto pro filtro JA
 		// EXISTENTE de cada painel embutido (ver #applySidebarFilter), sem
@@ -1770,19 +1808,35 @@ public class MainWindow extends JFrame {
 		JComponent sqlEditorsRow = sidebarRow(IconType.EDIT, sqlEditorsCountLabel, true, null,
 				() -> { if (!addQueryTab()) { selectLastRealTab(); } });
 		refreshSqlEditorsCount();
+		// A aba "SQL" so precisa da linha de atalho (o conteudo de verdade das
+		// abas de SQL fica no editor, area central — ver #editorTabs); o
+		// espaco vazio abaixo dela e proposital, mesma altura das outras 3
+		// abas ao trocar entre elas.
+		JPanel sqlEditorsTab = new JPanel(new BorderLayout());
+		sqlEditorsTab.setOpaque(false);
+		sqlEditorsTab.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+		sqlEditorsTab.add(sqlEditorsRow, BorderLayout.NORTH);
 
-		JComponent workspaceGroup = new JPanel();
-		workspaceGroup.setOpaque(false);
-		workspaceGroup.setLayout(new BoxLayout(workspaceGroup, BoxLayout.Y_AXIS));
-		workspaceGroup.add(groupHeader("WORKSPACE"));
-		workspaceGroup.add(indent(sqlEditorsRow));
-		workspaceGroup.add(indent(savedQueriesPanel));
-		workspaceGroup.add(indent(historyPanel));
+		// 4 abas clicaveis (Objetos/SQL/Salvas/Historico, pedido explicito do
+		// usuario na revisao de UX: "eram para ser abas") em vez de tudo
+		// empilhado numa coluna so — cada uma ocupa a altura INTEIRA restante
+		// da sidebar quando selecionada, ao inves de dividir espaco fixo com
+		// as outras 3 o tempo todo. So Conexoes fica sempre visivel fora das
+		// abas (usado junto com qualquer uma das 4, ver escolha do usuario).
+		sideTabs = new JTabbedPane(JTabbedPane.TOP);
+		sideTabs.addTab("Objetos", objectExplorer.buildObjectBrowser());
+		sideTabs.addTab("SQL", sqlEditorsTab);
+		sideTabs.addTab("Salvas", savedQueriesPanel);
+		sideTabs.addTab("Histórico", historyPanel);
+
+		JComponent quickActionsGroup = new JPanel();
+		quickActionsGroup.setOpaque(false);
+		quickActionsGroup.setLayout(new BoxLayout(quickActionsGroup, BoxLayout.Y_AXIS));
 		// Placeholder (SPEC-0007): "Favoritos" ainda nao existe no app (sem
 		// "favoritar" query salva de verdade fora do menu de contexto) —
 		// aparece desabilitado em vez de fingir que funciona.
-		workspaceGroup.add(indent(sidebarRow(IconType.FAVORITE, "Favoritos", false, "Favoritos — em breve", null)));
-		workspaceGroup.add(indent(sidebarRow(IconType.CHAT, "Chat com IA", true, null, this::openAiChat)));
+		quickActionsGroup.add(sidebarRow(IconType.FAVORITE, "Favoritos", false, "Favoritos — em breve", null));
+		quickActionsGroup.add(sidebarRow(IconType.CHAT, "Chat com IA", true, null, this::openAiChat));
 
 		JComponent toolsGroup = new JPanel();
 		toolsGroup.setOpaque(false);
@@ -1792,29 +1846,36 @@ public class MainWindow extends JFrame {
 		toolsGroup.add(indent(sidebarRow(IconType.USERS, "Usuarios e Privilegios", true, null, objectExplorer::openUserManagement)));
 		toolsGroup.add(indent(sidebarRow(IconType.MONITOR, "Monitor de Conexao", true, null, objectExplorer::openProcessList)));
 
-		historySectionAnchor = historyPanel;
+		// Rodape fixo (fora das abas, sempre visivel): atalhos que nao sao
+		// "listas pra navegar" (Favoritos/Chat com IA) e as ferramentas
+		// menos frequentes (Backup/Usuarios/Monitor) — nenhum dos dois se
+		// encaixava sozinho em nenhuma das 4 abas.
+		JPanel footer = new JPanel();
+		footer.setOpaque(false);
+		footer.setLayout(new BoxLayout(footer, BoxLayout.Y_AXIS));
+		footer.add(quickActionsGroup);
+		footer.add(toolsGroup);
 
-		JPanel column = new JPanel();
-		column.setOpaque(false);
-		column.setLayout(new BoxLayout(column, BoxLayout.Y_AXIS));
-		column.add(searchRow);
-		column.add(connectionsPanel);
-		column.add(workspaceGroup);
-		column.add(objectExplorer.buildObjectBrowser());
-		column.add(toolsGroup);
+		// Conexoes fica sempre visivel ACIMA das abas (pedido explicito do
+		// usuario): topo fixo (busca unificada + lista de conexoes), CENTRO
+		// elastico (as 4 abas, cada uma ocupando a altura toda quando
+		// selecionada), rodape fixo (atalhos + ferramentas) — nao e mais uma
+		// unica coluna rolando (BoxLayout dentro de um JScrollPane so): cada
+		// aba ja cuida da propria rolagem interna (JTree/JList com
+		// JScrollPane, ver ObjectExplorerController/SavedQueriesPanel/
+		// HistoryPanel), entao a sidebar toda usa BorderLayout normal.
+		JPanel fixedTop = new JPanel();
+		fixedTop.setOpaque(false);
+		fixedTop.setLayout(new BoxLayout(fixedTop, BoxLayout.Y_AXIS));
+		fixedTop.add(topStack);
+		fixedTop.add(searchRow);
+		fixedTop.add(connectionsPanel);
 
-		JScrollPane scroll = new JScrollPane(column);
-		scroll.setBorder(BorderFactory.createEmptyBorder());
-		scroll.getVerticalScrollBar().setUnitIncrement(16);
-		// Sidebar so rola verticalmente — nunca deve aparecer barra horizontal
-		// (o recuo de #indent somado a largura natural de algum item podia
-		// passar 1-2px do viewport e disparar uma sem necessidade nenhuma).
-		scroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
-
-		JPanel contentColumn = new JPanel(new BorderLayout());
-		contentColumn.setBorder(BorderFactory.createEmptyBorder(Spacing.SM, Spacing.SM, 0, Spacing.SM));
-		contentColumn.add(topStack, BorderLayout.NORTH);
-		contentColumn.add(scroll, BorderLayout.CENTER);
+		JPanel contentColumn = new JPanel(new BorderLayout(0, Spacing.SM));
+		contentColumn.setBorder(BorderFactory.createEmptyBorder(Spacing.SM, Spacing.SM, Spacing.SM, Spacing.SM));
+		contentColumn.add(fixedTop, BorderLayout.NORTH);
+		contentColumn.add(sideTabs, BorderLayout.CENTER);
+		contentColumn.add(footer, BorderLayout.SOUTH);
 
 		JPanel container = new JPanel(new BorderLayout());
 		container.add(contentColumn, BorderLayout.CENTER);
@@ -1989,8 +2050,9 @@ public class MainWindow extends JFrame {
 				if (editorTabs.getSelectedComponent() instanceof SqlEditorPane sep) {
 					// Ultima aba de SQL com foco de verdade — usada pelos presets
 					// do Chat (ver #activeOrLastSqlForPresets) pra achar o SQL
-					// "ativo" mesmo com a PROPRIA aba do Chat selecionada agora
-					// (nesse caso currentEditor() sozinho devolveria null).
+					// "ativo" quando o dock do Chat esta aberto mas nenhuma aba
+					// de SQL tem foco no momento (nesse caso currentEditor()
+					// sozinho devolveria null).
 					lastActiveEditor = sep;
 				}
 				scheduleSave();
@@ -2105,7 +2167,7 @@ public class MainWindow extends JFrame {
 		final SqlEditorPane[] holder = new SqlEditorPane[1];
 		SqlEditorPane pane = new SqlEditorPane(tabId, completionProvider, this::onRun, this::currentSqlFormatter,
 				formatState.editorFontFamily(), () -> currentSchema, objectExplorer::openEditorObject, objectExplorer::navigateBack,
-				this::showHistoryPanel, this::toggleEditorFocusMode,
+				this::toggleEditorFocusMode,
 				anchor -> showTabOptionsMenu(holder[0], anchor), this::currentConnectionLabel);
 		holder[0] = pane;
 		pane.setSchema(schema);
@@ -2156,13 +2218,10 @@ public class MainWindow extends JFrame {
 		return true;
 	}
 
-	/** Numero de abas de SQL (exclui "+" e a aba do Chat, que nao conta pro limite {@code MAX_TABS}). */
+	/** Numero de abas de SQL (exclui "+"; o Chat nao e mais uma aba, ver {@link #chatDock}). */
 	private int realTabCount() {
 		int count = editorTabs.getTabCount();
 		if (plusTab != null) {
-			count--;
-		}
-		if (chatTab != null) {
 			count--;
 		}
 		return count;
@@ -2187,9 +2246,7 @@ public class MainWindow extends JFrame {
 			return;
 		}
 		final Component target = editorTabs.getComponentAt(idx);
-		// "Renomear"/"Salvar como query" nao fazem sentido pra aba do Chat —
-		// mesmo tratamento do "+", sem menu de contexto nenhum.
-		if (target == plusTab || target == chatTab) {
+		if (target == plusTab) {
 			return;
 		}
 		buildTabContextMenu(target).show(editorTabs, e.getX(), e.getY());
@@ -2288,9 +2345,7 @@ public class MainWindow extends JFrame {
 		if (target == plusTab) {
 			return;
 		}
-		// A aba do Chat sempre pode ser fechada (nao e uma aba de SQL, nao
-		// conta pro "manter ao menos uma aba de SQL aberta" abaixo).
-		if (target != chatTab && realTabCount() <= 1) {
+		if (realTabCount() <= 1) {
 			return;
 		}
 		// Se a aba a fechar e a selecionada, selecione antes uma aba real vizinha,
@@ -2306,12 +2361,6 @@ public class MainWindow extends JFrame {
 		// sem a aba de SQL que os gerou (ver resultsByTab).
 		if (target instanceof SqlEditorPane sep) {
 			resultsController.forgetTab(sep);
-		}
-		if (target == chatTab) {
-			// Reabrir depois (ver openAiChat) cria uma instancia nova, com o
-			// historico persistido carregado de novo do disco — nao perde nada.
-			chatTab = null;
-			chatWindow = null;
 		}
 		scheduleSave();
 	}
@@ -2389,12 +2438,6 @@ public class MainWindow extends JFrame {
 				String title = (t.title() == null || t.title().isBlank()) ? nextQueryTitle() : t.title();
 				addQueryTab(title, t.sql(), t.id(), t.schema());
 			}
-		}
-		if (chatTab != null) {
-			// A aba do Chat nao pertence a nenhum workspace (ver javadoc do
-			// campo) — sobrevive a reconstrucao, sempre reinserida logo apos
-			// as abas de SQL (mesma posicao relativa "antes do +").
-			editorTabs.addTab("Chat com IA", chatTab);
 		}
 		addPlusTab();
 		// Restaura os resultados salvos (indexados pelo ID ESTAVEL da aba, ver
@@ -2577,7 +2620,7 @@ public class MainWindow extends JFrame {
 		return tableMetadataCache;
 	}
 
-	SqlCompletionProvider completionProvider() {
+	SqlCompletionProviderRSyntax completionProvider() {
 		return completionProvider;
 	}
 
@@ -2660,8 +2703,8 @@ public class MainWindow extends JFrame {
 	}
 
 	// ---------- Chat de IA (Ollama local) ----------
-	// Ver com.nureal.ide.ui.ai.ChatWindow/ChatController/DefaultAgent. Toda a
-	// logica de IA fica em core.ai (Swing-free); aqui so montamos o grafo de
+	// Ver com.nureal.ide.modulos.iachat.apresentacao.ChatWindow/ChatController/DefaultAgent. Toda a
+	// logica de IA fica em modulos.iachat (Swing-free); aqui so montamos o grafo de
 	// objetos (Provider/ToolExecutor/ContextProvider/Agent) a partir dos
 	// servicos que o MainWindow ja tem, via IdeContextAccessor.
 
@@ -2669,32 +2712,83 @@ public class MainWindow extends JFrame {
 	private static final String AI_CONVERSATION_ID = "default";
 
 	/**
-	 * Abre (ou foca, se ja aberta) a aba "Chat com IA" dentro de
-	 * {@link #editorTabs} — Fase 2 do {@code AI-CHAT-MASTER-PLAN.md}: era
-	 * uma janela {@code JDialog} flutuante singleton, agora e uma aba mais
-	 * (ver {@link #chatTab}). "Fechar" a aba (ver {@link #closeQueryTab})
-	 * limpa {@link #chatTab}/{@link #chatWindow}; reabrir cria uma instancia
-	 * nova, que recarrega o historico persistido do disco — nada se perde.
+	 * Abre (ou mostra, se ja construido) o dock do Chat de IA na borda
+	 * direita da janela (ver {@link #chatSplit}/{@link #chatDock}) — pedido
+	 * explicito do usuario na revisao de UX ("chat abrindo em aba do editor
+	 * ao inves de abrir uma janela na direita"). Antes o Chat era mais uma
+	 * aba dentro de {@link #editorTabs} (Fase 2 do AI-CHAT-MASTER-PLAN.md);
+	 * agora e um painel proprio, sempre no mesmo lugar quando aberto, sem
+	 * competir por espaco com as abas de SQL. Fechar o dock (botao "X" do
+	 * seu cabecalho, ver {@link #buildChatDockHeader}) so ESCONDE o painel
+	 * — {@link #chatWindow} continua vivo (conversa em memoria preservada);
+	 * reabrir o dock mostra exatamente onde parou, sem recarregar nada.
 	 */
 	private void openAiChat() {
-		if (chatTab != null) {
-			editorTabs.setSelectedComponent(chatTab);
+		if (chatWindow == null) {
+			AiPreferences aiPreferences = new AiPreferences();
+			AiCredentialsStore aiCredentials = new AiCredentialsStore();
+			chatHistoryStore = new ChatHistoryStore();
+			Agent agent = buildAiAgent(aiPreferences, aiCredentials, chatHistoryStore);
+			ChatActions actions = new ChatActions(this::runSqlFromChat, this::currentSqlFormatter, sql -> { },
+					this::activeOrLastSqlForPresets);
+			chatWindow = new ChatWindow(agent, chatHistoryStore, AI_CONVERSATION_ID,
+					() -> openAiSettings(aiPreferences, aiCredentials), actions);
+			wireChatToolbar(chatWindow, aiPreferences, aiCredentials);
+
+			chatDock.removeAll();
+			chatDock.add(buildChatDockHeader(), BorderLayout.NORTH);
+			chatDock.add(chatWindow.component(), BorderLayout.CENTER);
+		}
+		setChatDockVisible(true);
+	}
+
+	/**
+	 * Cabecalho minimo do dock do Chat — so o botao de fechar. O resto do
+	 * cabecalho "de verdade" (combo de modelo, "+ Novo Chat", selo de
+	 * esquema) ja vem de dentro do proprio {@code ChatPanel}, ver
+	 * {@link #wireChatToolbar}.
+	 */
+	private JComponent buildChatDockHeader() {
+		JButton close = Buttons.iconButton(IconType.CLOSE, 13, () -> GridTheme.MUTED_TEXT);
+		close.setToolTipText("Fechar chat");
+		close.addActionListener(e -> setChatDockVisible(false));
+		JPanel row = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 4));
+		row.setOpaque(false);
+		row.add(close);
+		return row;
+	}
+
+	/**
+	 * Mostra/esconde o dock do Chat (ver {@link #chatSplit}), lembrando a
+	 * ultima largura escolhida pelo usuario (mesmo principio de
+	 * {@link #sidebarLoc}/{@link #resultsLoc}) — largura padrao na 1a
+	 * abertura: {@link #CHAT_DOCK_DEFAULT_WIDTH}px a partir da borda direita.
+	 */
+	private void setChatDockVisible(boolean visible) {
+		if (chatDock.isVisible() == visible) {
 			return;
 		}
-		AiPreferences aiPreferences = new AiPreferences();
-		AiCredentialsStore aiCredentials = new AiCredentialsStore();
-		ChatHistoryStore chatHistoryStore = new ChatHistoryStore();
-		Agent agent = buildAiAgent(aiPreferences, aiCredentials, chatHistoryStore);
-		ChatActions actions = new ChatActions(this::runSqlFromChat, this::currentSqlFormatter, sql -> { },
-				this::activeOrLastSqlForPresets);
-		chatWindow = new ChatWindow(agent, chatHistoryStore, AI_CONVERSATION_ID,
-				() -> openAiSettings(aiPreferences, aiCredentials), actions);
-		wireChatToolbar(chatWindow, aiPreferences, aiCredentials);
-
-		chatTab = chatWindow.component();
-		int at = (plusTab != null) ? editorTabs.indexOfComponent(plusTab) : editorTabs.getTabCount();
-		editorTabs.insertTab("Chat com IA", null, chatTab, null, at);
-		editorTabs.setSelectedComponent(chatTab);
+		if (visible) {
+			chatDock.setVisible(true);
+			chatSplit.setDividerSize(4);
+			int total = chatSplit.getWidth();
+			if (chatDockLoc > 0) {
+				chatSplit.setDividerLocation(chatDockLoc);
+			} else if (total > 0) {
+				chatSplit.setDividerLocation(Math.max(200, total - CHAT_DOCK_DEFAULT_WIDTH));
+			} else {
+				// Janela ainda sem largura de verdade (dock aberto antes do 1o
+				// layout acontecer) — fracao serve so de fallback ate o proximo
+				// resize recalcular a posicao certa.
+				chatSplit.setDividerLocation(0.7);
+			}
+		} else {
+			chatDockLoc = chatSplit.getDividerLocation();
+			chatDock.setVisible(false);
+			chatSplit.setDividerSize(0);
+			chatSplit.setDividerLocation(chatSplit.getWidth());
+		}
+		chatSplit.revalidate();
 	}
 
 	/**
@@ -2751,7 +2845,7 @@ public class MainWindow extends JFrame {
 			return;
 		}
 		if (chatWindow != null) {
-			chatWindow.updateAgent(buildAiAgent(aiPreferences, aiCredentials, new ChatHistoryStore()));
+			chatWindow.updateAgent(buildAiAgent(aiPreferences, aiCredentials, chatHistoryStore));
 		}
 	}
 
@@ -2770,7 +2864,7 @@ public class MainWindow extends JFrame {
 	private void openAiSettings(AiPreferences aiPreferences, AiCredentialsStore aiCredentials) {
 		AiSettingsDialog.open(this, aiPreferences, aiCredentials, () -> {
 			if (chatWindow != null) {
-				chatWindow.updateAgent(buildAiAgent(aiPreferences, aiCredentials, new ChatHistoryStore()));
+				chatWindow.updateAgent(buildAiAgent(aiPreferences, aiCredentials, chatHistoryStore));
 			}
 		});
 	}
@@ -2824,12 +2918,13 @@ public class MainWindow extends JFrame {
 	}
 
 	/**
-	 * SQL da aba ATIVA, ou (se a propria aba do Chat estiver selecionada, ver
-	 * {@link #chatTab}) da ULTIMA aba de SQL com foco antes de trocar pro
-	 * Chat — sem isto, os presets de prompt (ver {@code ChatPanel}) nunca
-	 * achariam SQL nenhum, ja que o usuario PRECISA estar na aba do Chat pra
-	 * clicar neles, e {@link #currentEditor()} sozinho devolve {@code null}
-	 * nesse caso.
+	 * SQL da aba de SQL ATIVA, ou (se nenhuma aba de SQL tem foco no momento
+	 * — o dock do Chat, ver {@link #chatDock}, nao rouba a selecao de
+	 * {@link #editorTabs}, entao isso so acontece se o usuario nunca abriu
+	 * nenhuma aba de SQL nesta sessao) a ULTIMA com foco antes disso. Sem
+	 * isto, os presets de prompt (ver {@code ChatPanel}) nunca achariam SQL
+	 * nenhum nesse caso, ja que {@link #currentEditor()} sozinho devolveria
+	 * {@code null}.
 	 */
 	private String activeOrLastSqlForPresets() {
 		SqlEditorPane editor = currentEditor();
@@ -3619,9 +3714,8 @@ public class MainWindow extends JFrame {
 		if (leftSide != null && !leftSide.isVisible()) {
 			toggleSidebar();
 		}
-		if (historySectionAnchor != null) {
-			historySectionAnchor.scrollRectToVisible(
-					new Rectangle(0, 0, historySectionAnchor.getWidth(), historySectionAnchor.getHeight()));
+		if (sideTabs != null && historyPanel != null) {
+			sideTabs.setSelectedComponent(historyPanel);
 		}
 	}
 
@@ -3632,7 +3726,7 @@ public class MainWindow extends JFrame {
 	 * esquema sem precisar escolher de novo.
 	 */
 	private void openHistoryEntry(ExecutionHistoryStore.Entry entry) {
-		if (!addQueryTab("Historico", entry.sql())) {
+		if (!addQueryTab(historyTabTitle(entry.sql()), entry.sql())) {
 			return;
 		}
 		SqlEditorPane editor = currentEditor();
@@ -3641,6 +3735,31 @@ public class MainWindow extends JFrame {
 			scheduleSave();
 		}
 		statusBar.setText(" Execucao reaberta do historico.");
+	}
+
+	/**
+	 * Titulo da aba reaberta do Historico — ANTES sempre o literal
+	 * "Historico", entao reabrir 2+ execucoes ao mesmo tempo dava abas
+	 * IDENTICAS na barra, sem nenhum jeito de saber qual e qual sem clicar em
+	 * cada uma (revisao de UX, a partir de um screenshot mostrando exatamente
+	 * isso). Mesma receita ja usada para "SELECT nome_da_tabela" ao abrir uma
+	 * tabela pelo Object Browser (ver {@code ObjectExplorerController#generateSelect}):
+	 * 1a "linha" do SQL, achatada e truncada, com sufixo numerico (via
+	 * {@link #titleExists}) se o mesmo SQL for reaberto mais de uma vez.
+	 */
+	private String historyTabTitle(String sql) {
+		String flat = (sql == null) ? "" : sql.replaceAll("\\s+", " ").trim();
+		if (flat.isEmpty()) {
+			return "Historico";
+		}
+		int maxLen = 28;
+		String baseTitle = flat.length() > maxLen ? flat.substring(0, maxLen - 1) + "…" : flat;
+		String title = baseTitle;
+		int n = 1;
+		while (titleExists(title)) {
+			title = baseTitle + " " + (++n);
+		}
+		return title;
 	}
 
 	/**

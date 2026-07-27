@@ -1,4 +1,6 @@
 package com.nureal.ide.ui;
+import com.nureal.ide.compartilhado.designsystem.Buttons;
+import com.nureal.ide.compartilhado.designsystem.Typography;
 
 import java.awt.BorderLayout;
 import java.awt.Component;
@@ -26,7 +28,7 @@ import javax.swing.JTabbedPane;
 import javax.swing.JTable;
 import javax.swing.table.DefaultTableModel;
 
-import com.nureal.ide.core.metadata.model.ColumnInfo;
+import com.nureal.ide.modulos.metadados.dominio.entidades.ColumnInfo;
 
 /**
  * Importa um arquivo CSV ja lido/parseado (ver {@code CsvUtil}, chamado por

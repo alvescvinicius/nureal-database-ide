@@ -1,10 +1,10 @@
 package com.nureal.ide.ui;
 
-import com.nureal.ide.core.connection.ConexaoAtivaPort;
-import com.nureal.ide.core.metadata.model.ColumnDetail;
-import com.nureal.ide.core.metadata.model.ForeignKeyInfo;
-import com.nureal.ide.core.metadata.model.IndexInfo;
-import com.nureal.ide.core.metadata.model.TableDetails;
+import com.nureal.ide.modulos.conexoes.dominio.contratos.ConexaoAtivaPort;
+import com.nureal.ide.modulos.metadados.dominio.entidades.ColumnDetail;
+import com.nureal.ide.modulos.metadados.dominio.entidades.ForeignKeyInfo;
+import com.nureal.ide.modulos.metadados.dominio.entidades.IndexInfo;
+import com.nureal.ide.modulos.metadados.dominio.entidades.TableDetails;
 
 import java.util.ArrayList;
 import java.util.List;

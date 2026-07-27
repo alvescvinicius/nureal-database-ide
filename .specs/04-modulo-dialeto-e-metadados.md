@@ -1,5 +1,14 @@
 # Módulos: Dialeto e Metadados
 
+> **Progresso**: movimentação física concluída — `core.dialect.*` →
+> `modulos.dialeto.{dominio.contratos,infraestrutura}`; `core.metadata.*` →
+> `modulos.metadados.{dominio,infraestrutura}`. Verificado por
+> `mvn clean test` — 162 testes, mesma única falha pré-existente. **Pendente**:
+> a extração de casos de uso explícitos (`CarregarEstruturaDoBanco`,
+> `CarregarDetalhesDaTabela`) descrita abaixo e a formalização do ciclo de
+> vida de `MetadataCache` — hoje `MetadataService` continua com sua forma
+> original, só fisicamente realocada atrás de `MetadataRepository`.
+
 ## Objetivo
 
 Especificar a migração de `core.dialect.*` e `core.metadata.*` para `modulos/dialeto/` e `modulos/metadados/`, preservando o que já é o melhor exemplo de contrato de domínio do projeto e apenas fechando a lacuna de acoplamento a JDBC em `MetadataService`.
@@ -24,7 +33,7 @@ modulos/dialeto/
 
 modulos/metadados/
   README.md
-  interface/
+  apresentacao/
     (nenhuma tela própria — este módulo é consumido por outros: object explorer, autocomplete, ddl assistant)
   aplicacao/
     casos-de-uso/

@@ -1,4 +1,8 @@
 package com.nureal.ide.ui;
+import com.nureal.ide.compartilhado.designsystem.Buttons;
+import com.nureal.ide.compartilhado.designsystem.Typography;
+
+import com.nureal.ide.compartilhado.validacao.SqlIdentifiers;
 
 import java.awt.BorderLayout;
 import java.awt.Component;
@@ -28,7 +32,7 @@ import javax.swing.KeyStroke;
 
 import org.fife.ui.rsyntaxtextarea.RSyntaxTextArea;
 
-import com.nureal.ide.core.dialect.DatabaseDialect;
+import com.nureal.ide.modulos.dialeto.dominio.contratos.DatabaseDialect;
 import com.nureal.ide.core.format.SqlFormatter;
 
 /**

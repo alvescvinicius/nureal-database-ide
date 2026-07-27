@@ -1,8 +1,9 @@
 package com.nureal.ide.ui;
+import com.nureal.ide.compartilhado.designsystem.GridTheme;
 
-import com.nureal.ide.core.metadata.model.ColumnInfo;
-import com.nureal.ide.core.metadata.model.SchemaForeignKey;
-import com.nureal.ide.core.metadata.model.TableInfo;
+import com.nureal.ide.modulos.metadados.dominio.entidades.ColumnInfo;
+import com.nureal.ide.modulos.metadados.dominio.entidades.SchemaForeignKey;
+import com.nureal.ide.modulos.metadados.dominio.entidades.TableInfo;
 
 import javax.swing.JPanel;
 import java.awt.AlphaComposite;

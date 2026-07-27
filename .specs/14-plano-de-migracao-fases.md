@@ -1,5 +1,78 @@
 # Plano de Migração — Fases
 
+> **Progresso registrado**: Fase 1 concluída (`SqlExecutionEngine`,
+> `SqlGridPersistenceEngine`); Fase 2 concluída para os contratos aditivos
+> das specs 03, 04, 08 (parcial), 09 e 10 (`ConnectionRepository`,
+> `CredentialCipher`, `ConexaoAtivaPort`, `MetadataRepository`,
+> `RepositorioDeReleasesPort`, `BackupPort`, `TabelaExportavel`,
+> `ArquivoChaveValorUtil`); Fase 4 concluída para a reorganização de pacote
+> (`core.ai` → `modulos.iachat`, com a divisão interna real em
+> `dominio/{contratos,entidades}`, `aplicacao` e
+> `infraestrutura/{provider,tool,specialist}` — ver
+> [11-modulo-ia-chat.md](11-modulo-ia-chat.md) para a classificação exata e
+> as duas lacunas descobertas no processo), incluindo `ui.ai.*`
+> (apresentação), que também foi movida para `modulos.iachat.apresentacao`.
+> Movimentação física adicional concluída fora da ordem original das fases:
+> `core.dialect.*` → `modulos.dialeto`, `core.metadata.*` →
+> `modulos.metadados`, `core.connection.*` → `modulos.conexoes`,
+> `core.security.*` → `compartilhado.seguranca` (transversal — usado também
+> por `ia-chat`), todos com `dominio/{contratos,entidades}` +
+> `infraestrutura` e `README.md` próprio (ver specs 03/04). A extração de
+> casos de uso explícitos (Input/Handler/Output) dentro desses módulos
+> continua pendente — o que foi feito é a reorganização física das classes
+> já existentes, não uma reescrita em Backbone Pattern literal. Na mesma
+> leva: `core.update.*` → `modulos.atualizacao`, `core.backup.*` +
+> `core.export.*` + `core.csv.*` → `modulos.backupexportacao`,
+> `core.history/queries/session.*` → `modulos.historico.infraestrutura`
+> (specs 08/09/10 concluídas ou quase — ver cada uma para o que falta).
+> `core/` agora só contém `autocomplete`, `ddl`, `editor`, `format`, `json`,
+> `log`, `safety`, `sql`, `ui` — deliberadamente não tocados (specs 05/07,
+> risco de UI/Swing sem verificação visual possível neste ambiente). Tudo
+> verificado por `mvn clean test` a cada passo — 162 testes, mesma única
+> falha pré-existente durante toda a migração. Fase 6 (composition root)
+> **concluída**: `ComposicaoRaiz` (`com.nureal.ide.app`) construída em
+> `App.main` antes de `MainWindow` existir, injetando os 12 objetos de
+> infraestrutura hoje elegíveis (`dialeto`, `bootstrapConnectionManager`,
+> `metadados`, `conexoes`, `historico`, `atualizacao`, `FormatPreferences`)
+> via construtor — ver [13-composition-root-e-bootstrap.md](13-composition-root-e-bootstrap.md)
+> para o detalhamento e as duas exceções deliberadamente fora do escopo
+> (grafo de objetos do `ia-chat`, montado lazily por depender de
+> preferências de runtime; `ConnectionManager` por-conexão do usuário,
+> criado sob demanda ao conectar). Fase 3 concluída para as partes sem
+> risco visual: `core.autocomplete.*` → `modulos.autocomplete`
+> (`CaretContextResolver` em `dominio`, `GeradorDeSugestoes`/
+> `SugestaoDeCompletion`/`FonteDeChavesEstrangeiras` em `aplicacao` —
+> extraídos de dentro de `SqlCompletionProvider` para isolar a herança de
+> `DefaultCompletionProvider`, que agora só existe no adaptador
+> `SqlCompletionProviderRSyntax` em `infraestrutura`), `core.editor.EditorUndoManager`
+> → `modulos.editorsql.infraestrutura` (puro Swing, sem decisão de
+> design), `core.ddl.NormalizationAdvisor` → `modulos.assistenteddl.dominio`
+> e `ConstruirDdlDeTabela` (Input/Output/Handler) em
+> `modulos.assistenteddl.aplicacao` substituindo `SqlBuilderValidationException`
+> dentro de `DdlAssistantDialog` (a exceção em si permanece em `ui/`, ainda
+> usada por `ViewBuilderDialog`/`TriggerBuilderDialog`/`RoutineBuilderDialog`,
+> fora do escopo desta fatia). A divisão de `ui.SqlEditorPane` (1937
+> linhas) em sub-widgets e a movimentação física de `DdlAssistantDialog`
+> continuam pendentes — genuína decomposição de Swing sem cobertura
+> automatizada. Fase 5 concluída para o design system: `ui.components.*` +
+> `ui.{Spacing,GridTheme,Typography,Buttons,Icons,IconTheme,IconType}`
+> movidos para `compartilhado.designsystem` (achado no caminho: `Buttons`
+> dependia de `MainWindow.ACCENT` — violação de camada corrigida, ver
+> [12-interface-design-system-e-dialogos.md](12-interface-design-system-e-dialogos.md)).
+> `DialogShell` (`compartilhado.designsystem.dialog`) criado e migrado como
+> piloto em `ui.ProcessListDialog` (o mais simples dos 12+ — não-modal, sem
+> rodapé OK/Cancelar). Resolução de "owner" (`ui.DialogUtil`) e rodapé
+> padrão (`Buttons.dialogFooter`, já existente) ficaram deliberadamente de
+> fora do shell — ver [compartilhado/designsystem/dialog/README.md](../src/main/java/com/nureal/ide/compartilhado/designsystem/dialog/README.md).
+> As demais 11+ dialogs continuam pendentes de migração, uma por vez.
+> Todo o trabalho desta leva foi verificado por `mvn clean test` — 173
+> testes, mesma única falha pré-existente — mas **nenhuma parte que
+> envolveu Swing (EditorUndoManager, design system) foi verificada
+> visualmente**: compila e os testes automatizados passam, mas o
+> comportamento real da UI (tema claro/escuro, undo/redo, autocomplete no
+> editor) só pode ser confirmado rodando a aplicação, indisponível neste
+> ambiente. O usuário deve testar antes de aceitar esta fatia.
+
 ## Objetivo
 
 Definir a ordem obrigatória de execução da migração para NDS, escolhendo explicitamente **migração incremental** em vez de reescrita do zero, e detalhando o processo fase a fase.

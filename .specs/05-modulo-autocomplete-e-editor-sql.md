@@ -26,7 +26,7 @@ modulos/autocomplete/
 
 modulos/editor-sql/
   README.md
-  interface/
+  apresentacao/
     SqlEditorPane.java                 (casca fina remanescente: composição dos componentes abaixo)
     EditorThemeApplier.java            (extraído: ~232-730 de aparência/paleta)
     EditorShortcutBinder.java          (extraído: ~309-514 de atalhos)

@@ -1,4 +1,6 @@
 package com.nureal.ide.ui;
+import com.nureal.ide.compartilhado.designsystem.Buttons;
+import com.nureal.ide.compartilhado.designsystem.Typography;
 
 import java.awt.BorderLayout;
 import java.awt.Dimension;
@@ -17,8 +19,8 @@ import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 
-import com.nureal.ide.core.dialect.DatabaseDialect;
-import com.nureal.ide.core.metadata.model.DbUserInfo;
+import com.nureal.ide.modulos.dialeto.dominio.contratos.DatabaseDialect;
+import com.nureal.ide.modulos.metadados.dominio.entidades.DbUserInfo;
 
 /**
  * Aba "Roles" do {@link UserManagementDialog} — extraida do {@code Session}

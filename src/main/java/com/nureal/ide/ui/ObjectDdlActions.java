@@ -11,8 +11,8 @@ import java.util.Set;
 import javax.swing.JOptionPane;
 import javax.swing.SwingWorker;
 
-import com.nureal.ide.core.metadata.model.TableDetails;
-import com.nureal.ide.core.metadata.model.TableInfo;
+import com.nureal.ide.modulos.metadados.dominio.entidades.TableDetails;
+import com.nureal.ide.modulos.metadados.dominio.entidades.TableInfo;
 
 /**
  * Criar/alterar/dropar tabela/view/trigger/procedure/function — extraido do

@@ -1,4 +1,9 @@
 package com.nureal.ide.ui;
+import com.nureal.ide.compartilhado.designsystem.IconType;
+import com.nureal.ide.compartilhado.designsystem.Icons;
+import com.nureal.ide.compartilhado.designsystem.Buttons;
+import com.nureal.ide.compartilhado.designsystem.Typography;
+import com.nureal.ide.compartilhado.designsystem.GridTheme;
 
 import java.awt.BorderLayout;
 import java.awt.Color;
@@ -12,6 +17,7 @@ import java.awt.event.MouseEvent;
 import java.io.File;
 import java.io.IOException;
 import java.sql.Connection;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
@@ -44,10 +50,10 @@ import javax.swing.filechooser.FileNameExtensionFilter;
 import javax.swing.table.DefaultTableModel;
 
 import com.formdev.flatlaf.FlatLaf;
-import com.nureal.ide.core.export.ExcelExporter;
-import com.nureal.ide.core.export.TabelaExportavel;
-import com.nureal.ide.core.metadata.model.ColumnDetail;
-import com.nureal.ide.core.metadata.model.TableDetails;
+import com.nureal.ide.modulos.backupexportacao.infraestrutura.ExcelExporter;
+import com.nureal.ide.modulos.backupexportacao.dominio.contratos.TabelaExportavel;
+import com.nureal.ide.modulos.metadados.dominio.entidades.ColumnDetail;
+import com.nureal.ide.modulos.metadados.dominio.entidades.TableDetails;
 
 /**
  * Area de resultados: casca visual (abas, overlay de "executando",
@@ -64,6 +70,9 @@ import com.nureal.ide.core.metadata.model.TableDetails;
  * sempre atraves dos metodos de pacote abaixo, nunca direto no campo.
  */
 final class ResultsAreaController {
+
+	/** Pixels de folga da barra de rolagem vertical pra considerar "perto do fim" — ver {@link #installAutoLoadOnScroll}. */
+	private static final int SCROLL_LOAD_THRESHOLD_PX = 120;
 
 	private final MainWindow owner;
 
@@ -111,23 +120,23 @@ final class ResultsAreaController {
 		orientationToggle.addPropertyChangeListener("UI", e -> updateOrientationToggleIcon(orientationToggle));
 		this.resultsOrientationButton = orientationToggle;
 
-		JButton exportAllButton = new JButton();
-		Buttons.bindThemedIcon(exportAllButton, IconType.EXPORT, 14, () -> GridTheme.MUTED_TEXT);
-		exportAllButton.setToolTipText("Exportar todos os resultados abertos (uma aba por resultado)");
-		exportAllButton.addActionListener(e -> exportAll());
-
 		JButton expandResultsButton = new JButton();
 		Buttons.bindThemedIcon(expandResultsButton, IconType.EXPAND, 14, () -> GridTheme.MUTED_TEXT);
 		expandResultsButton.setToolTipText("Expandir/recolher resultados (oculta paineis laterais)");
 		expandResultsButton.addActionListener(e -> owner.toggleResultsFocusMode());
 
-		for (JButton btn : new JButton[] { exportAllButton, orientationToggle, expandResultsButton }) {
+		for (JButton btn : new JButton[] { orientationToggle, expandResultsButton }) {
 			Buttons.styleIconButton(btn);
 		}
 
+		// Sem o icone "Exportar todos" que ficava aqui: era um duplicado
+		// exato do item "Exportar todos (uma aba por resultado)..." que ja
+		// existe dentro do menu "Exportar" de CADA resultado (ver
+		// ResultStatusBar) — revisao de UX pediu um unico lugar descobrivel
+		// pra exportar, nao dois botoes pra mesma acao em cantos diferentes
+		// da tela.
 		JPanel headerIcons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 3, 0));
 		headerIcons.setOpaque(false);
-		headerIcons.add(exportAllButton);
 		headerIcons.add(orientationToggle);
 		headerIcons.add(expandResultsButton);
 
@@ -385,21 +394,135 @@ final class ResultsAreaController {
 		ResultGrid grid = new ResultGrid(model, owner.connectionManager(), schemaName, owner.tableMetadataCache(),
 				() -> exportResult(r), owner::scaledPx, owner.resultRowHeightBasePx());
 
-		ResultStatusBar resultStatusBar = new ResultStatusBar(SqlExecutionEngine.PAGE_SIZE);
+		ResultStatusBar resultStatusBar = new ResultStatusBar();
 		grid.keepSelectionOnFocusTo(resultStatusBar.asComponent());
 		Runnable refresh = () -> resultStatusBar.refresh(r.model().getRowCount(), r.execMs(), r.fetchMs(),
 				r.cursor() != null && !r.cursor().exhausted);
-		resultStatusBar.onLoadMore(() -> loadPage(r, SqlExecutionEngine.PAGE_SIZE, refresh));
-		resultStatusBar.onLoadAll(() -> loadAll(r, refresh));
+		// Um UNICO "ocupado" compartilhado entre paginacao (auto-scroll/
+		// "carregar tudo") e a contagem exata (ver #showExactTotal) — as duas
+		// leem do MESMO Statement/Connection deste resultado (ver
+		// SqlExecutionEngine.ResultCursor#st), entao nunca podem rodar ao
+		// mesmo tempo uma da outra.
+		boolean[] busy = { false };
+		resultStatusBar.onLoadAll(() -> {
+			if (busy[0]) {
+				return;
+			}
+			busy[0] = true;
+			loadAll(r, () -> {
+				refresh.run();
+				// loadAll so termina de verdade quando o cursor esgota (ver
+				// #loadAll); ate la cada "chunk" publicado chama refresh
+				// tambem, entao so libera o "ocupado" quando o cursor JA
+				// estiver esgotado (nao no meio do caminho).
+				if (r.cursor() == null || r.cursor().exhausted) {
+					busy[0] = false;
+				}
+			});
+		});
+		installAutoLoadOnScroll(grid, r, refresh, busy);
+		resultStatusBar.onShowExactTotal(() -> showExactTotal(r, resultStatusBar, busy));
 		resultStatusBar.onExportThis(() -> exportResult(r));
 		resultStatusBar.onExportAll(this::exportAll);
 		resultStatusBar.onExportCsv(() -> exportResultCsv(grid.table(), r.title()));
+		resultStatusBar.onExportJson(() -> exportResultJson(grid.table(), r.title()));
 		grid.onSelectionSummary(resultStatusBar::updateSelectionSummary);
 		refresh.run();
 
 		wireGridEditing(grid, resultStatusBar, model, schemaName);
 
 		return new ResultView(grid, resultStatusBar).asComponent();
+	}
+
+	/**
+	 * Rolagem perto do fim da grade busca a proxima pagina sozinha — pedido
+	 * explicito do usuario na revisao de UX ("queria eliminar esses botoes
+	 * no final da tela para dar impressao de continuidade"): antes disso a
+	 * UNICA forma de ver mais linhas era clicar em "Carregar mais N", um
+	 * botao permanente no rodape. {@code busy[0]} (compartilhado com
+	 * "Carregar tudo" e "Ver total exato", ver {@link #buildGridPanel})
+	 * evita disparar duas leituras ao mesmo tempo no MESMO cursor/conexao —
+	 * o evento de rolagem dispara varias vezes enquanto o usuario arrasta a
+	 * barra, e uma pagina/contagem so pode estar em andamento por vez.
+	 */
+	private void installAutoLoadOnScroll(ResultGrid grid, QueryResult r, Runnable refresh, boolean[] busy) {
+		JScrollPane scroll = grid.scrollPane();
+		if (scroll == null) {
+			return;
+		}
+		scroll.getVerticalScrollBar().addAdjustmentListener(e -> {
+			if (busy[0]) {
+				return;
+			}
+			SqlExecutionEngine.ResultCursor cursor = r.cursor();
+			if (cursor == null || cursor.exhausted) {
+				return;
+			}
+			java.awt.Adjustable bar = e.getAdjustable();
+			boolean nearBottom = bar.getValue() + bar.getVisibleAmount() >= bar.getMaximum() - SCROLL_LOAD_THRESHOLD_PX;
+			if (!nearBottom) {
+				return;
+			}
+			busy[0] = true;
+			loadPage(r, SqlExecutionEngine.PAGE_SIZE, () -> {
+				busy[0] = false;
+				refresh.run();
+			});
+		});
+	}
+
+	/**
+	 * "Ver total exato" (ver {@code ResultStatusBar#onShowExactTotal}): roda
+	 * {@code SELECT COUNT(*) FROM (<sql original>) AS contagem} — respeita
+	 * filtros/joins/agrupamentos da consulta original, ao contrario de so
+	 * contar linhas visiveis na grade — numa NOVA {@link Statement}, na
+	 * MESMA {@link Connection} do cursor original (ver
+	 * {@code SqlExecutionEngine.ResultCursor#st}). Deliberadamente opt-in
+	 * (nunca automatico): pode ser lenta em tabela grande, por isso um
+	 * botao, nao um calculo em toda pagina carregada.
+	 * <p>
+	 * {@code busy[0]} garante que isto nunca roda ao mesmo tempo que uma
+	 * pagina sendo carregada do MESMO cursor (ver {@link #installAutoLoadOnScroll}/
+	 * {@link #loadAll}) — duas leituras simultaneas na mesma {@link Connection}
+	 * JDBC nao sao seguras em geral.
+	 */
+	private void showExactTotal(QueryResult r, ResultStatusBar resultStatusBar, boolean[] busy) {
+		SqlExecutionEngine.ResultCursor cursor = r.cursor();
+		if (cursor == null || busy[0]) {
+			return;
+		}
+		String sql = r.sql().strip();
+		if (sql.endsWith(";")) {
+			sql = sql.substring(0, sql.length() - 1);
+		}
+		String countSql = "SELECT COUNT(*) FROM (" + sql + ") AS contagem_ide";
+		busy[0] = true;
+		resultStatusBar.setExactTotalBusy(true);
+		new SwingWorker<Long, Void>() {
+			@Override
+			protected Long doInBackground() throws SQLException {
+				try (Statement st = cursor.st.getConnection().createStatement();
+						ResultSet rs = st.executeQuery(countSql)) {
+					return rs.next() ? rs.getLong(1) : null;
+				}
+			}
+
+			@Override
+			protected void done() {
+				busy[0] = false;
+				resultStatusBar.setExactTotalBusy(false);
+				try {
+					Long total = get();
+					if (total != null) {
+						resultStatusBar.showExactTotal(total);
+					}
+				} catch (Exception ex) {
+					com.nureal.ide.core.log.AppLogger.warning("Falha ao contar o total exato do resultado", ex);
+					owner.statusBar().setText(" Nao foi possivel contar o total exato: "
+							+ ((ex.getCause() != null) ? ex.getCause().getMessage() : ex.getMessage()));
+				}
+			}
+		}.execute();
 	}
 
 	// ---------- Edicao direta na grade (update/insert/delete) ----------
@@ -550,7 +673,7 @@ final class ResultsAreaController {
 			return;
 		}
 		Connection conn = owner.connectionManager().getConnection();
-		com.nureal.ide.core.dialect.DatabaseDialect dialect = owner.connectionManager().dialect();
+		com.nureal.ide.modulos.dialeto.dominio.contratos.DatabaseDialect dialect = owner.connectionManager().dialect();
 		resultStatusBar.setEditBusy(true);
 		SwingWorker<GridEditController.ApplyResult, Void> worker = new SwingWorker<>() {
 			@Override
@@ -739,6 +862,32 @@ final class ResultsAreaController {
 			GridExporter.exportCsv(table, file.toPath());
 		} catch (IOException ex) {
 			owner.showError("Falha ao exportar CSV", ex);
+		}
+	}
+
+	/**
+	 * Exporta este resultado para JSON (mesmas linhas/colunas visiveis da
+	 * grade — respeita filtro/ordenacao atuais, ver {@link GridExporter}).
+	 * Ja existia so no menu de clique-direito da grade ({@code ResultContextMenu});
+	 * revisao de UX pediu consolidar exportacao num unico lugar descobrivel
+	 * (o botao "Exportar" desta barra), entao ganhou tambem este atalho.
+	 */
+	private void exportResultJson(JTable table, String title) {
+		JFileChooser fc = new JFileChooser();
+		fc.setDialogTitle("Exportar JSON");
+		fc.setSelectedFile(new File(title + ".json"));
+		fc.setFileFilter(new FileNameExtensionFilter("JSON (*.json)", "json"));
+		if (fc.showSaveDialog(owner) != JFileChooser.APPROVE_OPTION) {
+			return;
+		}
+		File file = fc.getSelectedFile();
+		if (!file.getName().toLowerCase(Locale.ROOT).endsWith(".json")) {
+			file = new File(file.getParentFile(), file.getName() + ".json");
+		}
+		try {
+			GridExporter.exportJson(table, file.toPath());
+		} catch (IOException ex) {
+			owner.showError("Falha ao exportar JSON", ex);
 		}
 	}
 

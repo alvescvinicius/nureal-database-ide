@@ -1,4 +1,7 @@
 package com.nureal.ide.ui;
+import com.nureal.ide.compartilhado.designsystem.IconType;
+import com.nureal.ide.compartilhado.designsystem.Icons;
+import com.nureal.ide.compartilhado.designsystem.GridTheme;
 
 import javax.swing.BorderFactory;
 import javax.swing.JLabel;

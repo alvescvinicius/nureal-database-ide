@@ -4,7 +4,7 @@ Objetivo:
 - Introduzir um módulo AI nativo.
 
 Estrutura:
-core.ai
+modulos.iachat
 ui.ai
 
 Princípios:

@@ -1,4 +1,6 @@
 package com.nureal.ide.ui;
+import com.nureal.ide.compartilhado.designsystem.Buttons;
+import com.nureal.ide.compartilhado.designsystem.Typography;
 
 import java.awt.BorderLayout;
 import java.awt.Component;
@@ -35,8 +37,8 @@ import javax.swing.JTextField;
 import javax.swing.KeyStroke;
 import javax.swing.ListSelectionModel;
 
-import com.nureal.ide.core.dialect.DatabaseDialect;
-import com.nureal.ide.core.metadata.model.DbUserInfo;
+import com.nureal.ide.modulos.dialeto.dominio.contratos.DatabaseDialect;
+import com.nureal.ide.modulos.metadados.dominio.entidades.DbUserInfo;
 
 /**
  * Administracao de usuarios e privilegios do SERVIDOR conectado — "Gerenciar

@@ -1,4 +1,9 @@
 package com.nureal.ide.ui;
+import com.nureal.ide.compartilhado.designsystem.IconType;
+import com.nureal.ide.compartilhado.designsystem.Icons;
+import com.nureal.ide.compartilhado.designsystem.Buttons;
+import com.nureal.ide.compartilhado.designsystem.Typography;
+import com.nureal.ide.compartilhado.designsystem.GridTheme;
 
 import javax.swing.JButton;
 import javax.swing.JComponent;
@@ -16,8 +21,13 @@ import java.awt.event.MouseEvent;
 
 /**
  * Barra inferior de uma aba de resultado: a esquerda, contagem de linhas +
- * tempos de execucao/busca + paginacao ("Carregar mais N" / "Carregar
- * tudo"); a direita, o botao "Exportar" com seu menu.
+ * tempos de execucao/busca + o link discreto "Carregar todas as linhas
+ * restantes"; a direita, o botao "Exportar" com seu menu. A paginacao em si
+ * (buscar a proxima pagina) passou a acontecer sozinha, ao rolar perto do
+ * fim da grade (ver {@code ResultsAreaController}) — revisao de UX: "queria
+ * eliminar esses botoes no final da tela para dar impressao de
+ * continuidade". Este link so fica pra quem quer TUDO de uma vez, sem
+ * precisar rolar repetidamente numa tabela grande.
  *
  * Consolida num unico componente o que a especificacao de arquitetura do
  * Grid descreve como dois componentes ({@code ResultStatistics} +
@@ -50,8 +60,26 @@ final class ResultStatusBar {
     private final JLabel selectionSummary = new JLabel();
     /** Ultima soma exibida — o que um clique em {@link #selectionSummary} copia (ver {@link #copySum}). */
     private java.math.BigDecimal lastSum;
-    private final JButton loadMoreButton;
-    private final JButton loadAllButton = new JButton("Carregar tudo");
+    /**
+     * Sem mais um botao "Carregar mais N" aqui (revisao de UX: "queria
+     * eliminar esses botoes no final da tela para dar impressao de
+     * continuidade") — {@code ResultsAreaController} agora carrega a
+     * proxima pagina sozinho quando o usuario rola perto do fim da grade
+     * (ver {@code #onNearScrollEnd}). {@code loadAllButton} continua
+     * existindo, so que como um LINK discreto (nao mais um botao
+     * proeminente) — util pra quem quer TUDO de uma vez numa tabela grande
+     * em vez de rolar repetidamente, mas sem competir visualmente com o
+     * resto da barra.
+     */
+    private final JButton loadAllButton = new JButton("Carregar todas as linhas restantes");
+    /**
+     * Roda um {@code SELECT COUNT(*)} sob demanda pra saber o total REAL da
+     * consulta sem precisar carregar todas as linhas na grade (ver
+     * {@code ResultsAreaController#showExactTotal}) — deliberadamente
+     * OPT-IN (nunca automatico): pode ser lento em tabela grande, entao so
+     * roda quando o usuario pede.
+     */
+    private final JButton exactTotalButton = new JButton("Ver total exato");
     private final JButton exportButton = new JButton("Exportar");
     private final JMenuItem exportThisItem = new JMenuItem("Exportar este resultado...");
     private final JMenuItem exportAllItem = new JMenuItem("Exportar todos (uma aba por resultado)...");
@@ -62,6 +90,8 @@ final class ResultStatusBar {
      * fase 3). Mesma acao, so exposta tambem aqui, junto do Excel.
      */
     private final JMenuItem exportCsvItem = new JMenuItem("Exportar CSV...");
+    /** Mesmo raciocinio do CSV acima — JSON ja existia so no menu de clique-direito da grade (revisao de UX: consolidar exportacao num unico lugar descobrivel). */
+    private final JMenuItem exportJsonItem = new JMenuItem("Exportar JSON...");
 
     // ---------- Barra de edicao (so aparece quando GridEditController.isEditable()) ----------
     private final JPanel editBar = new JPanel(new BorderLayout());
@@ -82,9 +112,7 @@ final class ResultStatusBar {
     private final JButton discardButton = new JButton("Descartar");
     private final JButton saveChangesButton = new JButton("Salvar alteracoes");
 
-    ResultStatusBar(int pageSize) {
-        loadMoreButton = new JButton("Carregar mais " + pageSize);
-
+    ResultStatusBar() {
         exportButton.setIcon(Icons.get(IconType.EXPORT, 14, MainWindow.ACCENT));
         exportButton.setToolTipText("Exportar resultado para Excel");
         JPopupMenu exportMenu = new JPopupMenu();
@@ -92,6 +120,7 @@ final class ResultStatusBar {
         exportMenu.add(exportAllItem);
         exportMenu.addSeparator();
         exportMenu.add(exportCsvItem);
+        exportMenu.add(exportJsonItem);
         exportButton.addActionListener(e -> exportMenu.show(exportButton, 0, exportButton.getHeight()));
 
         // Mesmo padrao "contorno" de botao secundario usado em qualquer
@@ -99,9 +128,15 @@ final class ResultStatusBar {
         // botoes PADRAO do FlatLaf, sem o mesmo raio/borda/espacamento das
         // acoes secundarias em outros lugares (DdlAssistantDialog,
         // FkInspectorWindow, CellContentViewer).
-        for (JButton btn : new JButton[] { loadMoreButton, loadAllButton, exportButton }) {
-            Buttons.styleSecondary(btn);
-        }
+        Buttons.styleSecondary(exportButton);
+        // "Carregar todas as linhas restantes" e "Ver total exato" viram
+        // LINKS discretos (sem fundo/borda de botao) — nenhum dos dois e
+        // mais a acao PRINCIPAL desta barra (paginacao agora e automatica ao
+        // rolar, ver ResultsAreaController), so atalhos secundarios opt-in.
+        styleAsLink(loadAllButton);
+        styleAsLink(exactTotalButton);
+        exactTotalButton.setToolTipText(
+                "Roda um SELECT COUNT(*) — pode ser lento em tabelas muito grandes, por isso nao e automatico");
 
         // Nivel TERCIARIO (informacao auxiliar) — ver Typography.
         Typography.tertiary(selectionSummary);
@@ -118,8 +153,8 @@ final class ResultStatusBar {
         JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 3));
         left.add(info);
         left.add(selectionSummary);
-        left.add(loadMoreButton);
         left.add(loadAllButton);
+        left.add(exactTotalButton);
         JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 3));
         right.add(exportButton);
 
@@ -181,12 +216,32 @@ final class ResultStatusBar {
         return panel;
     }
 
-    void onLoadMore(Runnable action) {
-        loadMoreButton.addActionListener(e -> action.run());
-    }
-
     void onLoadAll(Runnable action) {
         loadAllButton.addActionListener(e -> action.run());
+    }
+
+    /** "Ver total exato" clicado — ver javadoc de {@link #exactTotalButton}. */
+    void onShowExactTotal(Runnable action) {
+        exactTotalButton.addActionListener(e -> action.run());
+    }
+
+    /** Desabilita "Ver total exato" enquanto a contagem roda em segundo plano — evita clique duplo. */
+    void setExactTotalBusy(boolean busy) {
+        exactTotalButton.setEnabled(!busy);
+        exactTotalButton.setText(busy ? "Contando..." : "Ver total exato");
+    }
+
+    /**
+     * Mostra o total REAL apurado por {@code SELECT COUNT(*)} (ver
+     * {@code ResultsAreaController#showExactTotal}) — substitui a contagem
+     * aproximada de {@link #refresh} ate a proxima chamada dele (ex.:
+     * quando mais uma pagina e carregada, a contagem exata continua valendo,
+     * so a parte "carregadas" do texto muda).
+     */
+    void showExactTotal(long total) {
+        lastKnownTotal = total;
+        exactTotalButton.setVisible(false);
+        refreshInfoText();
     }
 
     void onExportThis(Runnable action) {
@@ -199,6 +254,10 @@ final class ResultStatusBar {
 
     void onExportCsv(Runnable action) {
         exportCsvItem.addActionListener(e -> action.run());
+    }
+
+    void onExportJson(Runnable action) {
+        exportJsonItem.addActionListener(e -> action.run());
     }
 
     void onToggleEditMode(Runnable action) {
@@ -268,13 +327,38 @@ final class ResultStatusBar {
         deleteRowsButton.setEnabled(hasSelection);
     }
 
-    /** Atualiza o texto de contagem/tempos e mostra/esconde os botoes de paginacao. */
+    /** Ultimos valores recebidos por {@link #refresh} — guardados pra {@link #refreshInfoText()} recompor o texto quando {@link #showExactTotal} chega depois. */
+    private int lastRowCount;
+    private long lastExecMs;
+    private long lastFetchMs;
+    private boolean lastHasMore;
+    /** Total exato ja apurado por {@link #showExactTotal}, ou {@code null} se ainda nao pedido/nao sabido. */
+    private Long lastKnownTotal;
+
+    /** Atualiza o texto de contagem/tempos e mostra/esconde os links de paginacao/contagem. */
     void refresh(int rowCount, long execMs, long fetchMs, boolean hasMore) {
-        info.setText(rowCount + " linha(s)" + (hasMore ? "+" : "")
-                + "   ·   execucao " + execMs + " ms"
-                + "   ·   busca " + fetchMs + " ms");
-        loadMoreButton.setVisible(hasMore);
+        lastRowCount = rowCount;
+        lastExecMs = execMs;
+        lastFetchMs = fetchMs;
+        lastHasMore = hasMore;
+        if (!hasMore) {
+            // Cursor esgotado (rolou ate o fim ou clicou "Carregar tudo") —
+            // rowCount JA E o total exato, nao precisa mais perguntar.
+            lastKnownTotal = (long) rowCount;
+        }
+        refreshInfoText();
         loadAllButton.setVisible(hasMore);
+        exactTotalButton.setVisible(hasMore && lastKnownTotal == null);
+    }
+
+    /** Recompoe o texto da contagem a partir do ultimo {@link #refresh} + {@link #lastKnownTotal}, se houver. */
+    private void refreshInfoText() {
+        String countPart = (lastKnownTotal != null)
+                ? lastRowCount + " de " + lastKnownTotal + " linha(s)"
+                : lastRowCount + (lastHasMore ? " linhas carregadas" : " linha(s)");
+        info.setText(countPart
+                + "   ·   execucao " + lastExecMs + " ms"
+                + "   ·   busca " + lastFetchMs + " ms");
     }
 
     /**
@@ -339,5 +423,16 @@ final class ResultStatusBar {
         // stripTrailingZeros() pode devolver notacao cientifica para
         // inteiros grandes (ex.: 1E+2) — toPlainString() sempre expande.
         return stripped.toPlainString();
+    }
+
+    /** Texto sem fundo/borda de botao, cor de link, cursor de mao — usado por {@link #loadAllButton}/{@link #exactTotalButton}. */
+    private static void styleAsLink(JButton button) {
+        button.setBorderPainted(false);
+        button.setContentAreaFilled(false);
+        button.setOpaque(false);
+        button.setForeground(GridTheme.ACCENT_INFO);
+        button.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        button.setMargin(new java.awt.Insets(0, 0, 0, 0));
+        button.setFont(button.getFont().deriveFont(11f));
     }
 }

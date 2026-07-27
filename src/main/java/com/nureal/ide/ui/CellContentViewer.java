@@ -1,4 +1,7 @@
 package com.nureal.ide.ui;
+import com.nureal.ide.compartilhado.designsystem.IconType;
+import com.nureal.ide.compartilhado.designsystem.Buttons;
+import com.nureal.ide.compartilhado.designsystem.GridTheme;
 
 import java.awt.BorderLayout;
 import java.awt.Component;

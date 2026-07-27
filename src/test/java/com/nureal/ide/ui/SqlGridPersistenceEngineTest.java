@@ -21,8 +21,8 @@ import java.util.Vector;
 
 import org.junit.jupiter.api.Test;
 
-import com.nureal.ide.core.dialect.DatabaseDialect;
-import com.nureal.ide.core.dialect.MySqlDialect;
+import com.nureal.ide.modulos.dialeto.dominio.contratos.DatabaseDialect;
+import com.nureal.ide.modulos.dialeto.infraestrutura.MySqlDialect;
 
 /**
  * Testes de caracterizacao do motor de persistencia de edicoes de grade,

@@ -1,7 +1,7 @@
 package com.nureal.ide.ui;
 
 import com.nureal.ide.core.log.AppLogger;
-import com.nureal.ide.core.metadata.model.ForeignKeyInfo;
+import com.nureal.ide.modulos.metadados.dominio.entidades.ForeignKeyInfo;
 
 import javax.swing.JFileChooser;
 import javax.swing.JMenu;

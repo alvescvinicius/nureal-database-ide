@@ -1,8 +1,13 @@
 package com.nureal.ide.ui;
+import com.nureal.ide.compartilhado.designsystem.IconType;
+import com.nureal.ide.compartilhado.designsystem.Icons;
+import com.nureal.ide.compartilhado.designsystem.Buttons;
+import com.nureal.ide.compartilhado.designsystem.Typography;
+import com.nureal.ide.compartilhado.designsystem.GridTheme;
 
-import com.nureal.ide.core.connection.ConnectionProfile;
-import com.nureal.ide.core.connection.ConnectionStore;
-import com.nureal.ide.ui.components.NSearchField;
+import com.nureal.ide.modulos.conexoes.dominio.entidades.ConnectionProfile;
+import com.nureal.ide.modulos.conexoes.dominio.contratos.ConnectionRepository;
+import com.nureal.ide.compartilhado.designsystem.NSearchField;
 
 import javax.swing.BorderFactory;
 import javax.swing.BoxLayout;
@@ -64,7 +69,7 @@ public class ConnectionsPanel extends JPanel {
      */
     static final int DEFAULT_ROW_HEIGHT = 24;
 
-    private final ConnectionStore store;
+    private final ConnectionRepository store;
     private final Consumer<ConnectionProfile> connectAction;
     private final Consumer<ConnectionProfile> disconnectAction;
     private final DefaultListModel<ConnectionProfile> model = new DefaultListModel<>();
@@ -88,7 +93,7 @@ public class ConnectionsPanel extends JPanel {
      * conectadas ao mesmo tempo, mas so uma tem suas abas na tela. */
     private String activeName;
 
-    public ConnectionsPanel(ConnectionStore store, Consumer<ConnectionProfile> connectAction,
+    public ConnectionsPanel(ConnectionRepository store, Consumer<ConnectionProfile> connectAction,
             Consumer<ConnectionProfile> disconnectAction) {
         super(new BorderLayout(0, 8));
         this.store = store;
@@ -172,9 +177,12 @@ public class ConnectionsPanel extends JPanel {
         // mesmo com a lista vazia ou com so 1-2 itens de verdade — na sidebar
         // unificada (Fase 3 do AI-CHAT-MASTER-PLAN.md), onde este painel fica
         // embutido numa coluna com varias secoes, isso sobrava uma caixa cinza
-        // vazia enorme. 5 linhas visiveis por padrao; quem tiver mais rola
+        // vazia enorme. 3 linhas visiveis por padrao (mesmo valor de
+        // SavedQueriesPanel/HistoryPanel, reduzido de 5 na revisao de UX —
+        // a maioria dos usuarios tem so 1-3 conexoes cadastradas, e 5 sobrava
+        // "espaco fantasma" visivel mesmo com poucas); quem tiver mais rola
         // dentro do proprio painel (ver MainWindow#capMaxHeight).
-        list.setVisibleRowCount(5);
+        list.setVisibleRowCount(3);
         // Sem isto, a linha selecionada usava o default do FlatLaf.properties
         // (List.selectionBackground = accent verde SOLIDO, #059669) — bem
         // mais "gritante" que o cinza neutro que a arvore de Objetos e a
@@ -388,6 +396,21 @@ public class ConnectionsPanel extends JPanel {
             idx = idx % WORKSPACE_PALETTE.length;
         }
         return WORKSPACE_PALETTE[idx];
+    }
+
+    /**
+     * Mistura {@code accent} em {@code base} com peso {@code weight}
+     * (0..1) — usada pelo tingimento de fundo da linha ativa
+     * ({@link ConnectionRenderer}). Calcula a cor SOLIDA final em vez de
+     * usar um {@code Color} com alfa: o resultado nao depende de o que foi
+     * pintado embaixo antes (ordem de pintura do {@code JList}), sempre o
+     * mesmo tom previsivel em claro ou escuro.
+     */
+    private static Color tint(Color base, Color accent, float weight) {
+        int r = Math.round(base.getRed() * (1 - weight) + accent.getRed() * weight);
+        int g = Math.round(base.getGreen() * (1 - weight) + accent.getGreen() * weight);
+        int b = Math.round(base.getBlue() * (1 - weight) + accent.getBlue() * weight);
+        return new Color(r, g, b);
     }
 
     private void persist() {
@@ -612,7 +635,8 @@ public class ConnectionsPanel extends JPanel {
             // TreeHoverTracker/GridTheme.HOVER_BACKGROUND); faltava aqui antes.
             // Selecao sempre tem prioridade visual: so pinta hover quando a
             // linha NAO esta selecionada.
-            if (!isSelected && index == TreeHoverTracker.hoverRow(list)) {
+            boolean hovered = !isSelected && index == TreeHoverTracker.hoverRow(list);
+            if (hovered) {
                 setOpaque(true);
                 setBackground(GridTheme.HOVER_BACKGROUND);
             }
@@ -644,6 +668,17 @@ public class ConnectionsPanel extends JPanel {
                                 BorderFactory.createMatteBorder(0, 3, 0, 0, colorForWorkspace(p.name())),
                                 BorderFactory.createEmptyBorder(4, 9, 4, 12))
                         : BorderFactory.createEmptyBorder(4, 12, 4, 12));
+                // Tarja lateral (acima) sozinha e sutil demais pra "achar" a
+                // workspace ativa numa lista de ~15 conexoes so de bater o
+                // olho (precisa reparar na borda fina de 3px). Um tingimento
+                // MUITO leve (12%) da mesma cor de identidade no fundo inteiro
+                // da linha da o mesmo sinal com muito mais area — so quando
+                // nem selecionada nem em hover, que continuam com prioridade
+                // visual maior (ver acima).
+                if (active && !isSelected && !hovered) {
+                    setOpaque(true);
+                    setBackground(tint(list.getBackground(), colorForWorkspace(p.name()), 0.12f));
+                }
                 // A tarja lateral colorida (acima) e o UNICO sinal hoje de
                 // qual conexao esta ativa — quem nao distingue bem cor (ou so
                 // olhou rapido) nao teria como saber sem ela. Sufixo textual

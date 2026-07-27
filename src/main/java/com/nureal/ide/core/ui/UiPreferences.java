@@ -133,7 +133,7 @@ public class UiPreferences {
      * Assim como {@link #parseIndex}, nao valida contra o tamanho real de
      * {@code MainWindow.ROW_SPACING_LEVELS} — este pacote ({@code core}) nao
      * conhece a UI de proposito (mesma razao documentada em
-     * {@code SqlCompletionProvider}). {@code MainWindow} e quem faz o
+     * {@code SqlCompletionProviderRSyntax}). {@code MainWindow} e quem faz o
      * "clamp" final contra o array de verdade, do mesmo jeito que ja faz
      * hoje para {@code zoomIndex} (ver {@code clampZoomIndex}).
      */

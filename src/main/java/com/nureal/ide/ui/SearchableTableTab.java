@@ -1,4 +1,5 @@
 package com.nureal.ide.ui;
+import com.nureal.ide.compartilhado.designsystem.Buttons;
 
 import java.awt.BorderLayout;
 import java.awt.Dimension;
@@ -15,7 +16,7 @@ import javax.swing.RowFilter;
 import javax.swing.table.DefaultTableModel;
 import javax.swing.table.TableRowSorter;
 
-import com.nureal.ide.ui.components.NSearchField;
+import com.nureal.ide.compartilhado.designsystem.NSearchField;
 
 /**
  * Aba "campo de busca + tabela filtravel + Atualizar" — layout repetido

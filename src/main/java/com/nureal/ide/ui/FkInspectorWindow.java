@@ -1,4 +1,7 @@
 package com.nureal.ide.ui;
+import com.nureal.ide.compartilhado.designsystem.Buttons;
+import com.nureal.ide.compartilhado.designsystem.Typography;
+import com.nureal.ide.compartilhado.designsystem.GridTheme;
 
 import java.awt.BorderLayout;
 import java.awt.Color;
@@ -27,10 +30,10 @@ import javax.swing.filechooser.FileNameExtensionFilter;
 
 import com.formdev.flatlaf.FlatLaf;
 
-import com.nureal.ide.core.connection.ConexaoAtivaPort;
-import com.nureal.ide.core.dialect.DatabaseDialect;
-import com.nureal.ide.core.export.ExcelExporter;
-import com.nureal.ide.core.metadata.model.ForeignKeyInfo;
+import com.nureal.ide.modulos.conexoes.dominio.contratos.ConexaoAtivaPort;
+import com.nureal.ide.modulos.dialeto.dominio.contratos.DatabaseDialect;
+import com.nureal.ide.modulos.backupexportacao.infraestrutura.ExcelExporter;
+import com.nureal.ide.modulos.metadados.dominio.entidades.ForeignKeyInfo;
 
 /**
  * Inspetor Flutuante de Chave Estrangeira: janela NAO-MODAL (o usuario nunca

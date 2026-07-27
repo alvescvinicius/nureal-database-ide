@@ -1,8 +1,9 @@
 package com.nureal.ide.ui;
+import com.nureal.ide.compartilhado.designsystem.GridTheme;
 
-import com.nureal.ide.core.connection.ConnectionManager;
-import com.nureal.ide.core.connection.ConnectionProfile;
-import com.nureal.ide.core.dialect.MySqlDialect;
+import com.nureal.ide.modulos.conexoes.infraestrutura.ConnectionManager;
+import com.nureal.ide.modulos.conexoes.dominio.entidades.ConnectionProfile;
+import com.nureal.ide.modulos.dialeto.infraestrutura.MySqlDialect;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;

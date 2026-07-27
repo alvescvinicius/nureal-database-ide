@@ -1,8 +1,10 @@
 package com.nureal.ide.ui;
+import com.nureal.ide.compartilhado.designsystem.Buttons;
+import com.nureal.ide.compartilhado.designsystem.Typography;
 
-import com.nureal.ide.core.metadata.model.SchemaForeignKey;
-import com.nureal.ide.core.metadata.model.TableInfo;
-import com.nureal.ide.ui.components.NSearchField;
+import com.nureal.ide.modulos.metadados.dominio.entidades.SchemaForeignKey;
+import com.nureal.ide.modulos.metadados.dominio.entidades.TableInfo;
+import com.nureal.ide.compartilhado.designsystem.NSearchField;
 
 import javax.imageio.ImageIO;
 import javax.swing.BorderFactory;

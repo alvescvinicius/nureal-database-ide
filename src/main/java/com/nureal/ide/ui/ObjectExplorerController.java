@@ -1,4 +1,8 @@
 package com.nureal.ide.ui;
+import com.nureal.ide.compartilhado.designsystem.IconType;
+import com.nureal.ide.compartilhado.designsystem.Buttons;
+import com.nureal.ide.compartilhado.designsystem.Typography;
+import com.nureal.ide.compartilhado.designsystem.GridTheme;
 
 import java.awt.BorderLayout;
 import java.awt.Component;
@@ -47,18 +51,18 @@ import javax.swing.tree.DefaultTreeModel;
 import javax.swing.tree.TreePath;
 
 import com.nureal.ide.core.log.AppLogger;
-import com.nureal.ide.core.metadata.model.ColumnDetail;
-import com.nureal.ide.core.metadata.model.ColumnInfo;
-import com.nureal.ide.core.metadata.model.DbUserInfo;
-import com.nureal.ide.core.metadata.model.ForeignKeyInfo;
-import com.nureal.ide.core.metadata.model.IndexInfo;
-import com.nureal.ide.core.metadata.model.SchemaForeignKey;
-import com.nureal.ide.core.metadata.model.SchemaInfo;
-import com.nureal.ide.core.metadata.model.TableDetails;
-import com.nureal.ide.core.metadata.model.TableInfo;
+import com.nureal.ide.modulos.metadados.dominio.entidades.ColumnDetail;
+import com.nureal.ide.modulos.metadados.dominio.entidades.ColumnInfo;
+import com.nureal.ide.modulos.metadados.dominio.entidades.DbUserInfo;
+import com.nureal.ide.modulos.metadados.dominio.entidades.ForeignKeyInfo;
+import com.nureal.ide.modulos.metadados.dominio.entidades.IndexInfo;
+import com.nureal.ide.modulos.metadados.dominio.entidades.SchemaForeignKey;
+import com.nureal.ide.modulos.metadados.dominio.entidades.SchemaInfo;
+import com.nureal.ide.modulos.metadados.dominio.entidades.TableDetails;
+import com.nureal.ide.modulos.metadados.dominio.entidades.TableInfo;
 import com.nureal.ide.core.sql.SqlTypeKind;
 import com.nureal.ide.core.sql.TableAliasGenerator;
-import com.nureal.ide.ui.components.NSearchField;
+import com.nureal.ide.compartilhado.designsystem.NSearchField;
 
 /**
  * Explorador de objetos do banco: arvore de tabelas/views/procedures/
@@ -106,6 +110,14 @@ final class ObjectExplorerController {
 		objectTree.setRootVisible(true);
 		objectTree.setShowsRootHandles(false);
 		objectTree.putClientProperty("JTree.paintSelection", false);
+		// JTree reserva altura para 20 linhas "fantasma" por padrao
+		// (Scrollable#getPreferredScrollableViewportSize), MESMO com poucos
+		// nos reais — igual ao bug ja corrigido em ConnectionsPanel/
+		// SavedQueriesPanel/HistoryPanel (la era JList, aqui e JTree, mesma
+		// causa) — achado na revisao de UX: um schema pequeno (poucas
+		// tabelas/views/procedures) deixava uma caixa cinza vazia enorme
+		// entre a arvore e o proximo grupo (WORKSPACE) da barra lateral.
+		objectTree.setVisibleRowCount(12);
 		objectTree.setRowHeight(owner.scaledPx(ConnectionsPanel.DEFAULT_ROW_HEIGHT));
 		objectTree.setBorder(BorderFactory.createEmptyBorder(4, 8, 4, 4));
 		objectTree.setCellRenderer(new ObjectTreeCellRenderer());
@@ -163,16 +175,17 @@ final class ObjectExplorerController {
 		createSchemaButton.setToolTipText("Criar esquema...");
 		createSchemaButton.addActionListener(e -> createSchema());
 
-		JPanel headerButtons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
-		headerButtons.setOpaque(false);
-		headerButtons.add(switchSchemaButton);
-		headerButtons.add(refreshObjectsButton);
-		headerButtons.add(createSchemaButton);
-
-		JPanel headerRow = new JPanel(new BorderLayout());
+		// Sem titulo "OBJETOS" aqui: este painel agora vive dentro de uma aba
+		// da sidebar (ver MainWindow#buildLeftSide) cujo ROTULO da propria
+		// aba ja diz "Objetos" — repetir o nome dentro do conteudo seria a
+		// MESMA duplicacao de marca ja corrigida no logo do topo da coluna
+		// (revisao de UX: "Objetos"/"Objetos" duas vezes, uma no rotulo da
+		// aba e outra dentro dela).
+		JPanel headerRow = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
 		headerRow.setOpaque(false);
-		headerRow.add(owner.sectionHeader("OBJETOS"), BorderLayout.WEST);
-		headerRow.add(headerButtons, BorderLayout.EAST);
+		headerRow.add(switchSchemaButton);
+		headerRow.add(refreshObjectsButton);
+		headerRow.add(createSchemaButton);
 
 		JPanel top = new JPanel(new BorderLayout(0, 6));
 		top.setOpaque(false);
@@ -1258,7 +1271,7 @@ final class ObjectExplorerController {
 	private void exportMetadataTable(String title, ResultTableModel model) {
 		File file = owner.chooseSaveFile(title);
 		if (file != null) {
-			owner.doExport(List.of(new com.nureal.ide.core.export.ExcelExporter.TableSheet(title, model)), file);
+			owner.doExport(List.of(new com.nureal.ide.modulos.backupexportacao.infraestrutura.ExcelExporter.TableSheet(title, model)), file);
 		}
 	}
 

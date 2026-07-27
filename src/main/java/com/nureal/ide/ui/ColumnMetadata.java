@@ -1,7 +1,7 @@
 package com.nureal.ide.ui;
 
-import com.nureal.ide.core.metadata.model.ForeignKeyInfo;
-import com.nureal.ide.core.metadata.model.IndexInfo;
+import com.nureal.ide.modulos.metadados.dominio.entidades.ForeignKeyInfo;
+import com.nureal.ide.modulos.metadados.dominio.entidades.IndexInfo;
 
 import java.util.List;
 

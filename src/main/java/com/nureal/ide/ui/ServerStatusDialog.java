@@ -12,7 +12,7 @@ import javax.swing.JTable;
 import javax.swing.table.DefaultTableModel;
 import javax.swing.table.TableRowSorter;
 
-import com.nureal.ide.core.dialect.DatabaseDialect;
+import com.nureal.ide.modulos.dialeto.dominio.contratos.DatabaseDialect;
 
 /**
  * Visor de variaveis ({@code SHOW GLOBAL VARIABLES}) e status

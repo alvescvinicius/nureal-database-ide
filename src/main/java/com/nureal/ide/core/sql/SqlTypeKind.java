@@ -1,4 +1,5 @@
 package com.nureal.ide.core.sql;
+import com.nureal.ide.compartilhado.designsystem.GridTheme;
 
 import java.util.Locale;
 
@@ -18,7 +19,7 @@ import java.util.Locale;
  * dados". Esta classe decide a CATEGORIA (o "o que e"); a COR de cada
  * categoria e responsabilidade unica de {@code com.nureal.ide.ui.GridTheme}
  * (camada UI) — este pacote ({@code core}) nao depende de Swing/AWT de
- * proposito (mesma razao documentada em {@code SqlCompletionProvider}), para
+ * proposito (mesma razao documentada em {@code SqlCompletionProviderRSyntax}), para
  * poder ser usado tanto pela grade quanto pelo autocomplete sem acoplar um ao
  * outro.
  *

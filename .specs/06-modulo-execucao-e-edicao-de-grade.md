@@ -24,7 +24,7 @@ Este é o item mais crítico do [diagnóstico](01-diagnostico-arquitetural-atual
 ```
 modulos/execucao-consulta/
   README.md
-  interface/
+  apresentacao/
     (nenhuma tela própria — consumido por MainWindow/ResultsAreaController)
   aplicacao/
     casos-de-uso/

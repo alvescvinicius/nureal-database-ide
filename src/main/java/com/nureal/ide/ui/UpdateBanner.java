@@ -1,4 +1,9 @@
 package com.nureal.ide.ui;
+import com.nureal.ide.compartilhado.designsystem.IconType;
+import com.nureal.ide.compartilhado.designsystem.Icons;
+import com.nureal.ide.compartilhado.designsystem.Buttons;
+import com.nureal.ide.compartilhado.designsystem.GridTheme;
+import com.nureal.ide.compartilhado.designsystem.Spacing;
 
 import java.awt.BorderLayout;
 import java.awt.FlowLayout;
@@ -12,7 +17,7 @@ import javax.swing.border.Border;
 import javax.swing.border.CompoundBorder;
 import javax.swing.border.MatteBorder;
 
-import com.nureal.ide.core.update.GithubRelease;
+import com.nureal.ide.modulos.atualizacao.dominio.entidades.GithubRelease;
 
 /**
  * Faixa discreta e dispensavel no topo da janela principal, mostrada quando o
@@ -81,7 +86,7 @@ final class UpdateBanner extends JPanel {
     void showUpdate(GithubRelease release) {
         iconLabel.setIcon(Icons.get(IconType.INFO, 16, MainWindow.ACCENT));
         messageLabel.setText("Nova versao disponivel: " + release.name()
-                + " (voce esta na " + com.nureal.ide.core.update.AppVersion.current() + ")");
+                + " (voce esta na " + com.nureal.ide.modulos.atualizacao.infraestrutura.AppVersion.current() + ")");
         setVisible(true);
         revalidate();
         repaint();
