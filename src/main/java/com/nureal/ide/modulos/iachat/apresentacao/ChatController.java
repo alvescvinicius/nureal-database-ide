@@ -9,6 +9,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import javax.swing.SwingUtilities;
+import javax.swing.SwingWorker;
 
 import com.nureal.ide.modulos.iachat.dominio.contratos.Agent;
 import com.nureal.ide.modulos.iachat.infraestrutura.ChatHistoryStore;
@@ -91,6 +92,24 @@ final class ChatController {
         }
     }
 
+    /**
+     * {@code agent.chat(...)} PARECE so submeter trabalho a uma thread de
+     * fundo (o streaming de verdade e assincrono, ver
+     * {@code AbstractStreamingProvider}), mas o METODO em si roda coisa
+     * sincrona ANTES disso — {@code DefaultAgent#chat} chama
+     * {@code contextProvider.collect()}, que inclui
+     * {@code Connection.getMetaData().getDatabaseProductName()/Version()}
+     * (ver {@code MainWindow#databaseProductNameForAi}) — uma chamada JDBC
+     * que PODE ir a rede, dependendo do driver/estado da conexao. Chamar
+     * {@code agent.chat(...)} direto da EDT (como era antes) trava a UI
+     * inteira por esse tempo, inclusive a bolha da PROPRIA mensagem do
+     * usuario que acabou de ser adicionada (ja no component tree, mas sem
+     * repintar ate a EDT ficar livre de novo) — sintoma relatado pelo
+     * usuario: "a pergunta que fiz so aparece depois de carregar tudo".
+     * {@link SwingWorker} tira so essa preparacao da EDT; os eventos que
+     * chegam depois (via {@code onEvent}) ja voltam pra EDT sozinhos, sem
+     * mudar nada nesse fluxo.
+     */
     private void sendMessage(String text) {
         panel.addMessage("user", text);
         panel.setSending(true);
@@ -98,8 +117,25 @@ final class ChatController {
         ChatPanel.LiveBubble bubble = panel.beginAssistantMessage();
         StringBuilder liveText = new StringBuilder();
         Map<String, ChatPanel.ToolCardHandle> toolCards = new HashMap<>();
-        activeTurnId = agent.chat(conversationId, text,
-                event -> SwingUtilities.invokeLater(() -> handleEvent(event, bubble, liveText, toolCards)));
+        new SwingWorker<String, Void>() {
+            @Override
+            protected String doInBackground() {
+                return agent.chat(conversationId, text,
+                        event -> SwingUtilities.invokeLater(() -> handleEvent(event, bubble, liveText, toolCards)));
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    activeTurnId = get();
+                } catch (Exception ex) {
+                    AppLogger.warning("Falha ao iniciar a conversa com a IA", ex);
+                    bubble.fail(ex.getMessage());
+                    panel.setSending(false);
+                    panel.setStatus(null);
+                }
+            }
+        }.execute();
     }
 
     /** "Explicar" de um card SQL — reusa o mesmo fluxo de {@link #sendMessage}, sem o usuario precisar copiar/colar. */

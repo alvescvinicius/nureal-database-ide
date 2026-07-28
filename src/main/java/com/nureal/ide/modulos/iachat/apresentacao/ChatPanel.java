@@ -3,7 +3,6 @@ package com.nureal.ide.modulos.iachat.apresentacao;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Dimension;
-import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
@@ -12,7 +11,6 @@ import java.util.function.Consumer;
 
 import javax.swing.BorderFactory;
 import javax.swing.BoxLayout;
-import javax.swing.ButtonGroup;
 import javax.swing.DefaultComboBoxModel;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
@@ -22,7 +20,7 @@ import javax.swing.JPanel;
 import javax.swing.JScrollBar;
 import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
-import javax.swing.JToggleButton;
+import javax.swing.Scrollable;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
@@ -42,30 +40,6 @@ import com.nureal.ide.compartilhado.designsystem.IconType;
 final class ChatPanel extends JPanel {
 
     private static final long serialVersionUID = 1L;
-
-    /**
-     * Presets de prompt (Fase 4 do {@code AI-CHAT-MASTER-PLAN.md}): atalhos
-     * de TEXTO, nunca tools novas — cada um (exceto {@code ASK}, neutro)
-     * reescreve o campo de mensagem NA HORA com a instrucao + o SQL da aba
-     * ativa (ver {@code ChatActions#activeSqlSupplier}), pra que o usuario
-     * VEJA e possa editar o texto final antes de mandar (nunca uma
-     * transformacao escondida so no envio).
-     */
-    private enum Preset {
-        ASK("Perguntar", null),
-        SQL("SQL", "Me ajude com esta consulta SQL:"),
-        EXPLAIN("Explicar", "Explique esta consulta:"),
-        OPTIMIZE("Otimizar", "Sugira otimizacoes (indices, reescrita) para esta consulta:"),
-        DOCUMENT("Documentar", "Documente esta consulta (o que cada parte faz):");
-
-        final String label;
-        final String instruction;
-
-        Preset(String label, String instruction) {
-            this.label = label;
-            this.instruction = instruction;
-        }
-    }
 
     private final JPanel messagesContainer = new JPanel();
     private final JScrollPane scrollPane;
@@ -129,7 +103,21 @@ final class ChatPanel extends JPanel {
         messagesContainer.setOpaque(false);
         messagesContainer.setBorder(BorderFactory.createEmptyBorder(6, 6, 6, 6));
 
-        JPanel messagesWrapper = new JPanel(new BorderLayout());
+        // Scrollable#getScrollableTracksViewportWidth()=true trava a LARGURA
+        // deste painel na largura do viewport, nunca deixando um filho mais
+        // largo empurra-lo pra fora (ex.: o card de resultado de
+        // ExecuteSqlTool, com uma tabela de varias colunas — ver
+        // MessageRenderer#sqlResultCard — ja tem sua PROPRIA barra horizontal
+        // interna, dimensionada com largura fixa). Sem isto, o JScrollPane
+        // EXTERNO (que envolve a lista inteira de mensagens) tambem ganhava
+        // uma barra horizontal PROPRIA sempre que algum card era mais largo
+        // que a janela do chat — duas barras horizontais coladas uma na
+        // outra (a de fora e a da tabela), faceis de confundir e que
+        // pareciam "rolar juntas" ao arrastar (relatado pelo usuario). So a
+        // largura e travada (getScrollableTracksViewportHeight continua
+        // false) — a lista de mensagens ainda cresce em ALTURA normalmente,
+        // com scroll vertical de verdade.
+        JPanel messagesWrapper = new ScrollableWidthTrackingPanel();
         messagesWrapper.setOpaque(false);
         messagesWrapper.add(messagesContainer, BorderLayout.NORTH);
 
@@ -169,7 +157,6 @@ final class ChatPanel extends JPanel {
 
         JPanel inputWrapper = new JPanel(new BorderLayout(6, 4));
         inputWrapper.setBorder(BorderFactory.createEmptyBorder(6, 6, 6, 6));
-        inputWrapper.add(buildPresetRow(), BorderLayout.NORTH);
         inputWrapper.add(new JScrollPane(input), BorderLayout.CENTER);
         JPanel sendWrapper = new JPanel(new BorderLayout());
         sendWrapper.add(sendButton, BorderLayout.NORTH);
@@ -178,43 +165,6 @@ final class ChatPanel extends JPanel {
 
         add(inputWrapper, BorderLayout.SOUTH);
         setPreferredSize(new Dimension(420, 560));
-    }
-
-    /** Perguntar/SQL/Explicar/Otimizar/Documentar — so um ativo por vez (ver {@link Preset}). */
-    private JPanel buildPresetRow() {
-        JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
-        row.setOpaque(false);
-        ButtonGroup group = new ButtonGroup();
-        for (Preset preset : Preset.values()) {
-            JToggleButton button = new JToggleButton(preset.label);
-            button.setSelected(preset == Preset.ASK);
-            button.addActionListener(e -> applyPreset(preset));
-            group.add(button);
-            row.add(button);
-        }
-        return row;
-    }
-
-    /**
-     * Reescreve o campo de mensagem AGORA (nao so no envio) com a instrucao
-     * do preset + o SQL da aba ativa entre crases, se houver — o usuario
-     * ainda pode editar livremente antes de clicar "Enviar", que continua
-     * mandando exatamente o que estiver escrito, sem nenhuma transformacao
-     * adicional (criterio de aceite da Fase 4: nada de "magica" escondida).
-     * {@code ASK} (neutro) nao mexe no que ja estava digitado.
-     */
-    private void applyPreset(Preset preset) {
-        if (preset.instruction == null) {
-            return;
-        }
-        StringBuilder message = new StringBuilder(preset.instruction);
-        String sql = actions.activeSqlSupplier().get();
-        if (sql != null && !sql.isBlank()) {
-            message.append("\n\n```sql\n").append(sql.strip()).append("\n```");
-        }
-        input.setText(message.toString());
-        input.requestFocusInWindow();
-        input.setCaretPosition(input.getText().length());
     }
 
     void setOnSend(Consumer<String> onSend) {
@@ -429,5 +379,45 @@ final class ChatPanel extends JPanel {
         messagesContainer.remove(index);
         messagesContainer.add(replacement, index);
         revalidateAndScrollToBottom();
+    }
+
+    /**
+     * {@code JPanel} que implementa {@link Scrollable} so para travar a
+     * LARGURA na do viewport do {@code JScrollPane} que o envolve (ver o
+     * comentario em {@link #ChatPanel()}, onde e instanciado) — anonima nao
+     * serve aqui porque a sintaxe de classe anonima nao permite "extends
+     * JPanel implements Scrollable" ao mesmo tempo.
+     */
+    private static final class ScrollableWidthTrackingPanel extends JPanel implements Scrollable {
+        private static final long serialVersionUID = 1L;
+
+        ScrollableWidthTrackingPanel() {
+            super(new BorderLayout());
+        }
+
+        @Override
+        public boolean getScrollableTracksViewportWidth() {
+            return true;
+        }
+
+        @Override
+        public boolean getScrollableTracksViewportHeight() {
+            return false;
+        }
+
+        @Override
+        public Dimension getPreferredScrollableViewportSize() {
+            return getPreferredSize();
+        }
+
+        @Override
+        public int getScrollableUnitIncrement(java.awt.Rectangle visibleRect, int orientation, int direction) {
+            return 16;
+        }
+
+        @Override
+        public int getScrollableBlockIncrement(java.awt.Rectangle visibleRect, int orientation, int direction) {
+            return orientation == SwingConstants.VERTICAL ? visibleRect.height : visibleRect.width;
+        }
     }
 }
