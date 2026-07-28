@@ -107,6 +107,36 @@ class SqlRiskAnalyzerTest {
     }
 
     @Test
+    void cteNaoEsconceDeleteOuUpdateSemWhereDoAnalisador() {
+        // WITH ... AS (...) antes do verbo real nao pode fazer o analisador
+        // parar em "with" e considerar a instrucao segura (MySQL 8+ aceita
+        // CTE antes de DELETE/UPDATE) — bug corrigido: ver firstWord().
+        assertEquals("DELETE sem WHERE — apaga TODAS as linhas da tabela.",
+                SqlRiskAnalyzer.riskReason("WITH cte AS (SELECT 1) DELETE FROM users"));
+        assertEquals("UPDATE sem WHERE — altera TODAS as linhas da tabela.",
+                SqlRiskAnalyzer.riskReason("WITH cte AS (SELECT 1) UPDATE users SET active = 0"));
+    }
+
+    @Test
+    void cteComWhereContinuaSeguro() {
+        assertNull(SqlRiskAnalyzer.riskReason("WITH cte AS (SELECT 1) DELETE FROM users WHERE id = 1"));
+        assertNull(SqlRiskAnalyzer.riskReason("WITH cte AS (SELECT 1) SELECT * FROM cte"));
+    }
+
+    @Test
+    void isWriteOrDdlCobreEscritaEDefinicaoDeEstrutura() {
+        assertTrue(SqlRiskAnalyzer.isWriteOrDdl("INSERT INTO users (id) VALUES (1)"));
+        assertTrue(SqlRiskAnalyzer.isWriteOrDdl("UPDATE users SET active = 0 WHERE id = 1"));
+        assertTrue(SqlRiskAnalyzer.isWriteOrDdl("DELETE FROM users WHERE id = 1"));
+        assertTrue(SqlRiskAnalyzer.isWriteOrDdl("CREATE TABLE x (id INT)"));
+        assertTrue(SqlRiskAnalyzer.isWriteOrDdl("WITH cte AS (SELECT 1) DELETE FROM users WHERE id = 1"));
+        assertFalse(SqlRiskAnalyzer.isWriteOrDdl("SELECT * FROM users"));
+        assertFalse(SqlRiskAnalyzer.isWriteOrDdl("WITH cte AS (SELECT 1) SELECT * FROM cte"));
+        assertFalse(SqlRiskAnalyzer.isWriteOrDdl(null));
+        assertFalse(SqlRiskAnalyzer.isWriteOrDdl(""));
+    }
+
+    @Test
     void isStructuralChangeCobreApenasDdlDeEstrutura() {
         assertTrue(SqlRiskAnalyzer.isStructuralChange("CREATE TABLE x (id INT)"));
         assertTrue(SqlRiskAnalyzer.isStructuralChange("ALTER TABLE x ADD COLUMN y INT"));

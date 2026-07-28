@@ -1,6 +1,7 @@
 package com.nureal.ide.core.safety;
 
 import java.util.Locale;
+import java.util.Set;
 
 /**
  * Avalia se uma instrucao SQL e "de risco" e merece confirmacao antes de rodar:
@@ -51,6 +52,23 @@ public final class SqlRiskAnalyzer {
         return riskReason(sql) != null;
     }
 
+    private static final Set<String> WRITE_OR_DDL_VERBS = Set.of(
+            "insert", "update", "delete", "replace", "truncate", "drop", "alter", "rename", "create");
+
+    /**
+     * Verdadeiro se a instrucao escreve dados ou altera estrutura — usado por
+     * {@code ExecuteSqlTool} (chat com IA) para bloquear QUALQUER escrita/DDL,
+     * nao so os casos "arriscados" de {@link #riskReason} (que so cobre
+     * DELETE/UPDATE SEM WHERE, nao um INSERT ou um UPDATE/DELETE COM WHERE —
+     * a IA nao deve rodar nenhum desses sozinha, arriscado ou nao).
+     */
+    public static boolean isWriteOrDdl(String sql) {
+        if (sql == null || sql.isBlank()) {
+            return false;
+        }
+        return WRITE_OR_DDL_VERBS.contains(firstWord(stripCommentsAndStrings(sql)));
+    }
+
     /**
      * Verdadeiro se a instrucao e DDL (CREATE/ALTER/DROP/RENAME) — ou seja,
      * pode ter criado, removido ou alterado tabelas, views, procedures,
@@ -67,18 +85,66 @@ public final class SqlRiskAnalyzer {
         };
     }
 
-    /** Primeira palavra (minuscula) da instrucao, ignorando pontuacao inicial. */
+    /**
+     * Verbos que podem seguir um preambulo {@code WITH ... AS (...)} (CTE) —
+     * usados por {@link #firstWord} para achar o verbo REAL da instrucao
+     * quando ela comeca com WITH, em vez de parar em "with" e considerar
+     * tudo seguro.
+     */
+    private static final Set<String> STATEMENT_VERBS = Set.of("select", "insert", "update", "delete", "replace");
+
+    /**
+     * Primeira palavra (minuscula) da instrucao, ignorando pontuacao inicial —
+     * exceto quando a instrucao comeca com uma CTE ({@code WITH nome AS
+     * (...) DELETE ...}): nesse caso, "with" nao e um verbo de instrucao
+     * nenhum, entao continua procurando (pulando nomes de CTE, "recursive",
+     * "as" e os corpos entre parenteses, que sao ignorados pelo controle de
+     * profundidade abaixo) ate achar o verbo real (SELECT/INSERT/UPDATE/
+     * DELETE/REPLACE) no nivel 0 de parenteses. Sem isto, QUALQUER DELETE/
+     * UPDATE sem WHERE (ou DROP/TRUNCATE/ALTER) prefixado por uma CTE
+     * escapava do analisador de risco por inteiro — MySQL 8+ aceita WITH
+     * antes de DELETE/UPDATE, entao nao e um caso hipotetico.
+     */
     private static String firstWord(String s) {
-        int i = 0;
         int n = s.length();
-        while (i < n && !isWordChar(s.charAt(i))) {
-            i++;
+        int depth = 0;
+        boolean sawWith = false;
+        int i = 0;
+        while (i < n) {
+            char c = s.charAt(i);
+            if (c == '(') {
+                depth++;
+                i++;
+                continue;
+            }
+            if (c == ')') {
+                depth--;
+                i++;
+                continue;
+            }
+            if (depth > 0 || !isWordChar(c)) {
+                i++;
+                continue;
+            }
+            int j = i;
+            while (j < n && isWordChar(s.charAt(j))) {
+                j++;
+            }
+            String word = s.substring(i, j).toLowerCase(Locale.ROOT);
+            i = j;
+            if (!sawWith) {
+                if (word.equals("with")) {
+                    sawWith = true;
+                    continue;
+                }
+                return word;
+            }
+            if (STATEMENT_VERBS.contains(word)) {
+                return word;
+            }
+            // nome de CTE, "recursive", "as": ainda no preambulo, continua procurando
         }
-        int j = i;
-        while (j < n && isWordChar(s.charAt(j))) {
-            j++;
-        }
-        return s.substring(i, j).toLowerCase(Locale.ROOT);
+        return sawWith ? "with" : "";
     }
 
     /** Verdadeiro se existe um WHERE no nivel 0 de parenteses. */

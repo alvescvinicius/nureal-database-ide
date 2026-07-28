@@ -74,10 +74,15 @@ public final class ExecuteSqlTool implements Tool {
             return ToolResult.failure("Parametro obrigatorio \"sql\" nao informado.");
         }
 
-        String riskReason = SqlRiskAnalyzer.riskReason(sql);
-        if (riskReason != null) {
-            return ToolResult.failure("Operacao bloqueada: " + riskReason + " A IA nao pode confirmar operacoes "
-                    + "de risco sozinha — rode manualmente no editor SQL, onde a confirmacao aparece.");
+        // isWriteOrDdl ja cobre todos os verbos que SqlRiskAnalyzer#riskReason
+        // marcaria como risco (delete/update/truncate/drop/alter/rename/create
+        // sao subconjunto de WRITE_OR_DDL_VERBS) — checar riskReason tambem
+        // aqui seria codigo morto, nunca alcancado para este tool.
+        if (SqlRiskAnalyzer.isWriteOrDdl(sql)) {
+            return ToolResult.failure("Operacao bloqueada: a IA so pode executar consultas de leitura (SELECT). "
+                    + "Comandos de escrita (INSERT/UPDATE/DELETE/REPLACE) ou de definicao de estrutura "
+                    + "(DROP/ALTER/CREATE/TRUNCATE/RENAME) devem ser rodados manualmente no editor SQL, "
+                    + "onde a confirmacao aparece.");
         }
 
         ConexaoAtivaPort manager = accessor.connectionManager();

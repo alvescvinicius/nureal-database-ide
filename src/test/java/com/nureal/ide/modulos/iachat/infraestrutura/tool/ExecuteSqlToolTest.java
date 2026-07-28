@@ -59,27 +59,32 @@ class ExecuteSqlToolTest {
     }
 
     @Test
-    void bloqueiaComandoDeRiscoSemTocarNaConexao() {
+    void bloqueiaComandoDeEscritaOuDdlSemTocarNaConexao() {
         // O manager falha se qualquer metodo for chamado - prova que o bloqueio
-        // acontece ANTES de qualquer tentativa de usar a conexao.
-        ConnectionManager manager = new ConnectionManager(null) {
-            @Override
-            public synchronized Connection getConnection() {
-                throw new AssertionError("nao deveria pedir a conexao pra um comando de risco");
-            }
+        // acontece ANTES de qualquer tentativa de usar a conexao. Cobre tanto
+        // um verbo "arriscado" no sentido de SqlRiskAnalyzer#riskReason
+        // (DELETE sem WHERE) quanto um que riskReason NUNCA marcou (INSERT) —
+        // isWriteOrDdl bloqueia os dois igualmente, sem diferenciar.
+        for (String sql : List.of("DELETE FROM usuarios", "INSERT INTO usuarios (nome) VALUES ('x')")) {
+            ConnectionManager manager = new ConnectionManager(null) {
+                @Override
+                public synchronized Connection getConnection() {
+                    throw new AssertionError("nao deveria pedir a conexao pra \"" + sql + "\"");
+                }
 
-            @Override
-            public synchronized boolean isConnected() {
-                throw new AssertionError("nao deveria checar a conexao pra um comando de risco");
-            }
-        };
-        ExecuteSqlTool tool = new ExecuteSqlTool(fakeAccessor(manager));
+                @Override
+                public synchronized boolean isConnected() {
+                    throw new AssertionError("nao deveria checar a conexao pra \"" + sql + "\"");
+                }
+            };
+            ExecuteSqlTool tool = new ExecuteSqlTool(fakeAccessor(manager));
 
-        ToolResult result = tool.execute(new ToolRequest("execute_sql",
-                Map.of("sql", "DELETE FROM usuarios"), "conv-1", "req-1", AgentContext.EMPTY));
+            ToolResult result = tool.execute(new ToolRequest("execute_sql",
+                    Map.of("sql", sql), "conv-1", "req-1", AgentContext.EMPTY));
 
-        assertFalse(result.success());
-        assertTrue(result.error().contains("DELETE sem WHERE"));
+            assertFalse(result.success());
+            assertTrue(result.error().contains("leitura"));
+        }
     }
 
     @Test
