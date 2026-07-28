@@ -271,15 +271,19 @@ public class MainWindow extends JFrame {
 
 	/**
 	 * Altura de linha (em px, ANTES do zoom/modo compacto — ver
-	 * {@link #resultRowHeightBasePx()}) das grades de resultado — pedido
-	 * explicito do usuario: "as vezes fica muito apertado... uma opcao
-	 * permitindo alguns tamanhos". Independente do zoom da interface (que
-	 * escala tudo) e do modo compacto (que reduz tudo): este controle mexe
-	 * SO no espaco entre as linhas da grade de resultados, pensado para quem
-	 * quer letras no tamanho normal mas linhas mais respiradas (ou o
-	 * contrario, mais linhas visiveis de uma vez). {@code 22} (indice 1,
+	 * {@link #resultRowHeightBasePx()}) de TODOS os componentes de linha
+	 * unica (icone + texto) da sessao: grade de resultados, arvore de
+	 * Objetos e lista de Conexoes — pedido explicito do usuario: "as vezes
+	 * fica muito apertado... uma opcao permitindo alguns tamanhos", estendido
+	 * depois para os 3 componentes (antes so a grade de resultados usava
+	 * este controle; arvore/conexoes ficavam presas a uma altura fixa,
+	 * inconsistente com a mesma preferencia). Independente do zoom da
+	 * interface (que escala tudo) e do modo compacto (que reduz tudo): este
+	 * controle mexe SO no espaco entre linhas. {@code 22} (indice 1,
 	 * "Padrao") e o valor que a grade sempre usou antes deste controle
-	 * existir.
+	 * existir. Historico/Consultas Salvas NAO usam esta escala — sao cards de
+	 * duas linhas (48/52px), estrutura diferente o bastante pra quebrar o
+	 * layout se forem espremidos nos mesmos 18-34px.
 	 */
 	private static final int[] ROW_SPACING_LEVELS = { 18, 22, 28, 34 };
 	private static final String[] ROW_SPACING_LABELS = { "Compacta", "Padrao", "Confortavel", "Espacosa" };
@@ -1055,10 +1059,16 @@ public class MainWindow extends JFrame {
 		zoomMenu.add(reset);
 		menu.add(zoomMenu);
 
-		// Espacamento de linhas da grade de resultados — pedido explicito do
-		// usuario, independente do Zoom acima (que escala a interface
-		// inteira): so a altura da linha das grades de resultado.
-		JMenu rowSpacingMenu = new JMenu("Espacamento de linhas (grade)");
+		// Espacamento de linhas — pedido explicito do usuario, independente do
+		// Zoom acima (que escala a interface inteira): so a altura de linha
+		// dos componentes em formato de linha unica (icone + texto) — grade
+		// de resultados, arvore de Objetos e lista de Conexoes, que ja
+		// compartilhavam a MESMA constante de altura entre si (ver
+		// ConnectionsPanel#DEFAULT_ROW_HEIGHT) antes desta preferencia
+		// existir. Historico/Consultas Salvas ficam de fora: sao cards de
+		// DUAS linhas (48/52px), estrutura diferente o bastante pra essa
+		// mesma escala (18-34px) quebrar o layout deles.
+		JMenu rowSpacingMenu = new JMenu("Espacamento de linhas (grade, arvore, conexoes)");
 		for (int i = 0; i < ROW_SPACING_LEVELS.length; i++) {
 			int idx = i;
 			String mark = (i == rowSpacingIndex) ? "✓ " : "      ";
@@ -1461,22 +1471,22 @@ public class MainWindow extends JFrame {
 
 	/**
 	 * Altura de linha BASE (antes de {@link #scaledPx}, que continua
-	 * aplicando zoom/modo compacto por cima) que {@link ResultGrid} usa para
-	 * TODAS as grades de resultado da sessao — trocar o indice reconstroi as
-	 * grades ja abertas (ver {@link #setRowSpacingIndex}) do mesmo jeito que
-	 * mudar o zoom ja fazia.
+	 * aplicando zoom/modo compacto por cima) usada por {@link ResultGrid}, a
+	 * arvore de Objetos e a lista de Conexoes — trocar o indice reconstroi/
+	 * reaplica nos 3 (ver {@link #setRowSpacingIndex}/{@link #refreshDynamicSizing})
+	 * do mesmo jeito que mudar o zoom ja fazia.
 	 */
 	int resultRowHeightBasePx() {
 		return ROW_SPACING_LEVELS[rowSpacingIndex];
 	}
 
-	/** Define o espacamento de linha da grade (0..ROW_SPACING_LEVELS.length-1) e reconstroi as grades abertas. */
+	/** Define o espacamento de linha (0..ROW_SPACING_LEVELS.length-1) e reaplica em grade/arvore/conexoes. */
 	private void setRowSpacingIndex(int index) {
 		rowSpacingIndex = clampRowSpacingIndex(index);
 		refreshDynamicSizing();
 		saveUiState();
 		if (statusBar != null) {
-			statusBar.setText(" Espacamento de linhas da grade: " + ROW_SPACING_LABELS[rowSpacingIndex] + ".");
+			statusBar.setText(" Espacamento de linhas: " + ROW_SPACING_LABELS[rowSpacingIndex] + ".");
 		}
 	}
 
@@ -1553,9 +1563,9 @@ public class MainWindow extends JFrame {
 	 * construidos (linhas da arvore, cartoes de conexao, grade de resultados).
 	 */
 	private void refreshDynamicSizing() {
-		objectExplorer.setRowHeight(scaledPx(ConnectionsPanel.DEFAULT_ROW_HEIGHT));
+		objectExplorer.setRowHeight(scaledPx(resultRowHeightBasePx()));
 		if (connectionsPanel != null) {
-			connectionsPanel.setRowHeight(scaledPx(ConnectionsPanel.DEFAULT_ROW_HEIGHT));
+			connectionsPanel.setRowHeight(scaledPx(resultRowHeightBasePx()));
 		}
 		// Reconstroi as abas de resultado (tabela, gutter e cabecalho usam
 		// tamanhos fixos definidos na hora da criacao do JTable).
@@ -1758,7 +1768,7 @@ public class MainWindow extends JFrame {
 	 */
 	private JComponent buildLeftSide() {
 		connectionsPanel = new ConnectionsPanel(connectionStore, this::connectTo, this::disconnectFrom);
-		connectionsPanel.setRowHeight(scaledPx(ConnectionsPanel.DEFAULT_ROW_HEIGHT));
+		connectionsPanel.setRowHeight(scaledPx(resultRowHeightBasePx()));
 		// So Conexoes precisa de teto (fica sempre visivel, ACIMA das 4 abas
 		// — ver mais abaixo): Queries Salvas/Historico agora sao conteudo de
 		// aba, cada uma ocupa a altura TODA da sidebar quando selecionada, em

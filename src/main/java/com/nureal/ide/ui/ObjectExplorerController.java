@@ -118,7 +118,7 @@ final class ObjectExplorerController {
 		// tabelas/views/procedures) deixava uma caixa cinza vazia enorme
 		// entre a arvore e o proximo grupo (WORKSPACE) da barra lateral.
 		objectTree.setVisibleRowCount(12);
-		objectTree.setRowHeight(owner.scaledPx(ConnectionsPanel.DEFAULT_ROW_HEIGHT));
+		objectTree.setRowHeight(owner.scaledPx(owner.resultRowHeightBasePx()));
 		objectTree.setBorder(BorderFactory.createEmptyBorder(4, 8, 4, 4));
 		objectTree.setCellRenderer(new ObjectTreeCellRenderer());
 		TreeHoverTracker.installOnTree(objectTree);
@@ -262,6 +262,15 @@ final class ObjectExplorerController {
 			return;
 		}
 		String schemaName = owner.currentSchema().name();
+		// Capturado ANTES de iniciar a SwingWorker (mesmo padrao ja usado em
+		// #createSchema/#deleteSchema): se o usuario trocar de aba/conexao
+		// enquanto este refresh (lento, roda em segundo plano) ainda esta em
+		// andamento, "ws" continua apontando pro workspace de ONDE o refresh
+		// foi pedido — o "done()" abaixo so aplica o resultado se essa ainda
+		// for a workspace ATIVA. Sem isto, os metadados/autocomplete/arvore da
+		// conexao/schema ERRADOS (o que ficou ativo no meio tempo) eram
+		// sobrescritos pelos dados da conexao de origem do refresh.
+		Conexao ws = owner.activeWorkspace();
 		if (manual && owner.statusBar() != null) {
 			owner.statusBar().setText(" Atualizando objetos de " + schemaName + "...");
 		}
@@ -276,9 +285,10 @@ final class ObjectExplorerController {
 			protected void done() {
 				try {
 					SchemaInfo schema = get();
-					if (owner.activeWorkspace() != null) {
-						owner.activeWorkspace().schema = schema;
+					if (ws == null || ws != owner.activeWorkspace()) {
+						return; // usuario trocou de conexao/aba antes do refresh terminar
 					}
+					ws.schema = schema;
 					owner.metadataCache().set(schema);
 					owner.completionProvider().refresh(schema);
 					owner.tableMetadataCache().clear();

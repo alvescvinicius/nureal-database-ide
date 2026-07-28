@@ -783,16 +783,26 @@ final class DdlAssistantDialog {
                         "Assistente de DDL", JOptionPane.WARNING_MESSAGE);
                 return;
             }
-            // Qualquer remocao (coluna/FK/indice) e destrutiva/irreversivel — pede
-            // confirmacao extra, separada da execucao em si (mesmo criterio ja
-            // usado em outras acoes destrutivas do app, ex.: Backup/Restore).
+            // Qualquer remocao (coluna/FK/indice) OU modificacao de coluna
+            // existente (MODIFY COLUMN pode truncar/rejeitar dados, ver
+            // hasDestructiveChanges) pede confirmacao extra, separada da
+            // execucao em si (mesmo criterio ja usado em outras acoes
+            // destrutivas do app, ex.: Backup/Restore).
             if (alterMode && hasDestructiveChanges()) {
+                boolean onlyModified = collectDroppedColumns().isEmpty() && collectDroppedForeignKeys().isEmpty()
+                        && collectDroppedIndexes().isEmpty();
+                String message = onlyModified
+                        ? "Esta alteracao vai MODIFICAR coluna(s) existentes da tabela \"" + alterTableName
+                                + "\" (tipo, tamanho, nulo ou default) — dependendo da mudanca, dados existentes "
+                                + "podem ser truncados ou rejeitados, e a operacao nao pode ser desfeita."
+                        : "Esta alteracao vai REMOVER e/ou MODIFICAR permanentemente coluna(s), chave(s) "
+                                + "estrangeira(s) e/ou indice(s) existentes da tabela \"" + alterTableName
+                                + "\" — dados dessas colunas podem ser perdidos ou truncados, e a operacao nao "
+                                + "pode ser desfeita.";
                 int choice = JOptionPane.showConfirmDialog(dialog,
-                        "Esta alteracao vai REMOVER permanentemente coluna(s), chave(s) estrangeira(s) e/ou "
-                                + "indice(s) existentes da tabela \"" + alterTableName + "\" — dados dessas colunas "
-                                + "sao perdidos e a operacao nao pode ser desfeita.\n\nConfira a aba \"DDL "
-                                + "(pre-visualizacao)\" antes, se ainda nao conferiu. Continuar mesmo assim?",
-                        "Confirmar remocao", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+                        message + "\n\nConfira a aba \"DDL (pre-visualizacao)\" antes, se ainda nao conferiu. "
+                                + "Continuar mesmo assim?",
+                        "Confirmar alteracao", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
                 if (choice != JOptionPane.YES_OPTION) {
                     return;
                 }
@@ -1007,10 +1017,20 @@ final class DdlAssistantDialog {
             return dropped;
         }
 
-        /** Se ha QUALQUER modificacao ou remocao pendente (usado so para decidir se pede confirmacao extra). */
+        /**
+         * Se ha QUALQUER remocao OU modificacao de coluna pendente (usado so
+         * para decidir se pede confirmacao extra). MODIFY COLUMN entra aqui
+         * tambem, nao so DROP: reduzir o tamanho de um VARCHAR ou trocar
+         * "aceita nulo" para "nao aceita" pode truncar ou rejeitar dados
+         * existentes silenciosamente — tao arriscado quanto uma remocao, so
+         * que sem o aviso explicito de "REMOVER" no texto. Nao tenta
+         * distinguir um MODIFY inofensivo (ex.: so aumentar o tamanho) de um
+         * arriscado: o custo de uma confirmacao a mais para uma mudanca
+         * inofensiva e bem menor que o de truncar dados sem avisar.
+         */
         private boolean hasDestructiveChanges() {
             return !collectDroppedColumns().isEmpty() || !collectDroppedForeignKeys().isEmpty()
-                    || !collectDroppedIndexes().isEmpty();
+                    || !collectDroppedIndexes().isEmpty() || !collectModifiedColumns().isEmpty();
         }
 
         /** "varchar(255)" -&gt; {"VARCHAR","255"}; "int" -&gt; {"INT",""}; "tinyint(1) unsigned" -&gt; {"TINYINT","1"}. */
