@@ -45,10 +45,19 @@ public final class MySqlDumpRunner implements BackupPort {
     public record RestoreOptions(String executablePath, ConnectionTarget target, String schema) {
     }
 
-    /** Resultado de uma execucao: codigo de saida (0 = sucesso) e se o processo chegou a rodar. */
-    public record RunResult(int exitCode) {
+    /**
+     * Resultado de uma execucao: codigo de saida (0 = processo terminou sem
+     * erro fatal) e se alguma linha de {@code stderr} parecia um erro real
+     * (ver {@link #LINHA_DE_ERRO}). As duas coisas sao independentes: o
+     * {@code mysqldump} pode sair com codigo 0 mesmo tendo falhado em uma
+     * parte do dump (ex.: sem privilegio {@code PROCESS} para
+     * routines/triggers) — ele avisa em stderr e segue em frente. Por isso
+     * {@link #success()} exige as duas condicoes, para nao reportar
+     * "concluido com sucesso" quando na verdade so uma parte do dump falhou.
+     */
+    public record RunResult(int exitCode, boolean hadErrorOutput) {
         public boolean success() {
-            return exitCode == 0;
+            return exitCode == 0 && !hadErrorOutput;
         }
     }
 
@@ -119,20 +128,34 @@ public final class MySqlDumpRunner implements BackupPort {
         return (configured == null || configured.isBlank()) ? defaultName : configured.trim();
     }
 
+    /**
+     * Reconhece a linha de erro real que {@code mysqldump}/{@code mysql}
+     * emitem em stderr (ex.: {@code "mysqldump: Error: 'Access denied..."})
+     * — distinta de avisos benignos ("-- Warning: ...") que nao indicam
+     * falha. Usada por {@link #runAndStreamErrors} para nao deixar um erro
+     * assim passar despercebido quando o processo ainda sai com codigo 0.
+     */
+    private static final java.util.regex.Pattern LINHA_DE_ERRO = java.util.regex.Pattern
+            .compile("^\\S+:\\s*Error", java.util.regex.Pattern.CASE_INSENSITIVE);
+
     private static RunResult runAndStreamErrors(ProcessBuilder pb, Consumer<String> onLogLine)
             throws IOException, InterruptedException {
         Process process = pb.start();
+        boolean[] hadErrorOutput = {false};
         try (BufferedReader reader = new BufferedReader(
                 new InputStreamReader(process.getErrorStream(), StandardCharsets.UTF_8))) {
             String line;
             while ((line = reader.readLine()) != null) {
+                if (LINHA_DE_ERRO.matcher(line).find()) {
+                    hadErrorOutput[0] = true;
+                }
                 if (onLogLine != null) {
                     onLogLine.accept(line);
                 }
             }
         }
         int exitCode = process.waitFor();
-        return new RunResult(exitCode);
+        return new RunResult(exitCode, hadErrorOutput[0]);
     }
 
     /**

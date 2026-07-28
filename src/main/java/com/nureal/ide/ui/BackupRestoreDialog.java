@@ -253,6 +253,14 @@ final class BackupRestoreDialog {
                             appendLog(backupLog, "Backup concluido com sucesso.");
                             JOptionPane.showMessageDialog(dialog, "Backup salvo em \"" + filePath + "\".",
                                     "Backup", JOptionPane.INFORMATION_MESSAGE);
+                        } else if (result.exitCode() == 0 && result.hadErrorOutput()) {
+                            backupProgress.setValue(100);
+                            appendLog(backupLog, "Backup concluido, mas com erros durante a execucao — veja o log acima.");
+                            JOptionPane.showMessageDialog(dialog,
+                                    "O backup terminou, mas houve erros durante a execucao (ex.: falta de "
+                                            + "privilegio para extrair alguma routine/trigger) — o arquivo em \""
+                                            + filePath + "\" pode estar incompleto. Veja o log para detalhes.",
+                                    "Backup", JOptionPane.WARNING_MESSAGE);
                         } else {
                             appendLog(backupLog, "mysqldump encerrou com codigo " + result.exitCode() + ".");
                             JOptionPane.showMessageDialog(dialog,
@@ -370,6 +378,13 @@ final class BackupRestoreDialog {
                             appendLog(restoreLog, "Restauracao concluida com sucesso.");
                             JOptionPane.showMessageDialog(dialog, "Restauracao concluida.",
                                     "Restaurar", JOptionPane.INFORMATION_MESSAGE);
+                        } else if (result.exitCode() == 0 && result.hadErrorOutput()) {
+                            restoreProgress.setValue(100);
+                            appendLog(restoreLog, "Restauracao concluida, mas com erros durante a execucao — veja o log acima.");
+                            JOptionPane.showMessageDialog(dialog,
+                                    "A restauracao terminou, mas houve erros durante a execucao — o esquema \""
+                                            + schemaName + "\" pode estar incompleto. Veja o log para detalhes.",
+                                    "Restaurar", JOptionPane.WARNING_MESSAGE);
                         } else {
                             appendLog(restoreLog, "mysql encerrou com codigo " + result.exitCode() + ".");
                             JOptionPane.showMessageDialog(dialog,
