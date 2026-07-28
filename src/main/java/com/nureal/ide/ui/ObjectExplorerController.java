@@ -288,9 +288,9 @@ final class ObjectExplorerController {
 					if (ws == null || ws != owner.activeWorkspace()) {
 						return; // usuario trocou de conexao/aba antes do refresh terminar
 					}
-					ws.schema = schema;
+					ws.setSchema(schema);
 					owner.metadataCache().set(schema);
-					owner.completionProvider().refresh(schema);
+					owner.completionProvider().refresh(ws.loadedSchemas.values(), schema.name());
 					owner.tableMetadataCache().clear();
 					populateTree(schema);
 					if (owner.statusBar() != null) {
@@ -604,8 +604,7 @@ final class ObjectExplorerController {
 			owner.statusBar().setText(" Esta conexao usa um esquema fixo definido no cadastro.");
 			return;
 		}
-		owner.activeWorkspace().schema = null;
-		owner.setCurrentSchema(null);
+		owner.setCurrentSchema(null); // ja zera activeWorkspace().schema tambem (ver MainWindow#setCurrentSchema)
 		buildSchemaPicker(owner.activeWorkspace().schemaList);
 		owner.statusBar().setText(" Selecione um esquema (" + owner.activeWorkspace().schemaList.size() + " disponiveis).");
 	}

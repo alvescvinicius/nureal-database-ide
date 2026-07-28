@@ -10,6 +10,7 @@ import com.nureal.ide.modulos.metadados.dominio.entidades.SchemaInfo;
 import com.nureal.ide.modulos.metadados.dominio.entidades.TableInfo;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -52,8 +53,30 @@ public final class GeradorDeSugestoes {
 
     private final List<String> keywords;
 
-    private volatile SchemaInfo schema;
-    /** Indice tabela(lowercase) -> TableInfo, para resolver "alias." rapido. */
+    /**
+     * TODOS os esquemas conhecidos da conexao ativa (nao so um) — pedido
+     * explicito do usuario: rodar/completar uma consulta cruzando schemas
+     * (ex.: {@code db1.tabela1} junto de {@code db2.tabela2}) nao deveria
+     * exigir "selecionar um esquema" primeiro. Populado por {@link #refreshAll},
+     * chamado com TODOS os esquemas ja carregados da conexao ATIVA (ver
+     * {@code Conexao#loadedSchemas} em {@code com.nureal.ide.ui}) — nunca
+     * mistura esquemas de conexoes DIFERENTES, porque quem chama sempre
+     * passa a colecao inteira da conexao ativa no momento, substituindo (nao
+     * acumulando) o que havia antes.
+     */
+    private volatile List<SchemaInfo> schemas = List.of();
+    /** Nome do esquema "corrente" (ver {@link #refreshAll}) — usado so para decidir QUANDO uma sugestao de tabela precisa vir qualificada ("schema.tabela") ou pode ficar so o nome, como sempre foi. */
+    private volatile String currentSchemaName;
+    /**
+     * Indice tabela(lowercase, SEM schema) -> TableInfo, para resolver
+     * "alias." rapido (ver {@link #addQualifiedColumns}) — o resolvedor de
+     * contexto do cursor ({@code CaretContextResolver}) ainda nao entende
+     * {@code schema.tabela} num FROM/JOIN (fora do escopo desta rodada, ver
+     * {@code CaretContextResolver}), entao esta busca continua so por nome
+     * de tabela; em caso de colisao (mesmo nome em 2+ schemas), prefere a
+     * tabela do {@link #currentSchemaName}, senao a primeira encontrada —
+     * melhor resolver ALGUMA coisa do que nenhuma.
+     */
     private volatile Map<String, TableInfo> tablesByName = new LinkedHashMap<>();
 
     private volatile FonteDeChavesEstrangeiras fkLookup = tableName -> List.of();
@@ -70,13 +93,34 @@ public final class GeradorDeSugestoes {
         this.keywords = keywords;
     }
 
-    /** Atualiza o cache apos a estrutura do banco ser lida. */
-    public void refresh(SchemaInfo schema) {
-        this.schema = schema;
+    /**
+     * Atualiza o cache apos a estrutura do banco ser lida — recebe TODOS os
+     * esquemas ja carregados da conexao ATIVA de uma vez (substitui, nunca
+     * acumula sozinho: quem chama decide o escopo, ver {@link #schemas}) e
+     * qual deles e o "corrente" ({@code currentSchemaName}, pode ser
+     * {@code null} — conexao sem nenhum esquema aberto ainda, so com
+     * schemas de outras abas, ou nenhum mesmo).
+     */
+    public void refreshAll(Collection<SchemaInfo> schemas, String currentSchemaName) {
+        this.schemas = (schemas == null) ? List.of() : List.copyOf(schemas);
+        this.currentSchemaName = currentSchemaName;
         Map<String, TableInfo> index = new LinkedHashMap<>();
-        if (schema != null) {
-            for (TableInfo t : schema.tables()) {
-                index.put(t.name().toLowerCase(Locale.ROOT), t);
+        // Esquema corrente primeiro: em caso de colisao de nome entre
+        // schemas, a tabela do corrente "vence" no indice bare-name (ver
+        // javadoc de #tablesByName).
+        for (SchemaInfo s : this.schemas) {
+            if (s != null && s.name().equals(currentSchemaName)) {
+                for (TableInfo t : s.tables()) {
+                    index.putIfAbsent(t.name().toLowerCase(Locale.ROOT), t);
+                }
+            }
+        }
+        for (SchemaInfo s : this.schemas) {
+            if (s == null) {
+                continue;
+            }
+            for (TableInfo t : s.tables()) {
+                index.putIfAbsent(t.name().toLowerCase(Locale.ROOT), t);
             }
         }
         this.tablesByName = index;
@@ -154,13 +198,29 @@ public final class GeradorDeSugestoes {
     }
 
     private void addTables(Map<String, String> out) {
-        SchemaInfo s = this.schema;
-        if (s == null) {
-            return;
+        for (SchemaInfo s : schemas) {
+            for (TableInfo t : s.tables()) {
+                out.putIfAbsent(qualifiedTableName(s, t), "tabela" + schemaSuffix(s));
+            }
         }
-        for (TableInfo t : s.tables()) {
-            out.putIfAbsent(t.name(), "tabela");
-        }
+    }
+
+    /**
+     * Nome pronto pra inserir no editor: SO o nome da tabela quando ela e do
+     * esquema CORRENTE (ou so ha um esquema conhecido — comportamento
+     * identico ao de antes desta funcionalidade, o caso comum) — qualificado
+     * como {@code "schema.tabela"} quando e de outro esquema, senao a
+     * instrucao gerada nao rodaria (nome sozinho pode nao existir ou
+     * apontar pra tabela ERRADA no esquema corrente).
+     */
+    private String qualifiedTableName(SchemaInfo s, TableInfo t) {
+        boolean sameAsCurrent = s.name().equals(currentSchemaName) || currentSchemaName == null;
+        return sameAsCurrent ? t.name() : s.name() + "." + t.name();
+    }
+
+    /** " (outro-esquema)" na descricao quando a tabela nao e do esquema corrente — deixa claro de onde ela vem no popup. */
+    private String schemaSuffix(SchemaInfo s) {
+        return (s.name().equals(currentSchemaName) || currentSchemaName == null) ? "" : " (" + s.name() + ")";
     }
 
     /**
@@ -182,10 +242,6 @@ public final class GeradorDeSugestoes {
      */
     private void addTablesForJoinContext(Map<String, String> out, List<String> tablesInScope) {
         fkSnippets.clear();
-        SchemaInfo s = this.schema;
-        if (s == null) {
-            return;
-        }
         Set<String> already = new LinkedHashSet<>();
         for (String t : tablesInScope) {
             already.add(t.toLowerCase(Locale.ROOT));
@@ -209,8 +265,10 @@ public final class GeradorDeSugestoes {
                 out.put(refTable, "relacionado por FK a " + baseTable);
             }
         }
-        for (TableInfo t : s.tables()) {
-            out.putIfAbsent(t.name(), "tabela");
+        for (SchemaInfo s : schemas) {
+            for (TableInfo t : s.tables()) {
+                out.putIfAbsent(qualifiedTableName(s, t), "tabela" + schemaSuffix(s));
+            }
         }
     }
 
@@ -252,10 +310,6 @@ public final class GeradorDeSugestoes {
      * Em ambos os casos as colunas entram na ordem de ORDINAL_POSITION.
      */
     private void addScopedColumns(Map<String, String> out, List<String> tables) {
-        SchemaInfo s = this.schema;
-        if (s == null) {
-            return;
-        }
         boolean added = false;
         for (String name : tables) {
             TableInfo t = tablesByName.get(name.toLowerCase(Locale.ROOT));
@@ -269,10 +323,12 @@ public final class GeradorDeSugestoes {
         if (added) {
             return;
         }
-        // fallback: todas as colunas do schema (cada tabela em sua ordem de criacao)
-        for (TableInfo t : s.tables()) {
-            for (ColumnInfo col : t.columns()) {
-                out.putIfAbsent(col.name(), "coluna (" + t.name() + ")");
+        // fallback: todas as colunas de TODOS os esquemas conhecidos (cada tabela em sua ordem de criacao)
+        for (SchemaInfo s : schemas) {
+            for (TableInfo t : s.tables()) {
+                for (ColumnInfo col : t.columns()) {
+                    out.putIfAbsent(col.name(), "coluna (" + qualifiedTableName(s, t) + ")");
+                }
             }
         }
     }

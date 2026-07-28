@@ -2711,14 +2711,14 @@ public class MainWindow extends JFrame {
 		rebuildEditorTabs(w.tabs, w.selectedTab, w.tabResults);
 		if (w.schema != null) {
 			metadataCache.set(w.schema);
-			completionProvider.refresh(w.schema);
+			completionProvider.refresh(w.loadedSchemas.values(), w.schema.name());
 			objectExplorer.populateTree(w.schema);
 		} else if (w.schemaList != null) {
-			completionProvider.refresh(null);
+			completionProvider.refresh(w.loadedSchemas.values(), null);
 			objectExplorer.buildSchemaPicker(w.schemaList);
 		} else {
 			setCurrentSchema(null);
-			completionProvider.refresh(null);
+			completionProvider.refresh(w.loadedSchemas.values(), null);
 			String label = (w.profile == null) ? "Sem conexao"
 					: (w.mgr.isConnected() ? "Selecione um esquema" : "Desconectado");
 			objectExplorer.showDisconnected(label);
@@ -2789,7 +2789,7 @@ public class MainWindow extends JFrame {
 	void setCurrentSchema(SchemaInfo schema) {
 		currentSchema = schema;
 		if (activeWorkspace != null) {
-			activeWorkspace.schema = schema;
+			activeWorkspace.setSchema(schema);
 		}
 	}
 
@@ -3287,9 +3287,9 @@ public class MainWindow extends JFrame {
 						@SuppressWarnings("unchecked")
 						List<String> schemas = (List<String>) result;
 						ws.schemaList = schemas;
-						ws.schema = null;
+						ws.setSchema(null);
 					} else {
-						ws.schema = (SchemaInfo) result;
+						ws.setSchema((SchemaInfo) result);
 						ws.schemaList = null;
 					}
 					activateWorkspace(ws);
@@ -3338,7 +3338,7 @@ public class MainWindow extends JFrame {
 			resultsController.closeOpenCursors();
 		}
 		w.mgr.close();
-		w.schema = null;
+		w.setSchema(null);
 		w.schemaList = null;
 		if (activeWorkspace == w) {
 			setCurrentSchema(null);
@@ -3380,7 +3380,7 @@ public class MainWindow extends JFrame {
 				try {
 					SchemaInfo schema = get();
 					if (activeWorkspace != null) {
-						activeWorkspace.schema = schema;
+						activeWorkspace.setSchema(schema);
 						// mantem schemaList: e o que permite "Trocar esquema..." depois,
 						// sem precisar desconectar e reconectar (ver maybeShowObjectContextMenu).
 					}
@@ -3414,7 +3414,10 @@ public class MainWindow extends JFrame {
 						scheduleSave();
 					}
 					metadataCache.set(schema);
-					completionProvider.refresh(schema);
+					List<SchemaInfo> known = (activeWorkspace != null)
+							? new ArrayList<>(activeWorkspace.loadedSchemas.values())
+							: List.of(schema);
+					completionProvider.refresh(known, schemaName);
 					objectExplorer.populateTree(schema);
 					setConnectedState(schemaName);
 					updateWorkspaceContextBar();
@@ -3507,37 +3510,23 @@ public class MainWindow extends JFrame {
 		if (editor == null) {
 			return;
 		}
-		// Conexao com varios esquemas (nao um schema fixo no cadastro): cada
-		// aba pode pertencer a um esquema diferente (ver SqlEditorPane#getSchema/
-		// #setSchema). Antes de rodar, garante que a conexao esta "apontando"
-		// (USE) para o esquema DESTA aba especifica — nao o que outra aba
-		// deixou selecionado por ultimo — conectando nele primeiro se
-		// necessario. Isto elimina o erro "No database selected" e a
-		// necessidade de reabrir o esquema na arvore antes de executar.
+		// Conexao com varios esquemas: cada aba PODE ter um esquema preferido
+		// (ver SqlEditorPane#getSchema/#setSchema), usado so para resolver
+		// nomes de tabela NAO qualificados escritos nela — nunca uma
+		// EXIGENCIA para rodar. Pedido explicito do usuario: "nao deveria ter
+		// limitacao para eu rodar conectado a um esquema... eu poderia ter
+		// acesso a mais de um esquema e combinar tabelas em queries" — quem
+		// decide cruzar esquemas e o proprio SQL (schema.tabela), a IDE nunca
+		// bloqueia nem reescreve a instrucao esperando uma escolha antes.
+		// So troca o catalogo da conexao (USE) quando a aba TEM um esquema
+		// preferido diferente do que a conexao esta apontando agora — sem
+		// isso, um "SELECT * FROM tabela" sem qualificar nesta aba resolveria
+		// no esquema ERRADO; com a aba sem preferencia nenhuma, roda direto
+		// no que a conexao ja estiver, sem perguntar nada.
 		if (activeWorkspace != null && activeWorkspace.schemaList() != null) {
-			String needed = editor.getSchema();
-			if (needed == null || needed.isBlank()) {
-				// Aba sem esquema proprio ainda (ex.: criada antes de qualquer
-				// esquema ter sido aberto nesta conexao, ou sessao salva antes
-				// desta funcionalidade existir) — cai no esquema aberto no
-				// momento, se houver, e passa a "adotar" ele dai em diante.
-				needed = currentActiveSchemaName();
-				if (needed == null) {
-					// Nunca foi aberto NENHUM esquema nesta conexao ainda — nao ha
-					// como adivinhar qual a aba deveria usar (a conexao pode ter
-					// dezenas deles). Em vez de so avisar na barra de status e
-					// travar a execucao (jeito antigo, que o usuario relatou como
-					// "nao executou a instrucao" — o aviso passava despercebido),
-					// pergunta o esquema agora mesmo e ja executa em seguida.
-					promptSchemaThenRun(editor);
-					return;
-				}
-				editor.setSchema(needed);
-				scheduleSave();
-			}
-			String activeName = currentActiveSchemaName();
-			if (!needed.equals(activeName)) {
-				switchToSchemaThenRun(needed, editor);
+			String preferred = editor.getSchema();
+			if (preferred != null && !preferred.isBlank() && !preferred.equals(currentActiveSchemaName())) {
+				switchCatalogThenRun(preferred, editor);
 				return;
 			}
 		}
@@ -3550,7 +3539,7 @@ public class MainWindow extends JFrame {
 	 * (nunca a executa de verdade) e mostra o plano navegavel em
 	 * {@link ExplainDialog}. Deliberadamente NAO reproduz toda a logica de
 	 * troca de esquema por aba de {@link #onRun} (ver
-	 * {@link #switchToSchemaThenRun}) — exige que a conexao ja esteja
+	 * {@link #switchCatalogThenRun}) — exige que a conexao ja esteja
 	 * "apontando" pro esquema certo (normal, ja que se explica uma consulta
 	 * que presumivelmente ja foi rodada nesta aba antes); escopo menor
 	 * assumido conscientemente para nao duplicar ~60 linhas de reconciliacao
@@ -3599,14 +3588,38 @@ public class MainWindow extends JFrame {
 
 	/**
 	 * Troca o "banco padrao" (USE) da conexao ativa para {@code schemaName} e
-	 * recarrega os metadados ANTES de rodar a instrucao de {@code editor} —
-	 * chamado por {@link #onRun} quando a aba a executar pertence a um
-	 * esquema diferente do que a conexao tem aberto no momento (conexao com
-	 * varios esquemas e abas de esquemas diferentes abertas ao mesmo tempo).
-	 * Espelha {@link #openSchema}, mas encadeia a execucao no final em vez de
-	 * so atualizar a arvore de objetos.
+	 * roda a instrucao de {@code editor} em seguida — chamado por
+	 * {@link #onRun} quando a aba tem um esquema PREFERIDO diferente do que
+	 * a conexao esta apontando agora (ver o comentario em {@link #onRun}
+	 * sobre isto ser preferencia, nunca exigencia). Reaproveita
+	 * {@link Conexao#loadedSchemas} quando esse esquema ja foi carregado
+	 * antes nesta conexao (caso comum: usuario ja abriu/rodou nele antes) —
+	 * so troca o catalogo, sem round-trip de metadados; consulta o banco de
+	 * verdade so na PRIMEIRA vez que este esquema e usado na sessao.
 	 */
-	private void switchToSchemaThenRun(String schemaName, SqlEditorPane editor) {
+	private void switchCatalogThenRun(String schemaName, SqlEditorPane editor) {
+		Conexao ws = activeWorkspace;
+		SchemaInfo cached = (ws != null) ? ws.loadedSchemas.get(schemaName) : null;
+		if (cached != null) {
+			new SwingWorker<Void, Void>() {
+				@Override
+				protected Void doInBackground() throws Exception {
+					connectionManager().getConnection().setCatalog(schemaName);
+					return null;
+				}
+
+				@Override
+				protected void done() {
+					try {
+						get();
+						applySwitchedSchemaThenRun(ws, cached, schemaName, editor);
+					} catch (Exception ex) {
+						showError("Falha ao trocar para o esquema \"" + schemaName + "\"", ex);
+					}
+				}
+			}.execute();
+			return;
+		}
 		statusBar.setText(" Conectando no esquema \"" + schemaName + "\" desta aba...");
 		new SwingWorker<SchemaInfo, Void>() {
 			@Override
@@ -3619,16 +3632,7 @@ public class MainWindow extends JFrame {
 			@Override
 			protected void done() {
 				try {
-					SchemaInfo schema = get();
-					if (activeWorkspace != null) {
-						activeWorkspace.schema = schema;
-					}
-					metadataCache.set(schema);
-					completionProvider.refresh(schema);
-					objectExplorer.populateTree(schema);
-					setConnectedState(schemaName);
-					updateWorkspaceContextBar();
-					runStatements(editor);
+					applySwitchedSchemaThenRun(ws, get(), schemaName, editor);
 				} catch (Exception ex) {
 					showError("Falha ao conectar no esquema \"" + schemaName + "\"", ex);
 					statusBar.setText(" Erro ao trocar de esquema");
@@ -3637,45 +3641,17 @@ public class MainWindow extends JFrame {
 		}.execute();
 	}
 
-	/**
-	 * Pergunta em qual esquema (dentre os disponiveis na conexao) esta aba
-	 * deveria rodar — chamado por {@link #onRun} quando a aba nunca teve um
-	 * esquema definido E a conexao tambem nunca abriu nenhum ainda (por isso
-	 * nao ha esquema "atual" nenhum para herdar). Ao escolher, a aba "adota"
-	 * esse esquema permanentemente (fica salvo com ela) e a instrucao roda
-	 * OK EM SEGUIDA, sem precisar clicar em Executar de novo.
-	 */
-	private void promptSchemaThenRun(SqlEditorPane editor) {
-		List<String> schemas = activeWorkspace.schemaList();
-		if (schemas == null || schemas.isEmpty()) {
-			// Conexao sem NENHUM esquema ainda (ex.: servidor recem-instalado,
-			// so com os schemas de sistema) — nao ha esquema pra "escolher" ou
-			// "adotar" nesta aba, mas a instrucao pode muito bem ser DDL de DBA
-			// (CREATE DATABASE/USER, GRANT...) que nao precisa de um banco
-			// selecionado pra rodar. Roda direto na conexao (sem USE) em vez de
-			// travar aqui; se a instrucao criar um schema novo, a lista e
-			// recarregada em runStatements/handleStatementResults.
-			runStatements(editor);
-			return;
+	/** Aplica o esquema (ja carregado, do cache ou fresco) apos {@link #switchCatalogThenRun} e roda a instrucao — sempre na EDT. */
+	private void applySwitchedSchemaThenRun(Conexao ws, SchemaInfo schema, String schemaName, SqlEditorPane editor) {
+		if (ws != null) {
+			ws.setSchema(schema);
 		}
-		JComboBox<String> combo = new JComboBox<>(schemas.toArray(new String[0]));
-		JPanel panel = new JPanel(new BorderLayout(0, 8));
-		panel.add(new JLabel("Esta aba ainda nao tem um esquema definido. Em qual esquema executar?"),
-				BorderLayout.NORTH);
-		panel.add(combo, BorderLayout.CENTER);
-		int opt = JOptionPane.showConfirmDialog(this, panel, "Escolher esquema para esta aba",
-				JOptionPane.OK_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE);
-		if (opt != JOptionPane.OK_OPTION) {
-			statusBar.setText(" Execucao cancelada: nenhum esquema escolhido para esta aba.");
-			return;
-		}
-		String chosen = (String) combo.getSelectedItem();
-		if (chosen == null) {
-			return;
-		}
-		editor.setSchema(chosen);
-		scheduleSave();
-		switchToSchemaThenRun(chosen, editor);
+		metadataCache.set(schema);
+		completionProvider.refresh(ws != null ? ws.loadedSchemas.values() : List.of(schema), schemaName);
+		objectExplorer.populateTree(schema);
+		setConnectedState(schemaName);
+		updateWorkspaceContextBar();
+		runStatements(editor);
 	}
 
 	/** Roda de fato as instrucoes SQL da aba {@code editor} — ver {@link #onRun}. */

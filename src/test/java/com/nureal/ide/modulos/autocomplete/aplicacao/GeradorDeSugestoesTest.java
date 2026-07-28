@@ -27,7 +27,7 @@ class GeradorDeSugestoesTest {
     @Test
     void contextoGeralSugereTabelasEPalavrasChave() {
         GeradorDeSugestoes gerador = new GeradorDeSugestoes(List.of("SELECT", "FROM"));
-        gerador.refresh(schemaDeTeste());
+        gerador.refreshAll(List.of(schemaDeTeste()), "db");
 
         // Antes de qualquer clausula (SELECT/FROM/etc.), o contexto e GENERAL.
         List<SugestaoDeCompletion> sugestoes = gerador.gerar("", 0, "");
@@ -40,7 +40,7 @@ class GeradorDeSugestoesTest {
     @Test
     void contextoDeTabelaSugereTabelasSemPalavrasChave() {
         GeradorDeSugestoes gerador = new GeradorDeSugestoes(List.of("SELECT", "FROM"));
-        gerador.refresh(schemaDeTeste());
+        gerador.refreshAll(List.of(schemaDeTeste()), "db");
 
         String sql = "SELECT * FROM ";
         List<SugestaoDeCompletion> sugestoes = gerador.gerar(sql, sql.length(), "");
@@ -53,7 +53,7 @@ class GeradorDeSugestoesTest {
     @Test
     void contextoDeColunaNaoSugereTabelasNemPalavrasChave() {
         GeradorDeSugestoes gerador = new GeradorDeSugestoes(List.of("SELECT", "FROM"));
-        gerador.refresh(schemaDeTeste());
+        gerador.refreshAll(List.of(schemaDeTeste()), "db");
 
         String sql = "SELECT  FROM usuarios";
         List<SugestaoDeCompletion> sugestoes = gerador.gerar(sql, 7, "");
@@ -69,7 +69,7 @@ class GeradorDeSugestoesTest {
         GeradorDeSugestoes gerador = new GeradorDeSugestoes(List.of());
         TableInfo t1 = new TableInfo("tit_titulo_tb", List.of());
         TableInfo t2 = new TableInfo("tit_titulo_venda_tb", List.of());
-        gerador.refresh(new SchemaInfo("db", List.of(t1, t2)));
+        gerador.refreshAll(List.of(new SchemaInfo("db", List.of(t1, t2))), "db");
 
         List<SugestaoDeCompletion> sugestoes = gerador.gerar("tit_ti", 6, "tit_ti");
 
@@ -83,7 +83,7 @@ class GeradorDeSugestoesTest {
         GeradorDeSugestoes gerador = new GeradorDeSugestoes(List.of());
         TableInfo pedidos = new TableInfo("pedidos", List.of());
         TableInfo usuarios = new TableInfo("usuarios", List.of());
-        gerador.refresh(new SchemaInfo("db", List.of(pedidos, usuarios)));
+        gerador.refreshAll(List.of(new SchemaInfo("db", List.of(pedidos, usuarios))), "db");
         gerador.setForeignKeyLookup(tableName -> "pedidos".equalsIgnoreCase(tableName)
                 ? List.of(new ForeignKeyInfo("fk_pedido_usuario", List.of("id_usuario"),
                         "usuarios", List.of("id"), "CASCADE", "CASCADE"))
@@ -96,5 +96,27 @@ class GeradorDeSugestoesTest {
                 .filter(s -> s.texto().equals("usuarios"))
                 .findFirst().orElseThrow();
         assertTrue(relacionada.snippet() != null && relacionada.snippet().contains("ON"));
+    }
+
+    @Test
+    void sugereTabelasDeOutrosEsquemasQualificadasComSchemaPonto() {
+        // Pedido explicito do usuario: rodar/completar cruzando esquemas
+        // (ex.: "SELECT * FROM db1.t1 JOIN db2.t2") nao deveria exigir
+        // selecionar um esquema so — refreshAll recebe TODOS os esquemas
+        // conhecidos da conexao, "db1" marcado como o corrente.
+        GeradorDeSugestoes gerador = new GeradorDeSugestoes(List.of("SELECT", "FROM"));
+        SchemaInfo db1 = new SchemaInfo("db1", List.of(new TableInfo("pedidos", List.of())));
+        SchemaInfo db2 = new SchemaInfo("db2", List.of(new TableInfo("produtos", List.of())));
+        gerador.refreshAll(List.of(db1, db2), "db1");
+
+        List<SugestaoDeCompletion> sugestoes = gerador.gerar("", 0, "");
+
+        // Tabela do esquema CORRENTE continua sem qualificar (comportamento
+        // identico ao de antes desta funcionalidade, o caso comum).
+        assertTrue(sugestoes.stream().anyMatch(s -> s.texto().equals("pedidos")));
+        // Tabela de OUTRO esquema vem qualificada — o texto inserido no
+        // editor precisa ser SQL valido sozinho, nao so "produtos" (que nao
+        // existiria no esquema corrente).
+        assertTrue(sugestoes.stream().anyMatch(s -> s.texto().equals("db2.produtos")));
     }
 }

@@ -2,6 +2,7 @@ package com.nureal.ide.ui;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -20,6 +21,20 @@ final class Conexao {
 	final ConexaoAtivaPort mgr; // gerenciador JDBC proprio
 	SchemaInfo schema; // esquema carregado (ou null)
 	List<String> schemaList; // lista de esquemas (schema em branco)
+	/**
+	 * TODOS os esquemas ja carregados nesta conexao durante a sessao (nao so
+	 * o {@link #schema} "corrente") — pedido explicito do usuario: rodar uma
+	 * consulta cruzando schemas (ex.: {@code SELECT * FROM db1.t1 JOIN
+	 * db2.t2}) nao deveria exigir "escolher um esquema" primeiro, e o
+	 * autocomplete deveria sugerir tabelas de QUALQUER esquema ja visitado
+	 * nesta conexao, nao so do que esta selecionado no momento. Acumulado
+	 * (nunca substituido) por {@link #rememberSchema} sempre que um esquema e
+	 * carregado (abrir na arvore, trocar de esquema, ou a aba pedir um
+	 * diferente do corrente ao executar) — ver {@code MainWindow#openSchema}/
+	 * {@code #switchCatalogThenRun}/{@code #activateWorkspace}. Nunca
+	 * misturado entre CONEXOES diferentes: cada {@code Conexao} tem o seu.
+	 */
+	final Map<String, SchemaInfo> loadedSchemas = new LinkedHashMap<>();
 	List<SessionStore.Tab> tabs = new ArrayList<>();
 	int selectedTab = 0;
 	/**
@@ -70,8 +85,12 @@ final class Conexao {
 		return schema;
 	}
 
+	/** Define o esquema CORRENTE e acumula em {@link #loadedSchemas} (nunca esquece um esquema ja visitado). */
 	void setSchema(SchemaInfo schema) {
 		this.schema = schema;
+		if (schema != null) {
+			loadedSchemas.put(schema.name(), schema);
+		}
 	}
 
 	List<String> schemaList() {

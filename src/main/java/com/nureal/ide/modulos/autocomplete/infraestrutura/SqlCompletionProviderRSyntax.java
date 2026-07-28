@@ -12,6 +12,7 @@ import org.fife.ui.autocomplete.ShorthandCompletion;
 
 import javax.swing.text.JTextComponent;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 
 /**
@@ -33,9 +34,14 @@ public class SqlCompletionProviderRSyntax extends DefaultCompletionProvider {
         setAutoActivationRules(true, ".");
     }
 
-    /** Atualiza o cache apos a estrutura do banco ser lida. */
-    public void refresh(SchemaInfo schema) {
-        gerador.refresh(schema);
+    /**
+     * Atualiza o cache apos a estrutura do banco ser lida — TODOS os esquemas
+     * ja carregados da conexao ATIVA (ver {@code Conexao#loadedSchemas}) de
+     * uma vez, nao so um; {@code currentSchemaName} decide qual deles pode
+     * ficar sem qualificar nas sugestoes (ver {@code GeradorDeSugestoes#refreshAll}).
+     */
+    public void refresh(Collection<SchemaInfo> schemas, String currentSchemaName) {
+        gerador.refreshAll(schemas, currentSchemaName);
     }
 
     /** Liga a fonte de FKs — chamado uma vez por MainWindow ao construir o provider. */
