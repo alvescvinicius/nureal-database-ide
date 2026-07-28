@@ -50,6 +50,7 @@ import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.ButtonGroup;
 import javax.swing.DefaultListCellRenderer;
+import javax.swing.DefaultListModel;
 import javax.swing.Icon;
 import javax.swing.JButton;
 import javax.swing.JCheckBoxMenuItem;
@@ -71,6 +72,7 @@ import javax.swing.JTabbedPane;
 import javax.swing.JTable;
 import javax.swing.JTextArea;
 import javax.swing.KeyStroke;
+import javax.swing.ListSelectionModel;
 import javax.swing.SwingWorker;
 import javax.swing.Timer;
 import javax.swing.UIManager;
@@ -238,6 +240,15 @@ public class MainWindow extends JFrame {
 	private NSearchField sidebarSearch;
 	/** Rotulo "SQL Editors (N)" — mantido em dia por {@link #updateWorkspaceContextBar} (mesmo hook que ja roda a cada aba aberta/fechada). */
 	private JLabel sqlEditorsCountLabel;
+	/**
+	 * Lista clicavel das abas de SQL abertas (aba "SQL" da sidebar) — guarda o
+	 * COMPONENTE de cada aba (nao o indice, que desloca ao fechar uma aba no
+	 * meio); titulo/dot de status sao resolvidos ao vivo em {@link #editorTabs}
+	 * (ver {@link SqlEditorsListRenderer}), nunca duplicados aqui. Mantida em
+	 * dia por {@link #refreshSqlEditorsCount} (mesmo hook de toda troca de aba).
+	 */
+	private final DefaultListModel<Component> sqlEditorsListModel = new DefaultListModel<>();
+	private JList<Component> sqlEditorsList;
 	/** As 4 abas da sidebar (Objetos/SQL/Salvas/Historico, ver {@link #buildLeftSide}) — usada por {@link #showHistoryPanel} pra selecionar a aba de Historico. */
 	private JTabbedPane sideTabs;
 	/** Esquema selecionado na conexao ativa — so escrever via {@link #setCurrentSchema}. */
@@ -1068,12 +1079,12 @@ public class MainWindow extends JFrame {
 		// Espacamento de linhas — pedido explicito do usuario, independente do
 		// Zoom acima (que escala a interface inteira): so a altura de linha
 		// dos componentes em formato de linha unica (icone + texto) — grade
-		// de resultados, arvore de Objetos e lista de Conexoes, que ja
-		// compartilhavam a MESMA constante de altura entre si (ver
-		// ConnectionsPanel#DEFAULT_ROW_HEIGHT) antes desta preferencia
-		// existir. Historico/Consultas Salvas ficam de fora: sao cards de
-		// DUAS linhas (48/52px), estrutura diferente o bastante pra essa
-		// mesma escala (18-34px) quebrar o layout deles.
+		// de resultados, arvore de Objetos, lista de Conexoes e lista de abas
+		// de SQL (ver #sqlEditorsList), que ja compartilhavam a MESMA
+		// constante de altura entre si (ver ConnectionsPanel#DEFAULT_ROW_HEIGHT)
+		// antes desta preferencia existir. Historico/Consultas Salvas ficam de
+		// fora: sao cards de DUAS linhas (48/52px), estrutura diferente o
+		// bastante pra essa mesma escala (18-34px) quebrar o layout deles.
 		JMenu rowSpacingMenu = new JMenu("Espacamento de linhas");
 		for (int i = 0; i < ROW_SPACING_LEVELS.length; i++) {
 			int idx = i;
@@ -1491,9 +1502,10 @@ public class MainWindow extends JFrame {
 	/**
 	 * Altura de linha BASE (antes de {@link #scaledPx}, que continua
 	 * aplicando zoom/modo compacto por cima) usada por {@link ResultGrid}, a
-	 * arvore de Objetos e a lista de Conexoes — trocar o indice reconstroi/
-	 * reaplica nos 3 (ver {@link #setRowSpacingIndex}/{@link #refreshDynamicSizing})
-	 * do mesmo jeito que mudar o zoom ja fazia.
+	 * arvore de Objetos, a lista de Conexoes e a lista de abas de SQL
+	 * ({@link #sqlEditorsList}) — trocar o indice reconstroi/reaplica nos 4
+	 * (ver {@link #setRowSpacingIndex}/{@link #refreshDynamicSizing}) do mesmo
+	 * jeito que mudar o zoom ja fazia.
 	 */
 	int resultRowHeightBasePx() {
 		return ROW_SPACING_LEVELS[rowSpacingIndex];
@@ -1585,6 +1597,9 @@ public class MainWindow extends JFrame {
 		objectExplorer.setRowHeight(scaledPx(resultRowHeightBasePx()));
 		if (connectionsPanel != null) {
 			connectionsPanel.setRowHeight(scaledPx(resultRowHeightBasePx()));
+		}
+		if (sqlEditorsList != null) {
+			sqlEditorsList.setFixedCellHeight(scaledPx(resultRowHeightBasePx()));
 		}
 		// Reconstroi as abas de resultado (tabela, gutter e cabecalho usam
 		// tamanhos fixos definidos na hora da criacao do JTable).
@@ -1836,15 +1851,58 @@ public class MainWindow extends JFrame {
 		Typography.secondary(sqlEditorsCountLabel);
 		JComponent sqlEditorsRow = sidebarRow(IconType.EDIT, sqlEditorsCountLabel, true, null,
 				() -> { if (!addQueryTab()) { selectLastRealTab(); } });
+		// Lista de verdade das abas de SQL abertas, clicaveis pra navegar entre
+		// elas — pedido explicito do usuario: a aba "SQL" so tinha o atalho
+		// "SQL Editors (N)" pra ABRIR uma aba nova, sem nenhuma forma de ver
+		// OU alternar entre as N abas ja abertas (parecia quebrada: um numero
+		// que nao levava a lugar nenhum). Guardamos o COMPONENTE de cada aba
+		// (nao o indice — indices deslocam ao fechar uma aba no meio; o
+		// componente e estavel) e resolvemos titulo/dot ao vivo via
+		// editorTabs.indexOfComponent/getTitleAt/getIconAt em vez de duplicar
+		// esse estado aqui.
+		sqlEditorsList = new JList<>(sqlEditorsListModel) {
+			private static final long serialVersionUID = 1L;
+
+			// Mesmo bug ja corrigido em ConnectionsPanel/HistoryPanel/
+			// SavedQueriesPanel: setSelectionBackground/Foreground "queima" a
+			// cor na hora da chamada — sem reaplicar aqui, a troca de tema
+			// (FlatLaf.updateUI(), ver #toggleTheme) reseta pro cinza padrao
+			// do L&F em vez de acompanhar GridTheme.
+			@Override
+			public void updateUI() {
+				super.updateUI();
+				setSelectionBackground(GridTheme.SELECTION_BACKGROUND);
+				setSelectionForeground(GridTheme.SELECTION_FOREGROUND);
+			}
+		};
+		sqlEditorsList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+		sqlEditorsList.setVisibleRowCount(6);
+		sqlEditorsList.setFixedCellHeight(scaledPx(resultRowHeightBasePx()));
+		sqlEditorsList.setSelectionBackground(GridTheme.SELECTION_BACKGROUND);
+		sqlEditorsList.setSelectionForeground(GridTheme.SELECTION_FOREGROUND);
+		sqlEditorsList.setCellRenderer(new SqlEditorsListRenderer());
+		TreeHoverTracker.installOnList(sqlEditorsList);
+		sqlEditorsList.addMouseListener(new MouseAdapter() {
+			@Override
+			public void mouseClicked(MouseEvent e) {
+				int idx = sqlEditorsList.locationToIndex(e.getPoint());
+				if (idx < 0) {
+					return;
+				}
+				sqlEditorsList.setSelectedIndex(idx);
+				Component tabComponent = sqlEditorsListModel.get(idx);
+				editorTabs.setSelectedComponent(tabComponent);
+				focusEditor();
+			}
+		});
 		refreshSqlEditorsCount();
-		// A aba "SQL" so precisa da linha de atalho (o conteudo de verdade das
-		// abas de SQL fica no editor, area central — ver #editorTabs); o
-		// espaco vazio abaixo dela e proposital, mesma altura das outras 3
-		// abas ao trocar entre elas.
-		JPanel sqlEditorsTab = new JPanel(new BorderLayout());
+		JScrollPane sqlEditorsListScroll = new JScrollPane(sqlEditorsList);
+		sqlEditorsListScroll.setBorder(BorderFactory.createEmptyBorder());
+		JPanel sqlEditorsTab = new JPanel(new BorderLayout(0, 4));
 		sqlEditorsTab.setOpaque(false);
 		sqlEditorsTab.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
 		sqlEditorsTab.add(sqlEditorsRow, BorderLayout.NORTH);
+		sqlEditorsTab.add(sqlEditorsListScroll, BorderLayout.CENTER);
 
 		// 4 abas clicaveis (Objetos/SQL/Salvas/Historico, pedido explicito do
 		// usuario na revisao de UX: "eram para ser abas") em vez de tudo
@@ -2011,6 +2069,59 @@ public class MainWindow extends JFrame {
 	private void refreshSqlEditorsCount() {
 		if (sqlEditorsCountLabel != null && editorTabs != null) {
 			sqlEditorsCountLabel.setText("SQL Editors (" + realTabCount() + ")");
+		}
+		refreshSqlEditorsList();
+	}
+
+	/** Repopula {@link #sqlEditorsListModel} a partir de {@link #editorTabs} (exclui a aba "+") e preserva a selecao da aba ativa. */
+	private void refreshSqlEditorsList() {
+		if (sqlEditorsList == null || editorTabs == null) {
+			return;
+		}
+		Component selected = editorTabs.getSelectedComponent();
+		sqlEditorsListModel.clear();
+		for (int i = 0; i < editorTabs.getTabCount(); i++) {
+			Component c = editorTabs.getComponentAt(i);
+			if (c != plusTab) {
+				sqlEditorsListModel.addElement(c);
+			}
+		}
+		if (selected != null && selected != plusTab) {
+			sqlEditorsList.setSelectedValue(selected, false);
+		}
+	}
+
+	/**
+	 * Renderiza cada linha da lista de abas de SQL: titulo + dot de status
+	 * (mesmo icone ja calculado por {@link #editorTabs}.setIconAt em
+	 * {@link #updateWorkspaceContextBar}, reaproveitado em vez de recalculado)
+	 * — negrito na aba ATUALMENTE selecionada no editor, pro usuario saber
+	 * qual delas esta na tela sem precisar clicar em cada uma.
+	 */
+	private final class SqlEditorsListRenderer extends DefaultListCellRenderer {
+		private static final long serialVersionUID = 1L;
+
+		@Override
+		public Component getListCellRendererComponent(JList<?> list, Object value, int index, boolean isSelected,
+				boolean cellHasFocus) {
+			super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
+			setBorder(BorderFactory.createEmptyBorder(4, 12, 4, 12));
+			setIconTextGap(10);
+			boolean hovered = !isSelected && index == TreeHoverTracker.hoverRow(list);
+			if (hovered) {
+				setOpaque(true);
+				setBackground(GridTheme.HOVER_BACKGROUND);
+			}
+			if (value instanceof Component tabComponent) {
+				int idx = editorTabs.indexOfComponent(tabComponent);
+				if (idx >= 0) {
+					setText(editorTabs.getTitleAt(idx));
+					setIcon(editorTabs.getIconAt(idx));
+				}
+				boolean active = tabComponent == editorTabs.getSelectedComponent();
+				setFont(getFont().deriveFont(active ? Font.BOLD : Font.PLAIN));
+			}
+			return this;
 		}
 	}
 
