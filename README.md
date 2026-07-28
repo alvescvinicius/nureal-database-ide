@@ -41,8 +41,11 @@ O que já funciona:
   maximizar em duplo-clique e Aero Snap continuam funcionando normalmente
 - **Assistente de DDL guiado** (menu de contexto: "Nova tabela..." / "Alterar
   tabela..."): cria uma tabela do zero ou adiciona colunas/chaves estrangeiras/
-  índices a uma existente (sempre aditivo no modo alterar — nunca MODIFY/DROP),
-  com abas para colunas, FKs, índices, **sugestões automáticas de normalização**
+  índices a uma existente — no modo alterar, colunas/FKs/índices existentes
+  também podem ser editados (MODIFY COLUMN) ou marcados para remoção (DROP
+  COLUMN/FOREIGN KEY/INDEX), com confirmação extra antes de executar qualquer
+  remoção; renomear coluna e remover a chave primária ficam fora do escopo
+  guiado —, com abas para colunas, FKs, índices, **sugestões automáticas de normalização**
   (chave primária ausente, tipos de dado, grupos repetitivos, dependência
   parcial/transitiva, índices de FK ausentes) e pré-visualização do DDL já
   formatado antes de executar

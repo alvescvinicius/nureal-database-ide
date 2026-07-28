@@ -910,6 +910,15 @@ final class ObjectExplorerController {
 			generateSelect.addActionListener(a -> generateSelect(obj));
 			menu.add(generateSelect);
 			if (obj.type() == NodeType.TABLE) {
+				JMenuItem generateInsert = new JMenuItem("Gerar INSERT");
+				generateInsert.addActionListener(a -> generateInsert(obj));
+				menu.add(generateInsert);
+				JMenuItem generateUpdate = new JMenuItem("Gerar UPDATE");
+				generateUpdate.addActionListener(a -> generateUpdate(obj));
+				menu.add(generateUpdate);
+				JMenuItem generateDelete = new JMenuItem("Gerar DELETE");
+				generateDelete.addActionListener(a -> generateDelete(obj));
+				menu.add(generateDelete);
 				menu.add(buildGenerateJoinItem(obj));
 			}
 		}
@@ -1004,28 +1013,115 @@ final class ObjectExplorerController {
 		});
 	}
 
+	/**
+	 * {@code SELECT *} por padrao (pedido explicito do usuario) — listar cada
+	 * coluna era mais verboso sem ganho real pra este atalho (o autocomplete
+	 * ja ajuda a trocar {@code *} por colunas especificas quando o usuario
+	 * quiser refinar a consulta na hora).
+	 */
 	private void generateSelect(ObjNode obj) {
-		List<ColumnInfo> cols = (obj.table() != null) ? obj.table().columns() : List.of();
-		StringBuilder sql = new StringBuilder("SELECT");
-		if (cols.isEmpty()) {
-			sql.append(" *\n");
-		} else {
-			sql.append('\n');
-			for (int i = 0; i < cols.size(); i++) {
-				sql.append("    ").append(cols.get(i).name());
-				sql.append(i < cols.size() - 1 ? ",\n" : "\n");
-			}
-		}
-		sql.append("FROM ").append(obj.name()).append(";\n");
+		String sql = "SELECT *\nFROM " + obj.name() + ";\n";
+		openGeneratedSqlTab("SELECT " + obj.name(), sql, " SELECT gerado numa nova aba do editor.");
+	}
 
-		String baseTitle = "SELECT " + obj.name();
+	/**
+	 * INSERT/UPDATE/DELETE de {@code obj} (so TABLE, ver {@link #buildObjectContextMenu})
+	 * respeitando a PK: UPDATE/DELETE usam as colunas PRIMARY KEY no WHERE
+	 * (nunca outra coluna) e o INSERT lista todas as colunas com {@code ?}
+	 * como placeholder de valor — o usuario preenche antes de executar. Os
+	 * detalhes da tabela (para saber QUAIS colunas sao PK, ver
+	 * {@link ColumnDetail#key()}) vem do mesmo {@link TableMetadataCache} que
+	 * {@link #buildGenerateJoinItem} ja usa — carregados em segundo plano na
+	 * primeira vez que o menu de contexto desta tabela e aberto.
+	 */
+	private void generateInsert(ObjNode obj) {
+		TableDetails details = tableDetailsForContextMenu(obj);
+		List<ColumnDetail> cols = (details != null) ? details.columns() : List.of();
+		if (cols.isEmpty()) {
+			owner.statusBar().setText(" Estrutura da tabela ainda carregando — tente de novo em instantes.");
+			return;
+		}
+		StringBuilder sql = new StringBuilder("INSERT INTO ").append(obj.name()).append(" (\n");
+		for (int i = 0; i < cols.size(); i++) {
+			sql.append("    ").append(cols.get(i).name()).append(i < cols.size() - 1 ? ",\n" : "\n");
+		}
+		sql.append(") VALUES (\n");
+		for (int i = 0; i < cols.size(); i++) {
+			sql.append("    ?").append(i < cols.size() - 1 ? ",\n" : "\n");
+		}
+		sql.append(");\n");
+		openGeneratedSqlTab("INSERT " + obj.name(), sql.toString(), " INSERT gerado numa nova aba do editor.");
+	}
+
+	private void generateUpdate(ObjNode obj) {
+		TableDetails details = tableDetailsForContextMenu(obj);
+		List<ColumnDetail> cols = (details != null) ? details.columns() : List.of();
+		if (cols.isEmpty()) {
+			owner.statusBar().setText(" Estrutura da tabela ainda carregando — tente de novo em instantes.");
+			return;
+		}
+		List<ColumnDetail> pk = primaryKeyColumns(cols);
+		List<ColumnDetail> setCols = pk.isEmpty() ? cols : cols.stream().filter(c -> !pk.contains(c)).toList();
+		if (setCols.isEmpty()) {
+			setCols = cols; // tabela so tem colunas de PK — nada mais pra SET, mas gera assim mesmo
+		}
+		StringBuilder sql = new StringBuilder("UPDATE ").append(obj.name()).append("\nSET\n");
+		for (int i = 0; i < setCols.size(); i++) {
+			sql.append("    ").append(setCols.get(i).name()).append(" = ?").append(i < setCols.size() - 1 ? ",\n" : "\n");
+		}
+		appendWhereByPrimaryKey(sql, pk, cols);
+		openGeneratedSqlTab("UPDATE " + obj.name(), sql.toString(), " UPDATE gerado numa nova aba do editor.");
+	}
+
+	private void generateDelete(ObjNode obj) {
+		TableDetails details = tableDetailsForContextMenu(obj);
+		List<ColumnDetail> cols = (details != null) ? details.columns() : List.of();
+		if (cols.isEmpty()) {
+			owner.statusBar().setText(" Estrutura da tabela ainda carregando — tente de novo em instantes.");
+			return;
+		}
+		List<ColumnDetail> pk = primaryKeyColumns(cols);
+		StringBuilder sql = new StringBuilder("DELETE FROM ").append(obj.name()).append('\n');
+		appendWhereByPrimaryKey(sql, pk, cols);
+		openGeneratedSqlTab("DELETE " + obj.name(), sql.toString(), " DELETE gerado numa nova aba do editor.");
+	}
+
+	private static List<ColumnDetail> primaryKeyColumns(List<ColumnDetail> cols) {
+		return cols.stream().filter(c -> "PRI".equalsIgnoreCase(c.key())).toList();
+	}
+
+	/**
+	 * WHERE pelas colunas de PK — se a tabela nao tiver PK conhecida, cai para
+	 * TODAS as colunas (unica forma de tentar identificar uma linha especifica
+	 * sem chave) e avisa com um comentario no SQL gerado, pra nao passar a
+	 * falsa impressao de que aquilo e seguro/preciso sem revisao.
+	 */
+	private static void appendWhereByPrimaryKey(StringBuilder sql, List<ColumnDetail> pk, List<ColumnDetail> allCols) {
+		List<ColumnDetail> whereCols = pk.isEmpty() ? allCols : pk;
+		if (pk.isEmpty()) {
+			sql.append("-- Tabela sem chave primaria conhecida: revise o WHERE antes de executar.\n");
+		}
+		sql.append("WHERE\n");
+		for (int i = 0; i < whereCols.size(); i++) {
+			sql.append("    ").append(whereCols.get(i).name()).append(" = ?").append(i < whereCols.size() - 1 ? "\n    AND " : "\n");
+		}
+		sql.append(";\n");
+	}
+
+	/** Mesmo cache/padrao de {@link #buildGenerateJoinItem}: {@code null} = ainda carregando em segundo plano. */
+	private TableDetails tableDetailsForContextMenu(ObjNode obj) {
+		String schemaName = (owner.currentSchema() != null) ? owner.currentSchema().name() : null;
+		return owner.tableMetadataCache().get(owner.connectionManager(), schemaName, obj.name(), () -> { });
+	}
+
+	private void openGeneratedSqlTab(String baseTitle, String sql, String statusOnSuccess) {
 		String title = baseTitle;
 		int n = 1;
 		while (owner.titleExists(title)) {
 			title = baseTitle + " " + (++n);
 		}
-		if (owner.addQueryTab(title, sql.toString())) {
-			owner.statusBar().setText(" SELECT gerado numa nova aba do editor.");
+		if (owner.addQueryTab(title, sql)) {
+			owner.statusBar().setText(statusOnSuccess);
 		} else {
 			owner.statusBar().setText(" Nao foi possivel abrir uma aba nova (limite de abas atingido).");
 		}
