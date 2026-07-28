@@ -675,6 +675,7 @@ final class ResultsAreaController {
 		Connection conn = owner.connectionManager().getConnection();
 		com.nureal.ide.modulos.dialeto.dominio.contratos.DatabaseDialect dialect = owner.connectionManager().dialect();
 		resultStatusBar.setEditBusy(true);
+		editController.setApplyInProgress(true);
 		SwingWorker<GridEditController.ApplyResult, Void> worker = new SwingWorker<>() {
 			@Override
 			protected GridEditController.ApplyResult doInBackground() throws SQLException {
@@ -684,6 +685,7 @@ final class ResultsAreaController {
 			@Override
 			protected void done() {
 				resultStatusBar.setEditBusy(false);
+				editController.setApplyInProgress(false);
 				try {
 					GridEditController.ApplyResult result = get();
 					owner.statusBar().setText(" Alteracoes salvas: " + result.inserted() + " inserida(s), "

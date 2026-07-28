@@ -52,6 +52,19 @@ final class GridEditController {
      */
     private boolean editModeOn;
 
+    /**
+     * {@code true} enquanto {@link #apply} esta rodando (na SwingWorker de
+     * {@code ResultsAreaController#applyPendingChanges}) — sem isto, a celula
+     * continuava editavel (so os BOTOES ficavam desabilitados, ver
+     * {@code ResultStatusBar#setEditBusy}) enquanto {@code
+     * SqlGridPersistenceEngine.apply} iterava {@link #dirtyCells} numa thread
+     * de fundo: terminar de editar outra celula nesse intervalo (Enter/Tab)
+     * disparava {@link #onModelEvent} na EDT, mutando o MESMO mapa que a
+     * thread de fundo estava percorrendo (ConcurrentModificationException).
+     * Ver {@link #setApplyInProgress}.
+     */
+    private boolean applyInProgress;
+
     /** Linhas adicionadas nesta sessao de edicao (ainda nao inseridas no banco). */
     private final Set<Integer> newRows = new HashSet<>();
     /** Linhas marcadas para exclusao (linhas normais OU novas — nesse caso, so somem localmente). */
@@ -91,7 +104,7 @@ final class GridEditController {
      * "original"; o INSERT sempre le o valor atual direto do modelo).
      */
     private void onModelEvent(TableModelEvent e) {
-        if (suppressEvents || target == null) {
+        if (suppressEvents || applyInProgress || target == null) {
             return;
         }
         if (e.getType() != TableModelEvent.UPDATE) {
@@ -208,7 +221,19 @@ final class GridEditController {
     }
 
     boolean isCellEditable(int row, int column) {
-        return target != null && editModeOn && !deletedRows.contains(row) && target.isEditableColumn(column);
+        return target != null && editModeOn && !applyInProgress && !deletedRows.contains(row)
+                && target.isEditableColumn(column);
+    }
+
+    /**
+     * Chamado por {@code ResultsAreaController#applyPendingChanges} na EDT,
+     * ANTES de disparar a SwingWorker que roda {@link #apply} em segundo
+     * plano, e de novo (com {@code false}) quando ela termina — trava a
+     * grade inteira nesse intervalo (ver {@link #applyInProgress}).
+     */
+    void setApplyInProgress(boolean inProgress) {
+        this.applyInProgress = inProgress;
+        fireChange();
     }
 
     boolean isNewRow(int row) {

@@ -88,6 +88,16 @@ final class SqlGridPersistenceEngine {
 		} catch (SQLException ex) {
 			safeRollback(conn);
 			throw ex;
+		} catch (RuntimeException ex) {
+			// Defesa em profundidade: qualquer erro inesperado que nao seja
+			// SQLException (ex.: um bug futuro nesta classe, ou uma corrida de
+			// dados como a que existia em GridEditController#onModelEvent antes
+			// da correcao de applyInProgress) NAO pode cair direto no finally
+			// abaixo — setAutoCommit(true) numa transacao ainda aberta faz
+			// COMMIT implicito do que ja rodou (spec do JDBC), o oposto de
+			// "tudo ou nada" que este metodo promete.
+			safeRollback(conn);
+			throw new SQLException("Falha inesperada ao salvar alteracoes da grade: " + ex.getMessage(), ex);
 		} finally {
 			try {
 				conn.setAutoCommit(prevAutoCommit);
