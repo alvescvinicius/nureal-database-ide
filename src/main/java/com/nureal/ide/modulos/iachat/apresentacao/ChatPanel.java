@@ -29,6 +29,10 @@ import javax.swing.UIManager;
 
 import com.nureal.ide.modulos.iachat.infraestrutura.tool.SqlQueryResult;
 import com.nureal.ide.compartilhado.designsystem.NToolbar;
+import com.nureal.ide.compartilhado.designsystem.Buttons;
+import com.nureal.ide.compartilhado.designsystem.GridTheme;
+import com.nureal.ide.compartilhado.designsystem.Icons;
+import com.nureal.ide.compartilhado.designsystem.IconType;
 
 /**
  * So layout e interacao com o {@link ChatController} (ver
@@ -84,9 +88,13 @@ final class ChatPanel extends JPanel {
     ChatPanel() {
         super(new BorderLayout());
 
-        JButton settingsButton = new JButton("⚙", null);
+        // Icone do catalogo (Buttons.iconButton/IconType.SETTINGS) em vez do
+        // emoji "⚙" como texto do botao — mesmo motivo do ajuste em
+        // #complete/MainWindow#buildLayoutMenu: um glifo Unicode direto no
+        // texto pode nao existir na fonte do sistema e aparecer como um
+        // quadrado vazio ("tofu"), relatado pelo usuario em varios lugares.
+        JButton settingsButton = Buttons.iconButton(IconType.SETTINGS, 16, () -> GridTheme.MUTED_TEXT);
         settingsButton.setToolTipText("Configuracoes de IA (modelo, base URL, streaming...)");
-        settingsButton.setHorizontalAlignment(SwingConstants.CENTER);
         settingsButton.addActionListener(e -> onOpenSettings.run());
 
         JButton newChatButton = new JButton("+ Novo Chat");
@@ -395,7 +403,13 @@ final class ChatPanel extends JPanel {
                 replaceComponent(component, MessageRenderer.sqlResultCard(data, actions));
                 return;
             }
-            statusLabel.setText((success ? "✓ " : "❌ ") + summary);
+            // Icone do catalogo (Icons.get) em vez de um caractere Unicode
+            // "✓ "/"❌ " colado no texto — mesmo motivo do ajuste em
+            // MainWindow#buildLayoutMenu/ConnectionStatusCard: o caractere nao
+            // existe em algumas fontes e aparecia como um quadrado vazio
+            // ("tofu") no lugar do simbolo, relatado pelo usuario.
+            statusLabel.setIcon(Icons.get(success ? IconType.SUCCESS : IconType.ERROR, 12));
+            statusLabel.setText(summary);
             revalidateAndScrollToBottom();
         }
     }

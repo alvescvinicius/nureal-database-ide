@@ -1048,8 +1048,12 @@ public class MainWindow extends JFrame {
 		for (int i = 0; i < ZOOM_LEVELS.length; i++) {
 			int idx = i;
 			int pct = (int) Math.round(ZOOM_LEVELS[i] * 100);
-			String mark = (i == zoomIndex) ? "✓ " : "      ";
-			JMenuItem item = new JMenuItem(mark + pct + "%");
+			// JCheckBoxMenuItem nativo (marcador do FlatLaf), nao mais um
+			// caractere Unicode "✓ " colado no texto — ver o mesmo ajuste (e o
+			// motivo) em #presetItem: o caractere nao existe em algumas fontes
+			// e aparecia como um quadrado vazio ("tofu") no lugar do check,
+			// relatado pelo usuario neste menu e no de Espacamento de linhas.
+			JCheckBoxMenuItem item = new JCheckBoxMenuItem(pct + "%", i == zoomIndex);
 			item.addActionListener(a -> setZoomIndex(idx));
 			zoomMenu.add(item);
 		}
@@ -1073,8 +1077,8 @@ public class MainWindow extends JFrame {
 		JMenu rowSpacingMenu = new JMenu("Espacamento de linhas");
 		for (int i = 0; i < ROW_SPACING_LEVELS.length; i++) {
 			int idx = i;
-			String mark = (i == rowSpacingIndex) ? "✓ " : "      ";
-			JMenuItem item = new JMenuItem(mark + ROW_SPACING_LABELS[i] + " (" + ROW_SPACING_LEVELS[i] + "px)");
+			JCheckBoxMenuItem item = new JCheckBoxMenuItem(
+					ROW_SPACING_LABELS[i] + " (" + ROW_SPACING_LEVELS[i] + "px)", i == rowSpacingIndex);
 			item.addActionListener(a -> setRowSpacingIndex(idx));
 			rowSpacingMenu.add(item);
 		}

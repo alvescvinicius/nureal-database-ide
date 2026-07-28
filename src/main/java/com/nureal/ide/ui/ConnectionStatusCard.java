@@ -12,8 +12,8 @@ import java.util.List;
 import java.util.function.Consumer;
 
 import javax.swing.JButton;
+import javax.swing.JCheckBoxMenuItem;
 import javax.swing.JLabel;
-import javax.swing.JMenuItem;
 import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
 
@@ -112,11 +112,19 @@ final class ConnectionStatusCard extends NCard {
 		this.onSwitchRequested = (callback != null) ? callback : name -> { };
 	}
 
+	/**
+	 * Marcador da conexao ATIVA via {@link JCheckBoxMenuItem} nativo (FlatLaf),
+	 * nao mais um caractere Unicode "✓ " colado no texto — mesmo motivo ja
+	 * documentado em {@code MainWindow#presetItem}: o caractere nao existe em
+	 * algumas fontes e aparecia como um quadrado vazio ("tofu") no lugar do
+	 * check, relatado pelo usuario em varios menus (este, Zoom e Espacamento
+	 * de linhas — ver os mesmos ajustes em {@code MainWindow#buildLayoutMenu}).
+	 */
 	private void showSwitchMenu() {
 		JPopupMenu menu = new JPopupMenu();
 		for (ActiveConnection c : activeConnections) {
 			boolean isActive = c.name().equals(activeConnectionName);
-			JMenuItem item = new JMenuItem((isActive ? "✓ " : "    ") + c.label());
+			JCheckBoxMenuItem item = new JCheckBoxMenuItem(c.label(), isActive);
 			if (isActive) {
 				item.setEnabled(false);
 			} else {
