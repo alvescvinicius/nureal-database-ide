@@ -1014,9 +1014,22 @@ public class MainWindow extends JFrame {
 	 * drag-and-drop dos paineis).
 	 */
 
+	/**
+	 * Agrupado por CONTEXTO real de cada opcao (pedido explicito do usuario,
+	 * apos revisao visual: "o que for de configuracao de grid deve estar nas
+	 * configuracoes de grid, o que for de sql editor nas configuracoes de sql
+	 * editor..."), nao mais uma lista unica sem hierarquia — mesma receita de
+	 * cabecalho de secao ({@link #formatMenuHeader}) que {@link #buildFormatMenu}
+	 * ja usa para "Presets"/"Configuracoes". "Layout" fica com o que afeta a
+	 * JANELA inteira; "Conexao" com o que e comportamento de conexao (nao tem
+	 * nada de layout); "Grade e arvore" com o que e especifico dos
+	 * componentes em linha (grade/arvore/conexoes, ver {@link #resultRowHeightBasePx});
+	 * "Aplicativo" com o que nao e nem um nem outro.
+	 */
 	private JPopupMenu buildLayoutMenu() {
 		JPopupMenu menu = new JPopupMenu();
 
+		menu.add(formatMenuHeader("Layout"));
 		JMenuItem moveSidebar = new JMenuItem(
 				sidebarOnRight ? "Mover painel lateral para a esquerda" : "Mover painel lateral para a direita");
 		moveSidebar.addActionListener(a -> toggleSidebarSide());
@@ -1027,23 +1040,10 @@ public class MainWindow extends JFrame {
 		toggleOrientation.addActionListener(a -> toggleResultsOrientation());
 		menu.add(toggleOrientation);
 
-		menu.addSeparator();
-
 		JCheckBoxMenuItem compact = new JCheckBoxMenuItem("Modo compacto", compactMode);
 		compact.addActionListener(a -> toggleCompactMode());
 		menu.add(compact);
 
-		JCheckBoxMenuItem keepAlive = new JCheckBoxMenuItem("Manter conexao viva (keep-alive)", keepAliveEnabled);
-		keepAlive.setToolTipText("Roda um SELECT de teste a cada " + keepAliveIntervalLabel() + " de ociosidade, "
-				+ "so nas conexoes que ja estao abertas, pra evitar que caiam por inatividade.");
-		keepAlive.addActionListener(a -> toggleKeepAlive());
-		menu.add(keepAlive);
-
-		JMenuItem keepAliveInterval = new JMenuItem("Intervalo do keep-alive... (" + keepAliveIntervalLabel() + ")");
-		keepAliveInterval.addActionListener(a -> configureKeepAliveInterval());
-		menu.add(keepAliveInterval);
-
-		menu.addSeparator();
 		JMenu zoomMenu = new JMenu("Zoom");
 		for (int i = 0; i < ZOOM_LEVELS.length; i++) {
 			int idx = i;
@@ -1059,6 +1059,8 @@ public class MainWindow extends JFrame {
 		zoomMenu.add(reset);
 		menu.add(zoomMenu);
 
+		menu.addSeparator();
+		menu.add(formatMenuHeader("Grade e arvore"));
 		// Espacamento de linhas — pedido explicito do usuario, independente do
 		// Zoom acima (que escala a interface inteira): so a altura de linha
 		// dos componentes em formato de linha unica (icone + texto) — grade
@@ -1068,7 +1070,7 @@ public class MainWindow extends JFrame {
 		// existir. Historico/Consultas Salvas ficam de fora: sao cards de
 		// DUAS linhas (48/52px), estrutura diferente o bastante pra essa
 		// mesma escala (18-34px) quebrar o layout deles.
-		JMenu rowSpacingMenu = new JMenu("Espacamento de linhas (grade, arvore, conexoes)");
+		JMenu rowSpacingMenu = new JMenu("Espacamento de linhas");
 		for (int i = 0; i < ROW_SPACING_LEVELS.length; i++) {
 			int idx = i;
 			String mark = (i == rowSpacingIndex) ? "✓ " : "      ";
@@ -1079,6 +1081,19 @@ public class MainWindow extends JFrame {
 		menu.add(rowSpacingMenu);
 
 		menu.addSeparator();
+		menu.add(formatMenuHeader("Conexao"));
+		JCheckBoxMenuItem keepAlive = new JCheckBoxMenuItem("Manter conexao viva (keep-alive)", keepAliveEnabled);
+		keepAlive.setToolTipText("Roda um SELECT de teste a cada " + keepAliveIntervalLabel() + " de ociosidade, "
+				+ "so nas conexoes que ja estao abertas, pra evitar que caiam por inatividade.");
+		keepAlive.addActionListener(a -> toggleKeepAlive());
+		menu.add(keepAlive);
+
+		JMenuItem keepAliveInterval = new JMenuItem("Intervalo do keep-alive... (" + keepAliveIntervalLabel() + ")");
+		keepAliveInterval.addActionListener(a -> configureKeepAliveInterval());
+		menu.add(keepAliveInterval);
+
+		menu.addSeparator();
+		menu.add(formatMenuHeader("Aplicativo"));
 		JMenuItem checkUpdates = new JMenuItem("Verificar atualizacoes...");
 		checkUpdates.addActionListener(a -> checkForUpdates(true));
 		menu.add(checkUpdates);

@@ -499,6 +499,17 @@ final class DdlAssistantDialog {
                     alreadyCovered.add(col.toLowerCase(Locale.ROOT));
                 }
             }
+            // Modo alterar: a tabela pode JA ter uma FK nessa coluna (ver
+            // existingFkModel) — sem isto, "Sugerir a partir de colunas *_id"
+            // oferecia uma constraint FK duplicada pra uma coluna que ja tinha
+            // FK antes mesmo do usuario adicionar qualquer FK nova nesta sessao.
+            if (existingFkModel != null) {
+                for (int r = 0; r < existingFkModel.getRowCount(); r++) {
+                    for (String col : splitCsv(str(existingFkModel.getValueAt(r, 1)))) {
+                        alreadyCovered.add(col.toLowerCase(Locale.ROOT));
+                    }
+                }
+            }
             int added = 0;
             for (NewColumnSpec c : collectAllColumnsForAdvisor()) {
                 String name = c.name().toLowerCase(Locale.ROOT);
