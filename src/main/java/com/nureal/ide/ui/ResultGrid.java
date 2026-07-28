@@ -5,6 +5,7 @@ import com.nureal.ide.compartilhado.designsystem.GridTheme;
 import com.nureal.ide.modulos.conexoes.dominio.contratos.ConexaoAtivaPort;
 import com.nureal.ide.compartilhado.designsystem.NSearchField;
 
+import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
@@ -54,6 +55,11 @@ final class ResultGrid extends JPanel {
     private final JTable table;
     /** Exposto via {@link #scrollPane()} pra quem precisar reagir a rolagem (ver {@code ResultsAreaController}, carregamento automatico de mais linhas). */
     private JScrollPane scrollPane;
+    /** Alterna grade <-> {@link ResultRecordView} — ver {@link #toggleRecordView}. */
+    private JPanel centerCards;
+    private ResultRecordView recordView;
+    private JButton recordViewToggle;
+    private boolean recordViewOn;
     private final ColumnSorter sorter;
     private final String fingerprint;
     private final JComboBox<String> filterColumnBox = new JComboBox<>();
@@ -272,8 +278,63 @@ final class ResultGrid extends JPanel {
         scroll.setCorner(JScrollPane.UPPER_LEFT_CORNER, corner);
         this.scrollPane = scroll;
 
+        // "Modo registro" (ver ResultRecordView) — pedido explicito do
+        // usuario: "mostrar a grade na vertical tambem", uma linha por vez
+        // com cada coluna empilhada verticalmente, pra ver todos os campos
+        // de UM registro sem rolar horizontalmente. CardLayout alterna entre
+        // a grade normal e o inspetor, sem afetar nenhuma das duas quando
+        // nao esta visivel.
+        this.recordView = new ResultRecordView(model, table, this::syncTableSelectionToModelRow);
+        this.centerCards = new JPanel(new java.awt.CardLayout());
+        centerCards.add(scroll, CARD_GRID);
+        centerCards.add(recordView, CARD_RECORD);
+
         add(buildFilterBar(model), BorderLayout.NORTH);
-        add(scroll, BorderLayout.CENTER);
+        add(centerCards, BorderLayout.CENTER);
+    }
+
+    private static final String CARD_GRID = "grid";
+    private static final String CARD_RECORD = "record";
+
+    /**
+     * Alterna entre a grade e o {@link #recordView} (botao "Ver como
+     * registro" da barra de filtro, ver {@link #buildFilterBar}). Ao entrar
+     * no modo registro, mostra a linha ATUALMENTE selecionada na grade (ou a
+     * primeira linha visivel, se nenhuma estiver selecionada) — as duas
+     * visoes ficam sincronizadas pela SELECAO da tabela, nunca por um
+     * indice proprio duplicado.
+     */
+    private void toggleRecordView() {
+        recordViewOn = !recordViewOn;
+        java.awt.CardLayout layout = (java.awt.CardLayout) centerCards.getLayout();
+        if (recordViewOn) {
+            int viewRow = table.getSelectedRow();
+            int modelRow;
+            if (viewRow >= 0) {
+                modelRow = table.convertRowIndexToModel(viewRow);
+            } else if (table.getRowCount() > 0) {
+                modelRow = table.convertRowIndexToModel(0);
+            } else {
+                modelRow = -1;
+            }
+            recordView.showRow(modelRow);
+            layout.show(centerCards, CARD_RECORD);
+        } else {
+            layout.show(centerCards, CARD_GRID);
+        }
+        if (recordViewToggle != null) {
+            recordViewToggle.setText(recordViewOn ? "Ver como grade" : "Ver como registro");
+        }
+    }
+
+    /** Callback de navegacao (Anterior/Proximo) do {@link #recordView} — mantem a selecao da grade em dia, mesmo invisivel. */
+    private void syncTableSelectionToModelRow(int modelRow) {
+        int viewRow = table.convertRowIndexToView(modelRow);
+        if (viewRow < 0) {
+            return; // linha filtrada/fora da view — recordView continua mostrando pelo indice de modelo mesmo assim
+        }
+        table.setRowSelectionInterval(viewRow, viewRow);
+        table.scrollRectToVisible(table.getCellRect(viewRow, 0, true));
     }
 
     /**
@@ -562,6 +623,15 @@ final class ResultGrid extends JPanel {
         bar.add(label);
         bar.add(filterColumnBox);
         bar.add(filterField);
+
+        // "Ver como registro" (ResultRecordView) — pedido explicito do
+        // usuario: mostrar a grade "na vertical tambem", uma linha por vez.
+        // Texto simples (nao icone novo): evita inventar um glifo sem poder
+        // validar visualmente (mesmo criterio ja usado no chat/IA nesta
+        // rodada de ajustes).
+        recordViewToggle = new JButton("Ver como registro");
+        recordViewToggle.addActionListener(e -> toggleRecordView());
+        bar.add(recordViewToggle);
 
         // ANTES esta barra nunca recebia fundo/borda proprios — so herdava o
         // cinza generico de "Panel.background" do L&F, um tom DIFERENTE (mais
