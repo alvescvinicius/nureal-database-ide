@@ -164,18 +164,19 @@ public final class Icons {
     // Nureal, fora do catalogo de icones de UI (IconType).
     // ====================================================================
 
-    /** Imagens do logo da Nureal (varios tamanhos) para o icone da janela/taskbar. */
+    /**
+     * Imagens do logo da Nureal (varios tamanhos) para o icone da janela/taskbar
+     * — desenhadas com {@link #brandImage(int)} (mesma marca do nureal-256.png/
+     * nureal.ico usados no empacotamento) em vez de carregar nureal-logo-n.svg,
+     * que era uma variante antiga do logo (um "N" preto solto, sem o quadrado
+     * verde de fundo) e aparecia deformado/irreconhecivel no icone da janela
+     * no Linux (relatado pelo usuario como parecendo um passaro).
+     */
     public static List<Image> brandImages() {
-        // Aponta para o novo arquivo dentro do seu diretório de resources mapeado
-        FlatSVGIcon svgIcon = new FlatSVGIcon("com/nureal/ide/icon/nureal-logo-n.svg");
-        
-        // Abordagem clássica e compatível com todas as versões do FlatLaf
         int[] sizes = {16, 20, 24, 32, 48, 64, 128, 256};
         List<Image> images = new ArrayList<>();
         for (int s : sizes) {
-            // .derive(w, h) altera o tamanho do ícone vetorialmente
-            // .getImage() extrai a java.awt.Image pura dele
-            images.add(svgIcon.derive(s, s).getImage());
+            images.add(brandImage(s));
         }
         return images;
     }

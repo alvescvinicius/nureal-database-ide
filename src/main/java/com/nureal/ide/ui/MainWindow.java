@@ -3494,7 +3494,14 @@ public class MainWindow extends JFrame {
 	private void promptSchemaThenRun(SqlEditorPane editor) {
 		List<String> schemas = activeWorkspace.schemaList();
 		if (schemas == null || schemas.isEmpty()) {
-			statusBar.setText(" Esta conexao nao tem nenhum esquema disponivel.");
+			// Conexao sem NENHUM esquema ainda (ex.: servidor recem-instalado,
+			// so com os schemas de sistema) — nao ha esquema pra "escolher" ou
+			// "adotar" nesta aba, mas a instrucao pode muito bem ser DDL de DBA
+			// (CREATE DATABASE/USER, GRANT...) que nao precisa de um banco
+			// selecionado pra rodar. Roda direto na conexao (sem USE) em vez de
+			// travar aqui; se a instrucao criar um schema novo, a lista e
+			// recarregada em runStatements/handleStatementResults.
+			runStatements(editor);
 			return;
 		}
 		JComboBox<String> combo = new JComboBox<>(schemas.toArray(new String[0]));
@@ -3614,9 +3621,49 @@ public class MainWindow extends JFrame {
 			resultsController.showResults(results);
 		}
 		if (ranStructuralDdl(statements, results)) {
-			objectExplorer.refreshObjectTree(false);
+			if (currentSchema() != null) {
+				objectExplorer.refreshObjectTree(false);
+			} else if (activeWorkspace != null && activeWorkspace.mgr.isConnected()) {
+				// DDL rodou sem nenhum esquema aberto (ex.: CREATE DATABASE numa
+				// conexao que ainda nao tinha nenhum) — recarrega a lista de
+				// esquemas pra ele aparecer na arvore sem precisar reconectar.
+				refreshSchemaList();
+			}
 		}
 		logExecutionHistory(editor, results);
+	}
+
+	/**
+	 * Recarrega a lista de esquemas da conexao ativa e reconstroi o seletor na
+	 * arvore de objetos — usado depois de DDL estrutural (ex.: CREATE DATABASE)
+	 * rodado sem nenhum esquema aberto ainda (ver {@link #handleStatementResults}).
+	 */
+	private void refreshSchemaList() {
+		Conexao ws = activeWorkspace;
+		if (ws == null || !ws.mgr.isConnected()) {
+			return;
+		}
+		new SwingWorker<List<String>, Void>() {
+			@Override
+			protected List<String> doInBackground() throws Exception {
+				return metadataService.listSchemas(ws.mgr.getConnection());
+			}
+
+			@Override
+			protected void done() {
+				try {
+					List<String> schemas = get();
+					ws.schemaList = schemas;
+					if (ws == activeWorkspace && ws.schema == null) {
+						objectExplorer.buildSchemaPicker(schemas);
+					}
+				} catch (Exception ex) {
+					// silencioso: so a lista de esquemas na sidebar fica desatualizada
+					// ate o proximo refresh manual ou reconexao — nao interrompe o
+					// fluxo do usuario por causa disso.
+				}
+			}
+		}.execute();
 	}
 
 	// ---------- Queries salvas (biblioteca gerenciada pelo app — ver SavedQueryStore) ----------
