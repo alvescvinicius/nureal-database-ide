@@ -360,6 +360,10 @@ public class MainWindow extends JFrame {
 		setIconImages(Icons.brandImages());
 		setSize(1280, 800);
 		setLocationRelativeTo(null);
+		// Maximizada por padrao (pedido explicito do usuario) — setSize acima
+		// continua servindo de "tamanho de restauracao" pra quando o usuario
+		// desmaximizar na mao, so nao e mais o tamanho INICIAL visivel.
+		setExtendedState(JFrame.MAXIMIZED_BOTH);
 		loadUiPrefs();
 		loadFormatPrefs();
 		// Liga o autocomplete ao cache de FKs (ver ObjectExplorerController#lookupForeignKeysForCompletion)
@@ -756,6 +760,16 @@ public class MainWindow extends JFrame {
 		centerSplit = new JSplitPane(resultsVertical ? JSplitPane.HORIZONTAL_SPLIT : JSplitPane.VERTICAL_SPLIT,
 				editorAreaPanel, resultsArea);
 		centerSplit.setResizeWeight(0.62);
+		// Faltava aqui (so existia nos 3 outros lugares que reajustam esta
+		// divisoria depois — #toggleResultsOrientation, saida do modo foco,
+		// #setRowSpacingIndex): sem um setDividerLocation inicial,
+		// setResizeWeight sozinho so decide como a divisoria se move numa
+		// REDIMENSIONADA futura da janela, nunca a posicao INICIAL — o
+		// JSplitPane cai no proprio calculo padrao (perto de 50/50) na
+		// primeira exibicao, ignorando os 62% pretendidos. Bug relatado pelo
+		// usuario: "o grid aparece a primeira vez dividindo metade da tela
+		// com o editor SQL".
+		centerSplit.setDividerLocation(0.62);
 		centerSplit.setBorder(BorderFactory.createEmptyBorder());
 
 		mainSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, sidebarOnRight ? centerSplit : leftSide,
