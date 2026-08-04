@@ -118,9 +118,24 @@ public class NCard extends JPanel {
     protected void paintComponent(Graphics g) {
         Graphics2D g2 = (Graphics2D) g.create();
         g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-        g2.setColor(fill);
+        g2.setColor(fillColor());
         g2.fillRoundRect(0, 0, getWidth(), getHeight(), NTheme.CARD_ARC, NTheme.CARD_ARC);
         g2.dispose();
         super.paintComponent(g);
+    }
+
+    /**
+     * Cor de fundo pintada por {@link #paintComponent} — {@link #fill} por
+     * padrao. Ponto de extensao pra cards CLICAVEIS (ex.:
+     * {@code ConnectionStatusCard}, que abre "Conexoes salvas" ao clicar em
+     * qualquer parte do card): a subclasse sobrescreve pra devolver
+     * {@code GridTheme.HOVER_BACKGROUND} enquanto o mouse esta em cima,
+     * dando o mesmo retorno visual de "tem uma acao aqui" que o resto do
+     * app ja usa em linhas clicaveis (arvore de objetos, listas) — pedido
+     * explicito do usuario ("faltou uma sombra de selecao... pra dar a
+     * entender que tem uma acao ali").
+     */
+    protected Color fillColor() {
+        return fill;
     }
 }

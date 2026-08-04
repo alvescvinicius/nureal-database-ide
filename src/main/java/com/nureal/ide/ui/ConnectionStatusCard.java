@@ -7,7 +7,10 @@ import com.nureal.ide.compartilhado.designsystem.GridTheme;
 
 import java.awt.BorderLayout;
 import java.awt.Color;
+import java.awt.Cursor;
 import java.awt.FlowLayout;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.util.List;
 import java.util.function.Consumer;
 
@@ -78,6 +81,8 @@ final class ConnectionStatusCard extends NCard {
 	private String activeConnectionName;
 	private Consumer<String> onSwitchRequested = name -> { };
 	private Runnable onManageConnections = () -> { };
+	/** {@code true} enquanto o mouse esta em cima do card (ou de qualquer filho dele) — ver {@link #fillColor()}. */
+	private boolean hovering;
 
 	ConnectionStatusCard() {
 		super(NAccent.NEUTRAL, null);
@@ -99,6 +104,60 @@ final class ConnectionStatusCard extends NCard {
 		nameRow.setOpaque(false);
 		nameRow.add(nameLabel, BorderLayout.WEST);
 		nameRow.add(switchRow, BorderLayout.EAST);
+		// O CARD INTEIRO (nao so a linha do nome) abre "Conexoes salvas" —
+		// pedido explicito do usuario apos achar a setinha pouco funcional/
+		// dificil de acertar, e depois relatar que nem a linha do nome
+		// reagia ao passar o mouse (provavelmente porque so tentou em cima
+		// de host/engine/status, que nao faziam parte do alvo). Cobrir TODO
+		// o card, nao so um pedaco especifico, elimina essa ambiguidade — o
+		// unico ponto que NAO deve disparar isto e switchRow (setinha +
+		// botao de trocar), que continua capturando o PROPRIO clique
+		// primeiro (Swing entrega ao filho mais especifico sob o cursor,
+		// nunca aos dois ao mesmo tempo). O listener vai em CADA componente
+		// visivel do card (nao so no painel externo): eventos de mouse em
+		// Swing nao "borbulham" sozinhos do filho pro pai (diferente do
+		// DOM) — um clique/hover em cima do TEXTO de qualquer rotulo vai
+		// direto pro rotulo, nunca alcançaria um listener so no card.
+		MouseAdapter openConnections = new MouseAdapter() {
+			@Override
+			public void mouseClicked(MouseEvent e) {
+				onManageConnections.run();
+			}
+		};
+		for (java.awt.Component c : new java.awt.Component[] {
+				this, nameRow, nameLabel, hostLabel, engineLabel, statusLabel }) {
+			c.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+			c.addMouseListener(openConnections);
+			if (c instanceof JLabel jl) {
+				jl.setToolTipText("Conexoes salvas");
+			}
+		}
+		// Fundo destacado (GridTheme.HOVER_BACKGROUND) enquanto o mouse esta
+		// em cima do card — pedido explicito do usuario: so o cursor virar
+		// maozinha nao deixava claro que tinha uma acao ali ("faltou uma
+		// sombra de selecao"). SO no CARD (nao em cada filho tambem, como o
+		// listener de clique acima): getMousePosition() de um Container ja
+		// retorna nao-nulo quando o mouse esta sobre um FILHO dele (ver
+		// javadoc de Component#getMousePosition), entao o mouseExited do
+		// card (disparado ao mover pra cima de um filho, que "rouba" o
+		// evento) so desliga o hover quando o mouse de fato SAIU do card
+		// inteiro — sem isto, o fundo "piscaria" toda vez que o mouse
+		// cruzasse a borda de um rotulo interno.
+		addMouseListener(new MouseAdapter() {
+			@Override
+			public void mouseEntered(MouseEvent e) {
+				hovering = true;
+				repaint();
+			}
+
+			@Override
+			public void mouseExited(MouseEvent e) {
+				if (getMousePosition() == null) {
+					hovering = false;
+					repaint();
+				}
+			}
+		});
 
 		addContent(nameRow);
 		addContent(hostLabel);
@@ -241,5 +300,11 @@ final class ConnectionStatusCard extends NCard {
 		engineLabel.setText(lastEngine);
 		statusLabel.setForeground(color);
 		statusLabel.setText(statusText);
+	}
+
+	/** Fundo do card: destacado (hover) enquanto o mouse esta em cima — ver {@link #hovering}. */
+	@Override
+	protected Color fillColor() {
+		return hovering ? GridTheme.HOVER_BACKGROUND : super.fillColor();
 	}
 }
