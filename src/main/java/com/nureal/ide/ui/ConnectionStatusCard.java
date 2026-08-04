@@ -57,6 +57,16 @@ final class ConnectionStatusCard extends NCard {
 	 * simultaneamente (com 0 ou 1, nao ha nada pra trocar).
 	 */
 	private final JButton switchButton;
+	/**
+	 * Seta de "gerenciar conexoes" (estilo dropdown, mesmo icone ja usado em
+	 * {@code MainWindow#addRunFormatExplainButtons} pro menu de opcoes de
+	 * formatacao) — SEMPRE visivel, ao contrario de {@link #switchButton}
+	 * (que so aparece com 2+ conexoes conectadas). Abre a lista completa de
+	 * conexoes salvas (ver {@link #setOnManageConnections}), que deixou de
+	 * ficar sempre visivel na sidebar (pedido explicito do protótipo:
+	 * "card reduzido para apenas Ambiente/Schema/Banco").
+	 */
+	private final JButton manageButton;
 	private final JPanel switchRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 2, 0));
 
 	private State state = State.DISCONNECTED;
@@ -67,18 +77,23 @@ final class ConnectionStatusCard extends NCard {
 	private List<ActiveConnection> activeConnections = List.of();
 	private String activeConnectionName;
 	private Consumer<String> onSwitchRequested = name -> { };
+	private Runnable onManageConnections = () -> { };
 
 	ConnectionStatusCard() {
 		super(NAccent.NEUTRAL, null);
-		Typography.primary(nameLabel);
-		Typography.tertiary(hostLabel);
-		Typography.tertiary(engineLabel);
 		statusLabel.setFont(statusLabel.getFont().deriveFont(java.awt.Font.BOLD, 11f));
 
 		switchButton = Buttons.iconButton(IconType.SWAP, 13, () -> GridTheme.MUTED_TEXT);
 		switchButton.setToolTipText("Trocar conexao ativa");
 		switchButton.addActionListener(e -> showSwitchMenu());
+
+		manageButton = new JButton(new com.formdev.flatlaf.icons.FlatMenuArrowIcon());
+		manageButton.setToolTipText("Conexoes salvas");
+		manageButton.addActionListener(e -> onManageConnections.run());
+		Buttons.styleIconButton(manageButton);
+
 		switchRow.setOpaque(false);
+		switchRow.add(manageButton);
 
 		JPanel nameRow = new JPanel(new BorderLayout());
 		nameRow.setOpaque(false);
@@ -110,6 +125,11 @@ final class ConnectionStatusCard extends NCard {
 	/** Chamado quando o usuario escolhe uma conexao diferente no dropdown — recebe o NOME da conexao escolhida. */
 	void setOnSwitchRequested(Consumer<String> callback) {
 		this.onSwitchRequested = (callback != null) ? callback : name -> { };
+	}
+
+	/** Chamado quando o usuario clica na seta de "Conexoes salvas" (ver {@link #manageButton}). */
+	void setOnManageConnections(Runnable callback) {
+		this.onManageConnections = (callback != null) ? callback : () -> { };
 	}
 
 	/**
@@ -149,6 +169,7 @@ final class ConnectionStatusCard extends NCard {
 		if (activeConnections.size() > 1) {
 			switchRow.add(new NBadge(String.valueOf(activeConnections.size()), NAccent.NEUTRAL));
 		}
+		switchRow.add(manageButton);
 		switchRow.revalidate();
 		switchRow.repaint();
 	}
@@ -189,6 +210,21 @@ final class ConnectionStatusCard extends NCard {
 	}
 
 	private void render() {
+		// Typography.primary/tertiary reaplicados AQUI (nao mais so uma vez
+		// no construtor): nameLabel/hostLabel/engineLabel ficavam com a cor
+		// do tema em que o card foi CONSTRUIDO (sempre o escuro, ver
+		// App#main) gravada pra sempre — so o statusLabel (linha abaixo,
+		// "Conectado"/"Desconectado") ja lia a cor certa a cada render()
+		// porque a sua vinha de uma variavel LOCAL (color, calculada aqui
+		// mesmo), nao de uma chamada unica no construtor. render() roda a
+		// cada troca de estado E a partir de refreshTheme() (chamado por
+		// MainWindow#toggleTheme), entao reaplicar aqui cobre os dois casos
+		// de uma vez — bug relatado pelo usuario ("continuo nao enxergando
+		// nada aqui" no tema claro, com captura mostrando nome/host/engine
+		// quase invisiveis contra o fundo claro do card).
+		Typography.primary(nameLabel);
+		Typography.tertiary(hostLabel);
+		Typography.tertiary(engineLabel);
 		Color color = switch (state) {
 		case DISCONNECTED -> GridTheme.COLOR_LOGIC_FALSE;
 		case CONNECTING -> GridTheme.HEADER_HIGHLIGHT_BORDER;

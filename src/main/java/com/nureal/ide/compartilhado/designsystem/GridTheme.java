@@ -359,7 +359,12 @@ public final class GridTheme {
             SELECTION_FOREGROUND = new Color(0x26, 0x32, 0x38);
             ACTIVE_CELL_BORDER = new Color(0x37, 0x47, 0x4F);
 
-            ZEBRA_EVEN = Color.WHITE;
+            // Branco PURO (0xFFFFFF) era duro/ofuscante contra o resto da
+            // paleta clara (cabecalho 0xF1F3F5, zebra impar 0xF7F8FA) —
+            // pedido explicito do usuario ("deixe mais suave"). Um branco
+            // levemente quebrado mantem a mesma leitura de "linha clara"
+            // sem o salto de contraste brusco pro branco absoluto.
+            ZEBRA_EVEN = new Color(0xFC, 0xFD, 0xFE);
             ZEBRA_ODD = new Color(0xF7, 0xF8, 0xFA);
             HOVER_BACKGROUND = new Color(0xEE, 0xF2, 0xF5);
 

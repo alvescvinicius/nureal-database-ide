@@ -1549,6 +1549,23 @@ public class SqlEditorPane extends JPanel {
      * @param focusReplace {@code true} quando veio de Ctrl+H (foca "Substituir");
      *                     {@code false} quando veio de Ctrl+F (foca "Localizar").
      */
+    /**
+     * Entrada publica pro campo "Buscar no editor..." da toolbar principal
+     * (ver {@code MainWindow#addRightIconGroup}): abre a MESMA barra de
+     * localizar/substituir de sempre (Ctrl+F) com o texto ja digitado e
+     * procura a proxima ocorrencia — sem duplicar nenhuma logica de busca,
+     * so encaminha pro {@link #findField}/{@link #findNext()} existentes.
+     */
+    void searchFromToolbar(String query) {
+        if (query == null || query.isEmpty()) {
+            return;
+        }
+        findField.setText(query);
+        findBar.setVisible(true);
+        revalidate();
+        findNext();
+    }
+
     private void showFindBar(boolean focusReplace) {
         String sel = textArea.getSelectedText();
         if (sel != null && !sel.isEmpty() && !sel.contains("\n")) {

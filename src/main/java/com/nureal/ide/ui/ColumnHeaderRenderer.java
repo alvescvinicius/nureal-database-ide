@@ -163,6 +163,11 @@ final class ColumnHeaderRenderer implements TableCellRenderer {
         this.highlightModelColumn = modelColumn;
     }
 
+    /** Indice de MODELO da coluna atualmente marcada, ou {@code -1} se nenhuma — ver {@link ResultGrid#installColumnHighlightClearOnClick}. */
+    int highlightedColumn() {
+        return highlightModelColumn;
+    }
+
     /** Tamanho do icone de seta — pequeno de proposito para caber nos ~9px de altura de cada metade da zona de ordenacao. */
     private static final int ARROW_ICON_SIZE = 9;
     private static final int FILTER_ICON_SIZE = 11;

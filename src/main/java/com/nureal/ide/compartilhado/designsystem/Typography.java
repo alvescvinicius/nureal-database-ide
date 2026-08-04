@@ -1,6 +1,7 @@
 package com.nureal.ide.compartilhado.designsystem;
 
 import java.awt.Font;
+import java.util.function.Consumer;
 
 import javax.swing.JComponent;
 import javax.swing.JLabel;
@@ -50,10 +51,25 @@ public final class Typography {
         c.setForeground(GridTheme.HEADER_FOREGROUND);
     }
 
-    /** Conteudo normal (listas/arvores/grade/editor/menus) — peso Regular, tom levemente suavizado. */
+    /**
+     * Conteudo normal (listas/arvores/grade/editor/menus) — peso Regular,
+     * cor padrao de texto do tema.
+     * <p>
+     * Usava {@link GridTheme#COLOR_TEXTUAL} ate esta correcao — mas esse
+     * campo e EDITOR-ONLY (ver o javadoc extenso de {@link GridTheme}: "o
+     * editor SQL le estes campos DIRETAMENTE... NUNCA por colorFor"), o
+     * VERDE de string literal do syntax highlight do editor, nao uma cor de
+     * texto geral. Usa-lo aqui pintava rotulos comuns (ex.: "Backup e
+     * Restauracao", "SQL Editors (N)") de verde em QUALQUER tema — bug de
+     * legibilidade relatado pelo usuario ("melhore o tema light... melhor
+     * visualizacao dos textos"), visivel nos dois temas (claro e escuro).
+     * {@link GridTheme#COLOR_DEFAULT_TEXT} e a cor certa: e literalmente
+     * "cor PADRAO de texto na exibicao de dados" do tema (quase preto no
+     * claro, quase branco no escuro).
+     */
     public static void secondary(JComponent c) {
         c.setFont(c.getFont().deriveFont(Font.PLAIN));
-        c.setForeground(GridTheme.COLOR_TEXTUAL);
+        c.setForeground(GridTheme.COLOR_DEFAULT_TEXT);
     }
 
     /** Informacao auxiliar/descricao/status/placeholder — a cor mais discreta da paleta. */
@@ -76,9 +92,58 @@ public final class Typography {
      * uma vez: a duplicacao E a divergencia entre os 4 cabecalhos.
      */
     public static JLabel sectionHeader(String text) {
-        JLabel label = new JLabel(text);
-        label.setFont(label.getFont().deriveFont(11f));
-        primary(label);
+        return selfStyling(text, label -> {
+            label.setFont(label.getFont().deriveFont(11f));
+            primary(label);
+        });
+    }
+
+    /**
+     * {@link JLabel} que reaplica {@code style} sozinho em {@link JLabel#updateUI()}
+     * — chamado pelo Swing em CADA componente da janela toda vez que
+     * {@code FlatLaf.updateUI()} roda (ver {@code MainWindow#toggleTheme}).
+     * <p>
+     * {@link #primary}/{@link #secondary}/{@link #tertiary} sozinhos so
+     * pintam a cor UMA VEZ, no instante da chamada (ver javadoc da classe):
+     * um rotulo construido enquanto o app estava no tema ESCURO (padrao ao
+     * abrir, ver {@code App#main}) ficava com a cor ESCURA gravada pra
+     * sempre — ao trocar pro tema CLARO, o FUNDO ao redor atualizava
+     * sozinho (via {@code FlatLaf.updateUI()}, que O SWING ja sabe redesenhar),
+     * mas o TEXTO continuava na cor do tema anterior (quase branco), ficando
+     * invisivel sobre o fundo agora branco — bug relatado pelo usuario
+     * ("no tema claro tem varios textos que nao estao visiveis"), com
+     * captura mostrando os rotulos do grupo FERRAMENTAS em branco.
+     * <p>
+     * Usado por {@link #sectionHeader} (cabecalhos "CONEXOES"/"OBJETOS"/
+     * "FERRAMENTAS" etc., em qualquer painel) e por
+     * {@code MainWindow#sidebarRow} (rotulos "Backup e Restauracao" etc.) —
+     * os dois pontos onde o rotulo NASCE dentro do proprio Design System /
+     * MainWindow, entao dá pra embutir o auto-refresh na criacao, sem exigir
+     * que cada chamador de {@link #primary}/{@link #secondary}/{@link #tertiary}
+     * (que recebem um {@link JComponent} JA EXISTENTE, de tipo arbitrario)
+     * se lembre de reaplicar manualmente.
+     */
+    public static JLabel selfStyling(String text, Consumer<JLabel> style) {
+        JLabel label = new JLabel(text) {
+            private static final long serialVersionUID = 1L;
+
+            @Override
+            public void updateUI() {
+                super.updateUI();
+                // Guard (mesmo padrao ja usado em ResultRecordView#updateUI):
+                // o PRIMEIRO updateUI() e disparado de DENTRO do super(text)
+                // do construtor de JLabel — nesse instante o campo sintetico
+                // que guarda "style" (variavel capturada por esta classe
+                // anonima) ainda nao foi atribuido pela JVM (so acontece
+                // DEPOIS que super() retorna), entao chega null aqui na
+                // primeira chamada. A atribuicao de verdade (linha
+                // "style.accept(label)" abaixo) cobre esse primeiro caso.
+                if (style != null) {
+                    style.accept(this);
+                }
+            }
+        };
+        style.accept(label);
         return label;
     }
 }

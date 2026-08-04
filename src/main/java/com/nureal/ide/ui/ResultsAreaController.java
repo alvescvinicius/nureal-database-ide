@@ -539,8 +539,14 @@ final class ResultsAreaController {
 			String schemaName) {
 		GridEditController editController = grid.editController();
 
-		Runnable refreshEditUi = () -> resultStatusBar.updatePendingState(
-				editController.pendingCount(), grid.selectedModelRows().length > 0);
+		Runnable refreshEditUi = () -> {
+			resultStatusBar.updatePendingState(editController.pendingCount(), grid.selectedModelRows().length > 0);
+			// "Ver como registro" precisa alternar entre campo so-leitura e
+			// campo editavel no mesmo instante em que o modo de edicao
+			// liga/desliga, mesmo se essa visao ja estiver aberta (nao so na
+			// proxima vez que o usuario marcar o checkbox).
+			grid.refreshRecordView();
+		};
 		editController.setOnChange(refreshEditUi);
 		grid.table().getSelectionModel().addListSelectionListener(e -> {
 			if (!e.getValueIsAdjusting()) {

@@ -107,6 +107,14 @@ final class ColumnMetadataPopup {
             hide();
             return;
         }
+        if (ResultTableHeader.filterIconAtPoint(header, col, e.getPoint())) {
+            // Mesmo motivo, so que pro icone de funil (autofiltro): o popup
+            // de metadados nao deve aparecer por cima dele, atrapalhando
+            // quem so quer clicar pra abrir o autofiltro — pedido explicito
+            // do usuario, com captura de tela.
+            hide();
+            return;
+        }
         if (col == shownForColumn && current != null && current.isVisible()) {
             return; // ja mostrando esta coluna
         }

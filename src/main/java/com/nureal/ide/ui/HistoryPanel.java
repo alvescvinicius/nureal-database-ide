@@ -1,6 +1,7 @@
 package com.nureal.ide.ui;
 import com.nureal.ide.compartilhado.designsystem.Buttons;
 import com.nureal.ide.compartilhado.designsystem.IconType;
+import com.nureal.ide.compartilhado.designsystem.Icons;
 import com.nureal.ide.compartilhado.designsystem.Typography;
 import com.nureal.ide.compartilhado.designsystem.GridTheme;
 
@@ -368,10 +369,17 @@ public class HistoryPanel extends JPanel {
             setHorizontalAlignment(SwingConstants.LEFT);
             setBorder(BorderFactory.createEmptyBorder(6, 12, 6, 12));
             if (value instanceof Entry e) {
-                // Mesmo par verde/vermelho "logico" da grade (BooleanCellRenderer)
-                // e do status de conexao no rodape — reativo ao tema, nao mais um
-                // par de literais proprios so desta lista.
-                String dot = hex(e.success() ? GridTheme.COLOR_LOGIC_TRUE : GridTheme.COLOR_LOGIC_FALSE);
+                // Bolinha de status: icone de verdade (mesma receita do
+                // ConnectionStatusCard), nao mais o caractere HTML "&#9679;"
+                // — o glifo nao existe em algumas fontes e aparecia como um
+                // quadrado vazio ("tofu") no lugar da bolinha, relatado pelo
+                // usuario com captura de tela. Mesma familia de bug ja
+                // corrigida em outros menus (ver MainWindow#presetItem).
+                Color dotColor = e.success() ? GridTheme.COLOR_LOGIC_TRUE : GridTheme.COLOR_LOGIC_FALSE;
+                setIcon(Icons.get(IconType.STATUS_DOT, 8, dotColor));
+                setIconTextGap(6);
+                setVerticalTextPosition(SwingConstants.TOP);
+                setHorizontalTextPosition(SwingConstants.RIGHT);
                 // Sub-texto: cor de selecao (a linha inteira agora usa o MESMO
                 // cinza neutro da grade/arvore, nao mais o verde solido do L&F —
                 // ver #buildList) OU o cinza mudo de sempre fora da selecao.
@@ -381,7 +389,6 @@ public class HistoryPanel extends JPanel {
                 String meta = relativeTime(e.executedAt()) + "  ·  " + e.durationMs() + "ms"
                         + (e.schema() != null ? "  ·  " + escape(e.schema()) : "");
                 setText("<html><div style='font-family:" + family + ";line-height:1.5'>"
-                        + "<span style='color:" + dot + "'>&#9679;</span> "
                         + "<b>" + preview + "</b><br>"
                         + "<span style='color:" + subColor + ";font-size:10px'>" + meta + "</span></div></html>");
                 String tooltip = absoluteTime(e.executedAt());

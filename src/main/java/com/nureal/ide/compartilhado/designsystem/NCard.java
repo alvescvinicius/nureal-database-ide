@@ -34,7 +34,27 @@ public class NCard extends JPanel {
 
     private static final long serialVersionUID = 1L;
 
-    private final Color fill = NTheme.surfaceBackground();
+    /**
+     * Mesma familia de bug ja corrigida varias vezes nesta base (cor
+     * "queimada" na construcao, nunca reaplicada ao trocar de tema — ver
+     * {@code ConnectionStatusCard}/{@code SqlEditorsListRenderer} etc.):
+     * como campo {@code final} calculado uma UNICA vez no construtor, um
+     * card criado enquanto o app estava no tema ESCURO (ver {@code App#main})
+     * continuava pintando o fundo escuro pra sempre, mesmo depois do usuario
+     * trocar pro tema claro — a UNICA excecao no app inteiro que nao
+     * acompanhava {@code MainWindow#toggleTheme()}, ficando uma caixa escura
+     * "fora do tema" (ex.: o card de conexao ativa da sidebar) — relatado
+     * pelo usuario com captura de tela. Recalculado em {@link #updateUI()}
+     * (chamado por {@code FlatLaf.updateUI()} em toda a arvore de
+     * componentes a cada troca de tema), nao mais {@code final}.
+     */
+    private Color fill = NTheme.surfaceBackground();
+
+    @Override
+    public void updateUI() {
+        super.updateUI();
+        fill = NTheme.surfaceBackground();
+    }
 
     /** Card sem cabecalho (ex.: paragrafo de texto simples) — so a superficie elevada, sem tinta de tipo. */
     public NCard() {

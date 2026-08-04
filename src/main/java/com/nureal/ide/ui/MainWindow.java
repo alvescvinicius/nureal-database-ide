@@ -128,6 +128,7 @@ import com.nureal.ide.modulos.iachat.apresentacao.ChatWindow;
 import com.nureal.ide.modulos.iachat.apresentacao.IdeContextAccessor;
 import com.nureal.ide.compartilhado.designsystem.NButton;
 import com.nureal.ide.compartilhado.designsystem.NSearchField;
+import com.nureal.ide.compartilhado.designsystem.NTheme;
 import com.nureal.ide.compartilhado.designsystem.NToast;
 
 /**
@@ -234,6 +235,9 @@ public class MainWindow extends JFrame {
 	private final ObjectExplorerController objectExplorer = new ObjectExplorerController(this);
 	private final ResultsAreaController resultsController = new ResultsAreaController(this);
 	private ConnectionsPanel connectionsPanel;
+	/** Indicador de linguagem + busca no editor da toolbar (ver {@link #addLanguageAndSearch}) — largura reaplicada por {@link #refreshDynamicSizing} a cada mudanca de zoom/modo compacto, igual aos demais componentes dependentes de escala. */
+	private JLabel languageLabel;
+	private NSearchField editorSearchField;
 	private SavedQueriesPanel savedQueriesPanel;
 	private HistoryPanel historyPanel;
 	/** Busca unificada da sidebar (Fase 3 do AI-CHAT-MASTER-PLAN.md, Ctrl+K) — ver {@link #buildLeftSide}/{@link #applySidebarFilter}. */
@@ -834,6 +838,7 @@ public class MainWindow extends JFrame {
 		gbc.insets = new Insets(0, 0, 0, 0);
 		mainBar.add(Box.createHorizontalGlue(), gbc);
 
+		addLanguageAndSearch(mainBar, gbc);
 		addRightIconGroup(mainBar, gbc);
 
 		toolbarBar = mainBar;
@@ -916,9 +921,16 @@ public class MainWindow extends JFrame {
 		mainBar.add(formatButton, gbc);
 
 		gbc.gridx = 2;
-		// So uma pequena margem entre "Formatar" e a seta de opcoes — nao
-		// colados de vez (como um segmented button ficaria), so proximos.
-		gbc.insets = new Insets(0, Spacing.XS, 0, 0);
+		// Colado direto em "Formatar" (sem gap) — pedido explicito do
+		// usuario apos revisao visual: os dois pareciam controles soltos
+		// e desalinhados. FlatButtonBorder (ver arc: 8 de Buttons#styleSecondary)
+		// so aceita um raio UNICO por botao, nao cantos assimetricos —
+		// verificado no fonte do FlatLaf 3.5.4 (sem suporte a
+		// "arc: tl,tr,br,bl" nesta versao) — entao a aproximacao possivel de
+		// "controle unico" e os dois colados sem espaco, cada um com seu
+		// proprio contorno arredondado, em vez de um "split button" com
+		// cantos internos retos.
+		gbc.insets = new Insets(0, 0, 0, 0);
 		mainBar.add(formatMenuButton, gbc);
 
 		gbc.gridx = 3;
@@ -958,6 +970,71 @@ public class MainWindow extends JFrame {
 		gbc.gridx = 4;
 		gbc.insets = new Insets(0, Spacing.MD, 0, 0);
 		mainBar.add(saveQueryButton, gbc);
+	}
+
+	/**
+	 * Indicador de linguagem ("SQL", so apresentacao — o app so roda SQL
+	 * hoje, sem outro dialeto pra escolher) + busca no editor ativo (pedido
+	 * explicito do protótipo: "Busca do editor integrada na barra
+	 * superior"), entre o grupo de acoes da esquerda e os icones da direita.
+	 * A busca so encaminha pra {@link SqlEditorPane#searchFromToolbar} —
+	 * reaproveita a barra de localizar/substituir (Ctrl+F) ja existente em
+	 * cada aba, sem duplicar logica de busca nova.
+	 * <p>
+	 * "SQL" e um {@link JLabel} simples, nao um {@code JComboBox} — um combo
+	 * clicavel com uma UNICA opcao sugeria ao usuario que dava pra trocar de
+	 * linguagem, o que nao existe hoje (pedido explicito do usuario apos
+	 * revisao visual).
+	 */
+	private void addLanguageAndSearch(JPanel mainBar, GridBagConstraints gbc) {
+		// selfStyling (nao "new JLabel" + Typography.secondary direto): a
+		// toolbar so e construida UMA VEZ (nunca reconstruida no toggle de
+		// tema) — sem isto o rotulo ficava com a cor do tema em que o app
+		// abriu (sempre escuro) gravada pra sempre, invisivel apos trocar
+		// pro tema claro (mesmo bug relatado pelo usuario nos rotulos de
+		// FERRAMENTAS, ver Typography#selfStyling).
+		languageLabel = Typography.selfStyling("SQL", Typography::secondary);
+		languageLabel.setToolTipText("Linguagem da aba atual");
+		languageLabel.setBorder(BorderFactory.createEmptyBorder(0, Spacing.SM, 0, Spacing.SM));
+
+		editorSearchField = new NSearchField("Buscar no editor...");
+		editorSearchField.onTextChange(() -> {
+			SqlEditorPane editor = currentEditor();
+			if (editor != null) {
+				editor.searchFromToolbar(editorSearchField.getText());
+			}
+		});
+		applyToolbarFieldSizes();
+
+		gbc.gridx = 7;
+		gbc.weightx = 0.0;
+		gbc.insets = new Insets(0, Spacing.LG, 0, 0);
+		mainBar.add(languageLabel, gbc);
+
+		gbc.gridx = 8;
+		gbc.insets = new Insets(0, Spacing.SM, 0, 0);
+		mainBar.add(editorSearchField, gbc);
+	}
+
+	/**
+	 * Largura de {@link #editorSearchField} escalada por {@link #scaledPx}
+	 * (zoom + modo compacto) — reaplicada por {@link #refreshDynamicSizing}
+	 * a cada mudanca, mesmo tratamento ja dado aos outros componentes
+	 * dependentes de escala (linhas da arvore, cartoes de conexao etc.).
+	 * Sem isto, a largura ficaria CONGELADA no valor calculado na construcao
+	 * da toolbar, fora de proporcao com o resto da UI depois de um zoom
+	 * in/out ou de ligar o modo compacto — pedido explicito do usuario
+	 * ("todos os componentes visuais deveriam acompanhar zoom/espacamento/
+	 * modo compacto"). {@link #languageLabel} nao precisa disto: e so texto,
+	 * o tamanho natural ja acompanha o zoom via a fonte padrao do UIManager
+	 * (ver {@link #applyZoomFont}).
+	 */
+	private void applyToolbarFieldSizes() {
+		if (editorSearchField != null) {
+			editorSearchField.setPreferredSize(null);
+			int height = editorSearchField.getPreferredSize().height;
+			editorSearchField.setPreferredSize(new Dimension(scaledPx(200), height));
+		}
 	}
 
 	/** Icones discretos da direita (sidebar/resultados/layout/tema/chat) — ultimo grupo da barra. */
@@ -1018,7 +1095,7 @@ public class MainWindow extends JFrame {
 		rightIcons.add(themeButton);
 		rightIcons.add(chatButton);
 
-		gbc.gridx = 7;
+		gbc.gridx = 9;
 		// CRITICO: weightx de volta pra 0 aqui — ficou em 1.0 desde o glue
 		// (gridx=6) e, com fill=NONE + anchor=BASELINE (centraliza
 		// horizontalmente dentro da propria celula), metade do espaco extra
@@ -1615,6 +1692,14 @@ public class MainWindow extends JFrame {
 		if (sqlEditorsList != null) {
 			sqlEditorsList.setFixedCellHeight(scaledPx(resultRowHeightBasePx()));
 		}
+		applyToolbarFieldSizes();
+		if (toolbarBar != null) {
+			toolbarBar.revalidate();
+			toolbarBar.repaint();
+		}
+		if (leftSide != null) {
+			leftSide.setMinimumSize(new Dimension(scaledPx(160), 0));
+		}
 		// Reconstroi as abas de resultado (tabela, gutter e cabecalho usam
 		// tamanhos fixos definidos na hora da criacao do JTable).
 		resultsController.reshowIfVisible();
@@ -1815,14 +1900,18 @@ public class MainWindow extends JFrame {
 	 * mesmo tipo de reducao de escopo documentada na Fase 4.
 	 */
 	private JComponent buildLeftSide() {
+		// ConnectionsPanel deixou de ficar sempre visivel na sidebar (pedido
+		// explicito do protótipo: "card reduzido para apenas Ambiente/Schema/
+		// Banco", sem a lista completa de conexoes salvas ocupando espaco
+		// permanente) — continua existindo (guarda todo o estado/logica de
+		// conectar/desconectar/cores por workspace) so que agora dentro de um
+		// popup, aberto pela seta "Conexoes salvas" do ConnectionStatusCard
+		// (ver #showConnectionsPopup).
 		connectionsPanel = new ConnectionsPanel(connectionStore, this::connectTo, this::disconnectFrom);
 		connectionsPanel.setRowHeight(scaledPx(resultRowHeightBasePx()));
-		// So Conexoes precisa de teto (fica sempre visivel, ACIMA das 4 abas
-		// — ver mais abaixo): Queries Salvas/Historico agora sao conteudo de
-		// aba, cada uma ocupa a altura TODA da sidebar quando selecionada, em
-		// vez de dividir espaco fixo com as outras (nao fazem mais sentido
-		// com teto de altura).
-		capMaxHeight(connectionsPanel, 220);
+		// Tamanho do popup recalculado a cada abertura (ver #showConnectionsPopup),
+		// nao fixado aqui: precisa acompanhar zoom/modo compacto como o resto
+		// da UI, e o zoom pode mudar entre uma abertura e outra.
 		savedQueriesPanel = new SavedQueriesPanel(savedQueryStore, this::openSavedQuery);
 		historyPanel = new HistoryPanel(historyStore, this::openHistoryEntry);
 
@@ -1837,6 +1926,7 @@ public class MainWindow extends JFrame {
 				statusBar.setText(" Workspace: " + name);
 			}
 		});
+		connectionCard.setOnManageConnections(() -> showConnectionsPopup(connectionCard));
 		JPanel cardRow = new JPanel(new BorderLayout());
 		cardRow.setOpaque(false);
 		cardRow.setBorder(BorderFactory.createEmptyBorder(Spacing.SM, 0, Spacing.SM, 0));
@@ -1861,8 +1951,9 @@ public class MainWindow extends JFrame {
 		searchRow.setBorder(BorderFactory.createEmptyBorder(0, 0, Spacing.SM, 0));
 		searchRow.add(sidebarSearch, BorderLayout.CENTER);
 
-		sqlEditorsCountLabel = new JLabel("SQL Editors");
-		Typography.secondary(sqlEditorsCountLabel);
+		// selfStyling: mesmo motivo do languageLabel (ver
+		// #addLanguageAndSearch) — a sidebar so e construida uma vez.
+		sqlEditorsCountLabel = Typography.selfStyling("SQL Editors", Typography::secondary);
 		JComponent sqlEditorsRow = sidebarRow(IconType.EDIT, sqlEditorsCountLabel, true, null,
 				() -> { if (!addQueryTab()) { selectLastRealTab(); } });
 		// Lista de verdade das abas de SQL abertas, clicaveis pra navegar entre
@@ -1925,16 +2016,23 @@ public class MainWindow extends JFrame {
 		// as outras 3 o tempo todo. So Conexoes fica sempre visivel fora das
 		// abas (usado junto com qualquer uma das 4, ver escolha do usuario).
 		sideTabs = new JTabbedPane(JTabbedPane.TOP);
+		// Uma UNICA linha, com rolagem, em vez do padrao do Swing de
+		// empilhar em varias linhas quando a coluna fica estreita — mesmo
+		// motivo/receita do editorTabs (ver #buildEditorArea) e do
+		// resultTabs (ver ResultsAreaController#buildResultsArea): pedido
+		// explicito do usuario, as abas nao devem ficar "umas em cima das
+		// outras", sempre lateralmente.
+		sideTabs.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
+		sideTabs.putClientProperty("JTabbedPane.tabType", "card");
 		sideTabs.addTab("Objetos", objectExplorer.buildObjectBrowser());
 		sideTabs.addTab("SQL", sqlEditorsTab);
 		sideTabs.addTab("Salvas", savedQueriesPanel);
 		sideTabs.addTab("Histórico", historyPanel);
 
-		JComponent quickActionsGroup = new JPanel();
-		quickActionsGroup.setOpaque(false);
-		quickActionsGroup.setLayout(new BoxLayout(quickActionsGroup, BoxLayout.Y_AXIS));
-		quickActionsGroup.add(sidebarRow(IconType.CHAT, "Chat com IA", true, null, this::openAiChat));
-
+		// FERRAMENTAS: um unico grupo no rodape com as 3 ferramentas
+		// administrativas MAIS "Chat com IA" logo depois (pedido explicito
+		// do protótipo, mesma ordem do mockup) — antes "Chat com IA" ficava
+		// num grupo separado, sem cabecalho, acima destas 3.
 		JComponent toolsGroup = new JPanel();
 		toolsGroup.setOpaque(false);
 		toolsGroup.setLayout(new BoxLayout(toolsGroup, BoxLayout.Y_AXIS));
@@ -1942,15 +2040,12 @@ public class MainWindow extends JFrame {
 		toolsGroup.add(indent(sidebarRow(IconType.BACKUP, "Backup e Restauracao", true, null, objectExplorer::openBackupRestore)));
 		toolsGroup.add(indent(sidebarRow(IconType.USERS, "Usuarios e Privilegios", true, null, objectExplorer::openUserManagement)));
 		toolsGroup.add(indent(sidebarRow(IconType.MONITOR, "Monitor de Conexao", true, null, objectExplorer::openProcessList)));
+		toolsGroup.add(indent(sidebarRow(IconType.CHAT, "Chat com IA", true, null, this::openAiChat)));
 
-		// Rodape fixo (fora das abas, sempre visivel): atalhos que nao sao
-		// "listas pra navegar" (Favoritos/Chat com IA) e as ferramentas
-		// menos frequentes (Backup/Usuarios/Monitor) — nenhum dos dois se
-		// encaixava sozinho em nenhuma das 4 abas.
+		// Rodape fixo (fora das abas, sempre visivel): unico grupo FERRAMENTAS.
 		JPanel footer = new JPanel();
 		footer.setOpaque(false);
 		footer.setLayout(new BoxLayout(footer, BoxLayout.Y_AXIS));
-		footer.add(quickActionsGroup);
 		footer.add(toolsGroup);
 
 		// Conexoes fica sempre visivel ACIMA das abas (pedido explicito do
@@ -1966,7 +2061,6 @@ public class MainWindow extends JFrame {
 		fixedTop.setLayout(new BoxLayout(fixedTop, BoxLayout.Y_AXIS));
 		fixedTop.add(topStack);
 		fixedTop.add(searchRow);
-		fixedTop.add(connectionsPanel);
 
 		JPanel contentColumn = new JPanel(new BorderLayout(0, Spacing.SM));
 		contentColumn.setBorder(BorderFactory.createEmptyBorder(Spacing.SM, Spacing.SM, Spacing.SM, Spacing.SM));
@@ -1977,23 +2071,43 @@ public class MainWindow extends JFrame {
 		JPanel container = new JPanel(new BorderLayout());
 		container.add(contentColumn, BorderLayout.CENTER);
 		container.setPreferredSize(new Dimension(280, 100));
+		// Minimo EXPLICITO e bem menor que o preferido: sem isto, JSplitPane
+		// usa o minimo CALCULADO pelos filhos (JTabbedPane com 4 abas,
+		// campos de busca, etc.) pra travar o quanto a divisoria pode andar
+		// — na pratica um teto bem maior do que o usuario queria (pedido
+		// explicito: "esse limite deveria ser bem menor"). Componentes
+		// internos continuam com seu proprio scroll/clipping quando a
+		// coluna fica mais estreita que o conteudo deles.
+		container.setMinimumSize(new Dimension(scaledPx(160), 0));
 		return container;
 	}
 
 	/**
-	 * Trava so a altura MAXIMA de um painel embutido na coluna unica (ver
-	 * {@link #buildLeftSide}) — NUNCA forca a preferida: com poucos itens
-	 * (ou nenhum), o BoxLayout usa a altura NATURAL do painel (pequena, sem
-	 * sobrar espaco vazio); so quando o conteudo passa do teto e que o
-	 * painel fica limitado a {@code maxHeight}, com sua PROPRIA JScrollPane
-	 * interna cuidando do resto (rolagem aninhada). Forcar a preferida como
-	 * o teto (versao anterior desta funcao) deixava uma caixa cinza vazia
-	 * enorme sempre que o usuario tinha poucas conexoes/queries/historico —
-	 * exatamente o problema reportado na revisao visual.
+	 * Popup com a lista completa de conexoes salvas ({@link #connectionsPanel},
+	 * conectar/desconectar/criar/editar) — aberto a partir da seta "Conexoes
+	 * salvas" do {@link ConnectionStatusCard} (ver #buildLeftSide). Deixou de
+	 * ficar sempre visivel na sidebar (pedido explicito do protótipo), mas
+	 * continua acessivel de um clique, sem perder nenhuma funcionalidade.
 	 */
-	private static void capMaxHeight(JComponent c, int maxHeight) {
-		Dimension max = c.getMaximumSize();
-		c.setMaximumSize(new Dimension(max.width, maxHeight));
+	private void showConnectionsPopup(JComponent anchor) {
+		// Mesma LARGURA do card de conexao (nao mais um valor fixo de
+		// 300px): pedido explicito do usuario ("poderia ter um visual
+		// melhor... acoplado") — com a mesma largura do card logo acima e
+		// zero espaco entre os dois (ver #show abaixo, y = anchor.getHeight()),
+		// o popup le como uma EXTENSAO do card (um dropdown), nao como um
+		// menu generico solto em outro lugar da tela.
+		connectionsPanel.setPreferredSize(new Dimension(Math.max(anchor.getWidth(), scaledPx(260)), scaledPx(360)));
+		// Cantos arredondados com o MESMO raio dos cards do design system
+		// (ver NTheme#CARD_ARC) e uma borda fina na cor neutra do tema —
+		// antes era um JPopupMenu generico (retangular, borda padrao do
+		// L&F), destoando do resto da UI (cards/botoes todos arredondados).
+		connectionsPanel.setBorder(BorderFactory.createLineBorder(GridTheme.HEADER_BORDER, 1, true));
+		JPopupMenu popup = new JPopupMenu();
+		popup.putClientProperty(com.formdev.flatlaf.FlatClientProperties.STYLE, "arc: " + NTheme.CARD_ARC);
+		popup.setBorder(BorderFactory.createEmptyBorder());
+		popup.setLayout(new BorderLayout());
+		popup.add(connectionsPanel, BorderLayout.CENTER);
+		popup.show(anchor, 0, anchor.getHeight());
 	}
 
 	/**
@@ -2029,12 +2143,19 @@ public class MainWindow extends JFrame {
 	 * "Favoritos" em {@link #buildLeftSide}).
 	 */
 	private JComponent sidebarRow(IconType icon, String text, boolean enabled, String tooltip, Runnable onClick) {
-		JLabel textLabel = new JLabel(text);
-		if (enabled) {
-			Typography.secondary(textLabel);
-		} else {
-			Typography.tertiary(textLabel);
-		}
+		// Typography.selfStyling (nao "new JLabel(text)" + Typography.secondary/
+		// tertiary direto): sem isto, o rotulo ficava com a cor do tema em
+		// que a sidebar foi CONSTRUIDA (sempre o escuro, ver App#main)
+		// gravada pra sempre — invisivel depois de trocar pro tema claro
+		// (bug relatado pelo usuario, com captura mostrando os rotulos do
+		// grupo FERRAMENTAS em branco sobre fundo branco).
+		JLabel textLabel = Typography.selfStyling(text, label -> {
+			if (enabled) {
+				Typography.secondary(label);
+			} else {
+				Typography.tertiary(label);
+			}
+		});
 		return sidebarRow(icon, textLabel, enabled, tooltip, onClick);
 	}
 
@@ -3199,6 +3320,17 @@ public class MainWindow extends JFrame {
 		// com a cor GridTheme do tema anterior ate a proxima mudanca de
 		// estado de conexao.
 		connectionCard.refreshTheme();
+		// ConnectionsPanel (lista de conexoes salvas, ver #showConnectionsPopup)
+		// so fica dentro de uma janela de verdade ENQUANTO o popup esta
+		// aberto — o resto do tempo, seu ULTIMO parent e um JPopupMenu ja
+		// descartado, fora de Window.getWindows(). FlatLaf.updateUI() so
+		// varre janelas ATIVAS, entao nunca alcancava este painel: a
+		// proxima vez que o usuario abria o popup, continuava 100% no tema
+		// ANTERIOR (fundo, selecao, lista inteira) — bug relatado pelo
+		// usuario com captura de tela ("conexoes nao mudou junto"). Reaplica
+		// manualmente aqui, igual FlatLaf faria se o painel estivesse numa
+		// janela visivel.
+		javax.swing.SwingUtilities.updateComponentTreeUI(connectionsPanel);
 		styleRunButton();
 		// Mesmo motivo: UpdateBanner tem setBackground/setBorder proprios
 		// (ver seu javadoc), fora do alcance do FlatLaf.updateUI().

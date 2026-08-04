@@ -304,8 +304,15 @@ final class ResultTableHeader {
      * no renderer ({@link ColumnHeaderRenderer#FILTER_ZONE_WIDTH}) — a altura
      * INTEIRA do cabecalho conta (nao ha divisao superior/inferior como nas
      * setinhas).
+     * <p>
+     * Visibilidade de pacote (nao {@code private}): tambem consultada por
+     * {@link ColumnMetadataPopup}, mesmo motivo ja documentado em
+     * {@link #columnAtDivider} pra divisoria de redimensionar — o popup de
+     * hover com "Tipo SQL/Nullable/etc." nao deve aparecer por cima do
+     * icone de funil, atrapalhando quem so quer clicar nele pra abrir o
+     * autofiltro (pedido explicito do usuario, com captura de tela).
      */
-    private static boolean filterIconAtPoint(JTableHeader header, int viewColumn, Point p) {
+    static boolean filterIconAtPoint(JTableHeader header, int viewColumn, Point p) {
         Rectangle rect = header.getHeaderRect(viewColumn);
         int sortZoneStart = rect.x + rect.width - ColumnHeaderRenderer.SORT_ZONE_WIDTH - 6;
         int filterZoneEnd = sortZoneStart - 2;

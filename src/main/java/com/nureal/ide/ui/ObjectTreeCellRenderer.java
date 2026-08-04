@@ -146,11 +146,16 @@ final class ObjectTreeCellRenderer extends DefaultTreeCellRenderer {
             return;
         }
         Dimension pref = getPreferredSize();
-        // Superestima a largura (arvore inteira, com folga) em vez de tentar
-        // calcular a posicao X exata da celula (indentacao + icones variam
-        // por profundidade) — o excesso e cortado pelo clip normal de
-        // pintura do Swing, nunca aparece por cima de outra coisa.
-        int width = Math.max(pref.width, Math.max(tree.getWidth(), 1000));
+        // Estica ate a largura REAL da arvore (nunca um piso artificial
+        // maior — ver historico desta linha) pra cobrir a linha inteira. Um
+        // piso fixo de 1000px aqui inflava a largura PREFERIDA da arvore
+        // toda (a linha do schema tem stretchWidth sempre true) bem alem do
+        // espaco visivel da sidebar, acionando uma barra de rolagem
+        // horizontal quase permanente mesmo com nomes curtos — relatado
+        // pelo usuario com captura de tela. tree.getWidth() antes do
+        // primeiro layout e 0, entao cai pro tamanho natural do texto
+        // (pref.width) sem regressao.
+        int width = Math.max(pref.width, tree.getWidth());
         setPreferredSize(new Dimension(width, pref.height));
     }
 

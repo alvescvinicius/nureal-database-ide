@@ -6,6 +6,7 @@ import com.nureal.ide.modulos.conexoes.dominio.contratos.ConexaoAtivaPort;
 import com.nureal.ide.compartilhado.designsystem.NSearchField;
 
 import javax.swing.JButton;
+import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
@@ -63,7 +64,7 @@ final class ResultGrid extends JPanel {
     /** Alterna grade <-> {@link ResultRecordView} — ver {@link #toggleRecordView}. */
     private JPanel centerCards;
     private ResultRecordView recordView;
-    private JButton recordViewToggle;
+    private JCheckBox recordViewToggle;
     private boolean recordViewOn;
     private final ColumnSorter sorter;
     private final String fingerprint;
@@ -143,6 +144,7 @@ final class ResultGrid extends JPanel {
 
         this.selection = SelectionManager.install(table);
         installSelectionSummaryListeners();
+        installColumnHighlightClearOnClick();
 
         JComponent corner = RowNumberGutter.corner();
         this.headerRenderer = new ColumnHeaderRenderer(sorter);
@@ -303,8 +305,12 @@ final class ResultGrid extends JPanel {
         // com cada coluna empilhada verticalmente, pra ver todos os campos
         // de UM registro sem rolar horizontalmente. CardLayout alterna entre
         // a grade normal e o inspetor, sem afetar nenhuma das duas quando
-        // nao esta visivel.
-        this.recordView = new ResultRecordView(model, table, this::syncTableSelectionToModelRow);
+        // nao esta visivel. Recebe os MESMOS metadataSource/fkOrigin ja
+        // construidos acima pro menu de contexto/icone de FK da grade —
+        // "Visualizar Origem" funciona igual nas duas visoes, sem duplicar a
+        // logica de abrir o FkInspectorWindow.
+        this.recordView = new ResultRecordView(model, table, this::syncTableSelectionToModelRow,
+                metadataSource, fkOrigin);
         this.centerCards = new JPanel(new java.awt.CardLayout());
         centerCards.add(scroll, CARD_GRID);
         centerCards.add(recordView, CARD_RECORD);
@@ -343,7 +349,7 @@ final class ResultGrid extends JPanel {
             layout.show(centerCards, CARD_GRID);
         }
         if (recordViewToggle != null) {
-            recordViewToggle.setText(recordViewOn ? "Ver como grade" : "Ver como registro");
+            recordViewToggle.setSelected(recordViewOn);
         }
     }
 
@@ -415,6 +421,21 @@ final class ResultGrid extends JPanel {
 
     GridEditController editController() {
         return editController;
+    }
+
+    /**
+     * Reconstroi a linha atualmente exibida no {@link #recordView} (ver
+     * {@link ResultRecordView#refresh}) — chamado de fora (ver
+     * {@code ResultsAreaController#wireGridEditing}) sempre que o modo de
+     * edicao liga/desliga ou o estado de pendencias muda, pra alternar entre
+     * campo so-leitura e campo editavel sem depender de {@link #toggleRecordView}
+     * (que so roda quando o USUARIO troca de visao, nao quando o modo de
+     * edicao muda com "Ver como registro" ja aberto).
+     */
+    void refreshRecordView() {
+        if (recordView != null) {
+            recordView.refresh();
+        }
     }
 
     /**
@@ -652,10 +673,12 @@ final class ResultGrid extends JPanel {
 
         // "Ver como registro" (ResultRecordView) — pedido explicito do
         // usuario: mostrar a grade "na vertical tambem", uma linha por vez.
-        // Texto simples (nao icone novo): evita inventar um glifo sem poder
-        // validar visualmente (mesmo criterio ja usado no chat/IA nesta
-        // rodada de ajustes).
-        recordViewToggle = new JButton("Ver como registro");
+        // JCheckBox (nao mais JButton de texto que trocava "Ver como
+        // grade"/"Ver como registro") — mesma linguagem visual do protótipo
+        // (checkbox numa unica linha de barra de resultados), e o estado
+        // ligado/desligado fica mais claro que um botao que muda de rotulo.
+        recordViewToggle = new JCheckBox("Ver como registro");
+        recordViewToggle.setOpaque(false);
         recordViewToggle.addActionListener(e -> toggleRecordView());
         bar.add(recordViewToggle);
 
@@ -862,6 +885,30 @@ final class ResultGrid extends JPanel {
     private void clearColumnHighlight() {
         headerRenderer.setHighlight(-1);
         table.getTableHeader().repaint();
+    }
+
+    /**
+     * Clicar em qualquer celula do CORPO da grade limpa o realce de coluna
+     * (ver {@link #highlightSelectedColumn}/{@link #searchColumn}) — antes
+     * so sumia trocando o combo "Filtro" pra "Todas as colunas" ou apagando
+     * o campo "Buscar coluna" a mao; clicar numa area neutra da grade nao
+     * tirava o destaque, ficando "preso" ali (relatado pelo usuario, com
+     * captura de tela). So limpa a marcacao VISUAL do cabecalho e o campo de
+     * busca de coluna — nao mexe no combo "Filtro" nem no filtro de linhas
+     * em vigor (SAO independentes: o realce e so um "olha aqui", nao reflete
+     * o filtro ativo).
+     */
+    private void installColumnHighlightClearOnClick() {
+        table.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mousePressed(MouseEvent e) {
+                if (headerRenderer.highlightedColumn() < 0) {
+                    return;
+                }
+                clearColumnHighlight();
+                columnSearchField.setText("");
+            }
+        });
     }
 
     /** Rola so no eixo horizontal ate a coluna informada, preservando a posicao vertical atual. */
