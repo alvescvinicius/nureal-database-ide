@@ -118,6 +118,16 @@ final class SelectionManager {
      */
     private final List<JComponent> exemptFromFocusClear = new ArrayList<>();
 
+    /** Recebe o clique no icone de FK de uma celula (ver {@link #installFkOriginHandler}). */
+    @FunctionalInterface
+    interface FkClickHandler {
+        void onFkCellClicked(int viewRow, int viewColumn);
+    }
+
+    /** {@code null} ate {@link #installFkOriginHandler} ser chamado (ver javadoc la) — celulas de FK nao respondem ao icone ate la. */
+    private ColumnHeaderRenderer.MetadataSource fkMetadataSource;
+    private FkClickHandler fkClickHandler;
+
     private SelectionManager(JTable table) {
         this.table = table;
     }
@@ -137,6 +147,25 @@ final class SelectionManager {
         table.addMouseListener(new MouseAdapter() {
             @Override
             public void mousePressed(MouseEvent e) {
+                if (SwingUtilities.isRightMouseButton(e) || e.isPopupTrigger()) {
+                    // Botao direito (menu de contexto, ver ResultContextMenu):
+                    // NUNCA mexe na selecao — nem para "so essa linha" nem
+                    // para nada. Sem esta saida, este listener (registrado
+                    // ANTES do listener do menu de contexto, ver
+                    // ResultGrid#wireContextMenusAndScroll) tratava qualquer
+                    // clique, direito ou esquerdo, como um clique simples e
+                    // colapsava a selecao multi-celula/multi-linha pra so a
+                    // linha sob o cursor — ResultContextMenu so decidia DEPOIS,
+                    // e so preservava a selecao se a celula clicada JA estivesse
+                    // nela, tarde demais. Bug relatado pelo usuario: clicar com
+                    // o botao direito fora da ULTIMA linha selecionada
+                    // desselecionava tudo antes do menu abrir. Popup trigger no
+                    // Windows so fica marcado no RELEASE (nao no PRESS), por
+                    // isso o filtro por botao ({@code isRightMouseButton})
+                    // continua necessario mesmo com o {@code isPopupTrigger()}
+                    // aqui.
+                    return;
+                }
                 plainPress = false;
                 int row = table.rowAtPoint(e.getPoint());
                 int col = table.columnAtPoint(e.getPoint());
@@ -150,6 +179,15 @@ final class SelectionManager {
                     // ficava "presa" — estilo Excel, clicar fora de qualquer
                     // celula limpa a selecao.
                     table.clearSelection();
+                    return;
+                }
+                if (e.getClickCount() == 1 && !e.isShiftDown() && !e.isControlDown()
+                        && fkClickHandler != null && isOverFkIcon(row, col, e.getPoint())) {
+                    // Clique no icone de FK da celula (ver AbstractTypedCellRenderer):
+                    // abre "Visualizar Origem" direto, sem tocar na selecao —
+                    // pedido explicito do usuario para nao precisar do menu de
+                    // contexto so pra isso.
+                    fkClickHandler.onFkCellClicked(row, col);
                     return;
                 }
                 if (e.getClickCount() >= 2) {
@@ -236,23 +274,34 @@ final class SelectionManager {
 
     /**
      * Shift+clique estende a selecao da ANCORA (celula do ultimo clique
-     * simples) ate a celula clicada agora — um RETANGULO de verdade (linhas E
-     * colunas), nao mais a linha inteira: pedido explicito do usuario para
-     * conseguir marcar so um trecho de UMA coluna com Shift+clique, igual ao
-     * arrasto (ver {@link #installBodyMouseHandling}). A ancora de COLUNA usa
-     * o indice de LEAD (nao o de ancora) do modelo de selecao de colunas:
-     * {@link #selectFullColumnRangeWithLead} (chamado pelo clique simples
-     * anterior) sempre deixa esse indice apontando pra coluna que o usuario
-     * de fato clicou, mesmo com TODAS as colunas visualmente selecionadas —
-     * o indice de ancora, ali, aponta pra ultima coluna da grade, nao pra
-     * coluna clicada.
+     * simples, NUNCA a ultima celula que o proprio Shift+clique tocou) ate a
+     * celula clicada agora — um RETANGULO de verdade (linhas E colunas), nao
+     * mais a linha inteira: pedido explicito do usuario para conseguir marcar
+     * so um trecho de UMA coluna com Shift+clique, igual ao arrasto (ver
+     * {@link #installBodyMouseHandling}) — mesmo comportamento do Excel:
+     * Shift+clique repetido (sem soltar Shift entre um clique e outro) sempre
+     * mede a partir do MESMO ponto de partida, nunca do ultimo Shift+clique.
+     *
+     * As DUAS dimensoes usam {@code getAnchorSelectionIndex()} (nunca
+     * {@code getLeadSelectionIndex()}) de proposito: {@link #selectFullRow}/
+     * {@link #addRowToSelection}/{@link #selectFullColumnRangeWithLead} sempre
+     * terminam com ANCORA == LEAD == celula que o usuario de fato clicou, mas
+     * so a ANCORA continua estavel entre Shift+cliques consecutivos — o LEAD
+     * seria sobrescrito pelo PROPRIO {@code setRowSelectionInterval}/
+     * {@code setColumnSelectionInterval} desta chamada (que sempre fixam
+     * anchor=fromRow/fromCol, MAS lead=a celula recem-clicada). Usar LEAD
+     * aqui foi o bug relatado pelo usuario: o 1o Shift+clique acertava (lead
+     * ainda igual a ancora, herdado do clique simples anterior), mas cada
+     * Shift+clique SEGUINTE "esquecia" o ponto de partida original e passava
+     * a medir a partir do Shift+clique anterior, encolhendo/deslocando o
+     * retangulo em vez de so estende-lo — comportamento oposto ao Excel.
      */
     private void extendRowRangeTo(int row, int clickedCol) {
         int rowAnchor = table.getSelectionModel().getAnchorSelectionIndex();
         int fromRow = (rowAnchor < 0) ? row : rowAnchor;
         table.setRowSelectionInterval(fromRow, row);
 
-        int colAnchor = table.getColumnModel().getSelectionModel().getLeadSelectionIndex();
+        int colAnchor = table.getColumnModel().getSelectionModel().getAnchorSelectionIndex();
         int fromCol = (colAnchor < 0) ? clickedCol : colAnchor;
         table.setColumnSelectionInterval(fromCol, clickedCol);
 
@@ -365,7 +414,7 @@ final class SelectionManager {
             return;
         }
         corner.setToolTipText(
-                "Clique: selecionar tudo  ·  Duplo-clique: alternar largura de todas as colunas (ajustar ao conteudo -> minimo -> padrao)");
+                "Clique: selecionar tudo (clique de novo p/ desselecionar)  ·  Duplo-clique: alternar largura de todas as colunas (ajustar ao conteudo -> minimo -> padrao)");
         corner.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseClicked(MouseEvent e) {
@@ -374,12 +423,31 @@ final class SelectionManager {
                     if (onAutoFitAll != null) {
                         onAutoFitAll.run();
                     }
+                } else if (isEverythingSelected()) {
+                    // Pedido explicito do usuario: com TUDO ja selecionado
+                    // (por um clique anterior no canto, ou Ctrl+A), um SEGUNDO
+                    // clique no canto desseleciona em vez de repetir o
+                    // "selecionar tudo" sem efeito visivel nenhum — a unica
+                    // forma de limpar a selecao antes era clicar fora da
+                    // grade. Nao afeta o primeiro clique (grade ainda nao
+                    // totalmente selecionada): esse continua selecionando
+                    // tudo, igual ao Excel.
+                    table.clearSelection();
                 } else {
                     table.selectAll();
                     setSelectionScope(SelectionScope.MULTI);
                 }
             }
         });
+    }
+
+    /** {@code true} quando TODAS as linhas E TODAS as colunas estao selecionadas (grade nao-vazia) — ver {@link #installCorner}. */
+    private boolean isEverythingSelected() {
+        int rowCount = table.getRowCount();
+        int colCount = table.getColumnCount();
+        return rowCount > 0 && colCount > 0
+                && table.getSelectedRowCount() == rowCount
+                && table.getSelectedColumnCount() == colCount;
     }
 
     /**
@@ -473,6 +541,42 @@ final class SelectionManager {
         });
     }
 
+    // ---------- Icone de FK (acesso direto a "Visualizar Origem") ----------
+
+    /**
+     * Liga o clique no icone de FK (ver {@link AbstractTypedCellRenderer#FK_ICON_ZONE_WIDTH})
+     * ao handler que abre o {@code FkInspectorWindow} — chamado por
+     * {@link ResultGrid} DEPOIS de montar o {@code FkOriginHandler} (que por
+     * sua vez precisa da conexao/schema, so disponiveis mais tarde no
+     * construtor). Pedido explicito do usuario: acessar "Visualizar Origem"
+     * direto na celula, sem abrir o menu de contexto.
+     */
+    void installFkOriginHandler(ColumnHeaderRenderer.MetadataSource metadataSource, FkClickHandler handler) {
+        this.fkMetadataSource = metadataSource;
+        this.fkClickHandler = handler;
+    }
+
+    /**
+     * {@code true} se {@code p} cai na zona do icone de FK (ultimos
+     * {@link AbstractTypedCellRenderer#FK_ICON_ZONE_WIDTH}px da celula) E a
+     * coluna clicada e realmente uma FK — mesma fonte de metadados que pinta
+     * o icone (ver {@link AbstractTypedCellRenderer#resolveMetadata}), entao
+     * o hit-test nunca "acerta" numa coluna sem icone nenhum pintado.
+     */
+    private boolean isOverFkIcon(int viewRow, int viewCol, java.awt.Point p) {
+        if (fkMetadataSource == null) {
+            return false;
+        }
+        int modelColumn = table.convertColumnIndexToModel(viewCol);
+        ColumnMetadata meta = fkMetadataSource.metadataFor(modelColumn);
+        if (meta == null || !meta.hasForeignKey()) {
+            return false;
+        }
+        Rectangle cellRect = table.getCellRect(viewRow, viewCol, false);
+        int zoneStart = cellRect.x + cellRect.width - AbstractTypedCellRenderer.FK_ICON_ZONE_WIDTH;
+        return p.x >= zoneStart && p.x < cellRect.x + cellRect.width;
+    }
+
     // ---------- Perder foco limpa a selecao ----------
 
     private void installFocusClearing() {
@@ -513,7 +617,16 @@ final class SelectionManager {
         table.addMouseMotionListener(new MouseMotionAdapter() {
             @Override
             public void mouseMoved(MouseEvent e) {
-                setHoverRow(table.rowAtPoint(e.getPoint()));
+                int row = table.rowAtPoint(e.getPoint());
+                setHoverRow(row);
+                // Cursor de mao sobre o icone de FK (ver isOverFkIcon) — mesmo
+                // sinal visual ja usado pelo icone de filtro/setinhas do
+                // cabecalho, indicando que ali e clicavel.
+                int col = table.columnAtPoint(e.getPoint());
+                boolean overFkIcon = fkClickHandler != null && row >= 0 && col >= 0
+                        && isOverFkIcon(row, col, e.getPoint());
+                table.setCursor(java.awt.Cursor.getPredefinedCursor(
+                        overFkIcon ? java.awt.Cursor.HAND_CURSOR : java.awt.Cursor.DEFAULT_CURSOR));
             }
         });
         table.addMouseListener(new MouseAdapter() {

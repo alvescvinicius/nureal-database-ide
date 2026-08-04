@@ -362,37 +362,39 @@ final class ResultStatusBar {
     }
 
     /**
-     * Atualiza o resumo de selecao ("N selecionada(s) · Soma: X") — chamado
-     * pela {@link ResultGrid} sempre que a selecao de celulas muda (ver
-     * {@code MainWindow#buildGridPanel}, que liga os dois). Pedido explicito
-     * do usuario: selecionar N celulas soma so essas N; selecionar a coluna
-     * inteira soma a coluna inteira — igual a barra de status do Excel.
+     * Atualiza o resumo de selecao ("N selecionada(s) · Soma: X · Media: Y ·
+     * Min: Z · Max: W") — chamado pela {@link ResultGrid} sempre que a
+     * selecao de celulas muda (ver {@code MainWindow#buildGridPanel}, que liga
+     * os dois). Pedido explicito do usuario: selecionar N celulas agrega so
+     * essas N; selecionar a coluna inteira agrega a coluna inteira — igual a
+     * barra de status do Excel, so que com todas as funcoes de uma vez (nao
+     * so soma) em vez de exigir escolher uma por menu de contexto.
      *
-     * {@code count <= 1} nao mostra nada: com uma unica celula selecionada o
-     * proprio valor ja esta visivel na grade, um "1 selecionada" fixo so
+     * {@code cellCount <= 1} nao mostra nada: com uma unica celula selecionada
+     * o proprio valor ja esta visivel na grade, um "1 selecionada" fixo so
      * seria ruido durante a navegacao normal (mesmo comportamento do Excel).
-     *
-     * @param sum {@code null} quando nenhum valor numerico entra na selecao
-     *            (texto/nulos/datas) — nesse caso mostra so a contagem.
      */
-    void updateSelectionSummary(int count, java.math.BigDecimal sum) {
-        lastSum = sum;
-        if (count <= 1) {
+    void updateSelectionSummary(SelectionStats stats) {
+        lastSum = stats.sum();
+        if (stats.cellCount() <= 1) {
             selectionSummary.setText("");
             selectionSummary.setToolTipText(null);
             selectionSummary.setCursor(Cursor.getDefaultCursor());
             return;
         }
-        String text = count + " selecionada(s)";
-        if (sum != null) {
-            text += "   ·   Soma: " + formatSum(sum);
+        StringBuilder text = new StringBuilder(stats.cellCount() + " selecionada(s)");
+        if (stats.sum() != null) {
+            text.append("   ·   Soma: ").append(formatSum(stats.sum()));
+            text.append("   ·   Media: ").append(formatSum(stats.average()));
+            text.append("   ·   Min: ").append(formatSum(stats.min()));
+            text.append("   ·   Max: ").append(formatSum(stats.max()));
             selectionSummary.setToolTipText("Clique para copiar a soma");
             selectionSummary.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         } else {
             selectionSummary.setToolTipText(null);
             selectionSummary.setCursor(Cursor.getDefaultCursor());
         }
-        selectionSummary.setText(text);
+        selectionSummary.setText(text.toString());
     }
 
     /**

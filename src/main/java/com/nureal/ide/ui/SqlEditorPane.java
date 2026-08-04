@@ -180,6 +180,8 @@ public class SqlEditorPane extends JPanel {
     }
 
     private final ObjectOpenHandler onOpenObject;
+    /** Guardado so pra {@link #buildEditorPopupMenu} conseguir oferecer "Executar esta instrucao" — mesmo Runnable de {@link #bindRunAndFormatShortcuts}/{@link #buildBreadcrumbBar}. */
+    private final Runnable onRun;
 
     public SqlEditorPane(String tabId, SqlCompletionProviderRSyntax provider, Runnable onRun,
             Supplier<SqlFormatter> formatterSupplier, String fontFamily, Supplier<SchemaInfo> schemaSupplier,
@@ -215,6 +217,7 @@ public class SqlEditorPane extends JPanel {
         this.schemaSupplier = schemaSupplier;
         this.connectionNameSupplier = connectionNameSupplier;
         this.onOpenObject = onOpenObject;
+        this.onRun = onRun;
         this.textArea = buildTextArea();
         // Ligado JA AQUI (antes de qualquer setText(sql) que o chamador venha
         // a fazer pra carregar o conteudo inicial da aba) — MainWindow chama
@@ -835,6 +838,24 @@ public class SqlEditorPane extends JPanel {
 
             @Override
             public void mouseClicked(MouseEvent e) {
+                // Duplo-clique: seleciona a INSTRUCAO SQL inteira sob o
+                // cursor (ate o ";" anterior/seguinte, ver SqlStatementLocator
+                // — mesma logica ja usada pelo destaque de fundo da instrucao
+                // atual), nao so a palavra sob o cursor (o padrao do Swing/
+                // RSyntaxTextArea) — pedido explicito do usuario: poder
+                // selecionar uma instrucao inteira com duplo-clique pra
+                // executar so ela (ver tambem "Executar esta instrucao" no
+                // menu de contexto, buildEditorPopupMenu). O padrao do Swing
+                // ja rodou no mousePressed ANTES deste mouseClicked (selecionou
+                // so a palavra); aqui so sobrescrevemos com a selecao maior.
+                if (e.getClickCount() == 2 && !javax.swing.SwingUtilities.isRightMouseButton(e)) {
+                    int offset = textArea.viewToModel2D(e.getPoint());
+                    int[] bounds = SqlStatementLocator.boundsAt(textArea.getText(), offset);
+                    if (bounds[1] > bounds[0]) {
+                        textArea.select(bounds[0], bounds[1]);
+                    }
+                    return;
+                }
                 // CTRL+Clique sobre um objeto reconhecido (secao 8.3): abre a
                 // tela de propriedades — mesmo destino de duplo-clique na
                 // arvore de objetos, so que a partir do editor. So dispara se
@@ -1908,6 +1929,24 @@ public class SqlEditorPane extends JPanel {
         JMenuItem selectAll = new JMenuItem("Selecionar tudo");
         selectAll.addActionListener(e -> textArea.selectAll());
         menu.add(selectAll);
+        menu.addSeparator();
+
+        // Roda SO a instrucao sob o cursor (ate o ";" anterior/seguinte, ver
+        // SqlStatementLocator) — pedido explicito do usuario: mesma selecao
+        // que o duplo-clique ja faz (ver installObjectHover), so acessivel
+        // pelo menu de contexto tambem, sem precisar dar duplo-clique antes.
+        // Reaproveita currentSql() (usa a selecao quando ha uma) selecionando
+        // a instrucao primeiro e so entao chamando onRun — mesmo caminho do
+        // botao "Executar"/Ctrl+Enter, sem duplicar a logica de execucao.
+        JMenuItem runStatement = new JMenuItem("Executar esta instrucao");
+        runStatement.addActionListener(e -> {
+            int[] bounds = SqlStatementLocator.boundsAt(textArea.getText(), textArea.getCaretPosition());
+            if (bounds[1] > bounds[0]) {
+                textArea.select(bounds[0], bounds[1]);
+            }
+            onRun.run();
+        });
+        menu.add(runStatement);
 
         menu.addPopupMenuListener(new javax.swing.event.PopupMenuListener() {
             @Override
@@ -1918,6 +1957,7 @@ public class SqlEditorPane extends JPanel {
                 cut.setEnabled(hasSelection && textArea.isEditable());
                 copy.setEnabled(hasSelection);
                 paste.setEnabled(textArea.isEditable());
+                runStatement.setEnabled(!textArea.getText().isBlank());
             }
 
             @Override

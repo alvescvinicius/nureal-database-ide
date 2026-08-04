@@ -93,6 +93,10 @@ final class ResultsAreaController {
 
 	JComponent buildResultsArea() {
 		resultTabs = new JTabbedPane();
+		// Mesmo motivo do editorTabs (ver MainWindow#buildEditorArea): uma
+		// unica linha de abas, com rolagem, em vez do padrao do Swing de
+		// empilhar em varias linhas — pedido explicito do usuario.
+		resultTabs.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
 		resultTabs.putClientProperty("JTabbedPane.tabType", "card");
 		resultTabs.putClientProperty("JTabbedPane.minimumTabWidth", 96);
 		resultTabs.addMouseListener(new MouseAdapter() {

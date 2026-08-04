@@ -46,6 +46,8 @@ import java.awt.GridLayout;
 final class ColumnHeaderRenderer implements TableCellRenderer {
 
     static final int SORT_ZONE_WIDTH = 18;
+    /** Largura fixa do icone de filtro (funil), reservada a esquerda da zona de ordenacao — ver {@link #FILTER_ZONE_WIDTH}. */
+    static final int FILTER_ZONE_WIDTH = 16;
 
     /** Fonte de metadados (PK/FK) para o popup de hover/dialogo de informacoes da coluna. Pode devolver {@code null}. */
     @FunctionalInterface
@@ -53,10 +55,19 @@ final class ColumnHeaderRenderer implements TableCellRenderer {
         ColumnMetadata metadataFor(int modelColumn);
     }
 
+    /** Diz se a coluna tem um autofiltro de valores ativo (ver {@link ColumnValueFilter}) — usado so para colorir o icone de filtro. */
+    @FunctionalInterface
+    interface FilterActiveSource {
+        boolean isActive(int modelColumn);
+    }
+
     private final ColumnSorter sorter;
+    private FilterActiveSource filterActiveSource = modelColumn -> false;
 
     private final JPanel panel = new JPanel(new BorderLayout(4, 0));
     private final JLabel nameLabel = new JLabel();
+    private final JPanel rightZone = new JPanel(new BorderLayout(2, 0));
+    private final JLabel filterIcon = new JLabel("", SwingConstants.CENTER);
     private final JPanel sortZone = new JPanel(new GridLayout(2, 1, 0, 0));
     // Texto vazio de proposito: o glifo em si agora vem de um Icon (ver
     // applySortIndicator), nao mais de um caractere Unicode "▲"/"▼" solto no
@@ -103,8 +114,19 @@ final class ColumnHeaderRenderer implements TableCellRenderer {
         sortZone.add(upArrow);
         sortZone.add(downArrow);
 
+        filterIcon.setPreferredSize(new Dimension(FILTER_ZONE_WIDTH, 1));
+
+        rightZone.setOpaque(false);
+        rightZone.add(filterIcon, BorderLayout.WEST);
+        rightZone.add(sortZone, BorderLayout.EAST);
+
         panel.add(nameLabel, BorderLayout.CENTER);
-        panel.add(sortZone, BorderLayout.EAST);
+        panel.add(rightZone, BorderLayout.EAST);
+    }
+
+    /** Ligado uma unica vez por {@link ResultGrid} depois de criar o {@link ColumnValueFilter} desta grade. */
+    void setFilterActiveSource(FilterActiveSource source) {
+        this.filterActiveSource = source;
     }
 
     @Override
@@ -115,6 +137,7 @@ final class ColumnHeaderRenderer implements TableCellRenderer {
 
         int modelColumn = table.getColumnModel().getColumn(viewColumn).getModelIndex();
         applySortIndicator(modelColumn);
+        applyFilterIndicator(modelColumn);
 
         boolean highlighted = highlightModelColumn >= 0 && modelColumn == highlightModelColumn;
         panel.setBackground(highlighted ? GridTheme.HEADER_HIGHLIGHT_BACKGROUND : GridTheme.HEADER_BACKGROUND);
@@ -142,6 +165,20 @@ final class ColumnHeaderRenderer implements TableCellRenderer {
 
     /** Tamanho do icone de seta — pequeno de proposito para caber nos ~9px de altura de cada metade da zona de ordenacao. */
     private static final int ARROW_ICON_SIZE = 9;
+    private static final int FILTER_ICON_SIZE = 11;
+
+    /**
+     * Icone de funil (autofiltro estilo Excel, ver {@link ColumnFilterPopup}):
+     * cor de destaque ({@link GridTheme#SORT_INDICATOR_ACTIVE}) quando a
+     * coluna tem um filtro de valores ativo, cinza discreto caso contrario —
+     * mesma convencao visual ja usada pelas setinhas de ordenacao.
+     */
+    private void applyFilterIndicator(int modelColumn) {
+        boolean active = filterActiveSource.isActive(modelColumn);
+        filterIcon.setIcon(Icons.get(IconType.FILTER, FILTER_ICON_SIZE,
+                active ? GridTheme.SORT_INDICATOR_ACTIVE : GridTheme.SORT_INDICATOR_INACTIVE));
+        filterIcon.setToolTipText(active ? "Filtro ativo nesta coluna — clique para ajustar" : "Filtrar esta coluna");
+    }
 
     /**
      * Cada setinha reflete SO a sua propria direcao — nunca as duas ativas ao

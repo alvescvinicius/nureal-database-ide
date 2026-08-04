@@ -1,11 +1,15 @@
 package com.nureal.ide.ui;
 import com.nureal.ide.compartilhado.designsystem.GridTheme;
+import com.nureal.ide.compartilhado.designsystem.IconType;
+import com.nureal.ide.compartilhado.designsystem.Icons;
 
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Font;
+import java.awt.Graphics;
 
 import javax.swing.BorderFactory;
+import javax.swing.Icon;
 import javax.swing.JTable;
 import javax.swing.SwingConstants;
 import javax.swing.table.DefaultTableCellRenderer;
@@ -35,6 +39,19 @@ abstract class AbstractTypedCellRenderer extends DefaultTableCellRenderer {
 
     private static final long serialVersionUID = 1L;
 
+    /**
+     * Largura fixa (px) reservada no canto direito de uma celula de chave
+     * estrangeira para o icone de "ir para a origem" (ver {@link #fkIconVisible}
+     * e {@link SelectionManager}, que usa esta MESMA constante para o
+     * hit-test do clique) — pedido explicito do usuario: acessar "Visualizar
+     * Origem" sem precisar abrir o menu de contexto.
+     */
+    static final int FK_ICON_ZONE_WIDTH = 18;
+    private static final int FK_ICON_SIZE = 12;
+
+    /** {@code true} so durante a pintura de UMA celula de FK (ver {@link #getTableCellRendererComponent}) — consultado por {@link #paintComponent}. */
+    private boolean fkIconVisible;
+
     // ANTES era "static final Color COLOR_NULL = GridTheme.COLOR_NULL" — uma
     // copia feita UMA VEZ, no carregamento da classe. GridTheme.COLOR_NULL
     // agora muda quando o usuario alterna claro/escuro (ver GridTheme#applyPalette),
@@ -50,6 +67,7 @@ abstract class AbstractTypedCellRenderer extends DefaultTableCellRenderer {
         setForeground(null);
         setFont(getFont().deriveFont(Font.PLAIN));
         resetTypedState();
+        fkIconVisible = false;
 
         boolean isNull = (value == null);
         String display = isNull ? "null" : formatValue(value);
@@ -78,9 +96,26 @@ abstract class AbstractTypedCellRenderer extends DefaultTableCellRenderer {
             // vindo do tipo real da coluna (ver alignment() acima), pedido
             // explicito do usuario: nao mexer em como varchar/number etc. sao
             // exibidos, so trazer de volta a cor de destaque de chave.
-            Color keyColor = keyHighlightColor(table, column);
-            if (keyColor != null) {
-                setForeground(keyColor);
+            ColumnMetadata meta = resolveMetadata(table, column);
+            if (meta != null && meta.primaryKey()) {
+                setForeground(GridTheme.COLOR_PRIMARY_KEY);
+            } else if (meta != null && meta.hasForeignKey()) {
+                setForeground(GridTheme.COLOR_IDENTIFIER);
+            }
+            // O icone de "ir para a origem" (ver paintComponent/SelectionManager)
+            // depende SO de ser FK — DESACOPLADO da cor acima de proposito:
+            // uma coluna que e PK desta tabela E FK de outra ao mesmo tempo
+            // (comum em tabela de detalhe 1:1, ex.: "pessoa_id" PK de
+            // "pessoa_juridica" e FK para "pessoa") caia sempre no ramo de PK
+            // pra cor (prioridade preservada de proposito, ja era assim antes
+            // desta mudanca), mas ainda tem uma origem valida pra visualizar —
+            // bug relatado pelo usuario: o menu de contexto mostrava
+            // "Visualizar Origem", mas o icone nunca aparecia nessas colunas
+            // porque o "else if" antigo nunca era alcancado quando a coluna
+            // tambem era PK.
+            if (meta != null && meta.hasForeignKey()) {
+                fkIconVisible = true;
+                setBorder(BorderFactory.createEmptyBorder(0, 8, 0, 8 + FK_ICON_ZONE_WIDTH));
             }
         }
         paintActiveCellBorder(table, row, column);
@@ -88,34 +123,47 @@ abstract class AbstractTypedCellRenderer extends DefaultTableCellRenderer {
     }
 
     /**
-     * Cor de destaque de chave (dourado = PK, amarelo = FK — cores distintas
-     * desde a Rodada 2 do "Sistema Semantico de Cores", pedido explicito do
-     * usuario para nao confundir as duas) para a coluna sob o cursor de
-     * pintura, ou {@code null} se a coluna nao e chave de nenhuma tabela (ou
-     * os metadados ainda nao carregaram). Consulta o
-     * {@link ColumnMetadataResolver} guardado pela {@link ResultGrid} desta
-     * tabela especifica (client property — ver {@link RendererFactory#KEY_METADATA_RESOLVER}),
-     * o MESMO usado pelo indicador de FK do cabecalho e pelo popup de
-     * metadados, entao o resultado e sempre consistente entre os tres.
-     * Enquanto o schema ainda nao carregou, {@code resolve} dispara a carga
-     * em segundo plano e agenda um {@code table.repaint()} para quando ela
-     * terminar — a celula simplesmente aparece sem destaque ate la.
+     * Metadados (PK/FK) da coluna sob o cursor de pintura, ou {@code null} se
+     * a coluna nao e chave de nenhuma tabela (ou os metadados ainda nao
+     * carregaram). Consulta o {@link ColumnMetadataResolver} guardado pela
+     * {@link ResultGrid} desta tabela especifica (client property — ver
+     * {@link RendererFactory#KEY_METADATA_RESOLVER}), o MESMO usado pelo
+     * indicador de FK do cabecalho, pelo popup de metadados e pelo clique no
+     * icone de FK (ver {@link SelectionManager}), entao o resultado e sempre
+     * consistente entre os quatro. Enquanto o schema ainda nao carregou,
+     * {@code resolve} dispara a carga em segundo plano e agenda um
+     * {@code table.repaint()} para quando ela terminar — a celula
+     * simplesmente aparece sem destaque/icone ate la.
      */
-    private static Color keyHighlightColor(JTable table, int viewColumn) {
+    static ColumnMetadata resolveMetadata(JTable table, int viewColumn) {
         Object resolverObj = table.getClientProperty(RendererFactory.KEY_METADATA_RESOLVER);
         if (!(resolverObj instanceof ColumnMetadataResolver resolver)
                 || !(table.getModel() instanceof ResultTableModel model)) {
             return null;
         }
         int modelColumn = table.convertColumnIndexToModel(viewColumn);
-        ColumnMetadata meta = resolver.resolve(model, modelColumn, table::repaint);
-        if (meta.primaryKey()) {
-            return GridTheme.COLOR_PRIMARY_KEY;
+        return resolver.resolve(model, modelColumn, table::repaint);
+    }
+
+    /**
+     * Pinta o icone de "ir para a origem" por CIMA do texto ja pintado pelo
+     * {@link DefaultTableCellRenderer}, no canto direito da celula (zona
+     * reservada via {@link #FK_ICON_ZONE_WIDTH}, ver {@link #getTableCellRendererComponent}) —
+     * so quando esta celula especifica e de uma coluna de chave estrangeira
+     * ({@link #fkIconVisible}). O clique em cima dele e tratado por
+     * {@link SelectionManager} (mesma zona de pixels), nao aqui — um renderer
+     * nunca recebe eventos de mouse por si so.
+     */
+    @Override
+    protected void paintComponent(Graphics g) {
+        super.paintComponent(g);
+        if (!fkIconVisible) {
+            return;
         }
-        if (meta.hasForeignKey()) {
-            return GridTheme.COLOR_IDENTIFIER;
-        }
-        return null;
+        Icon icon = Icons.get(IconType.FOREIGN_KEY, FK_ICON_SIZE, GridTheme.COLOR_IDENTIFIER);
+        int x = getWidth() - FK_ICON_ZONE_WIDTH + (FK_ICON_ZONE_WIDTH - FK_ICON_SIZE) / 2 - 4;
+        int y = (getHeight() - FK_ICON_SIZE) / 2;
+        icon.paintIcon(this, g, x, y);
     }
 
     /**
@@ -197,9 +245,14 @@ abstract class AbstractTypedCellRenderer extends DefaultTableCellRenderer {
         int leadRow = table.getSelectionModel().getLeadSelectionIndex();
         int leadCol = table.getColumnModel().getSelectionModel().getLeadSelectionIndex();
         if (row == leadRow && column == leadCol && table.isCellSelected(row, column)) {
+            // Preserva a zona reservada do icone de FK (ver fkIconVisible) —
+            // sem o "+ FK_ICON_ZONE_WIDTH" aqui, a celula ATIVA de uma coluna
+            // de FK perdia o espaco reservado e o texto passava a ficar
+            // embaixo do icone bem na celula que o usuario esta olhando.
+            int right = 7 + (fkIconVisible ? FK_ICON_ZONE_WIDTH : 0);
             setBorder(BorderFactory.createCompoundBorder(
                     BorderFactory.createMatteBorder(1, 1, 1, 1, GridTheme.ACTIVE_CELL_BORDER),
-                    BorderFactory.createEmptyBorder(0, 7, 0, 7)));
+                    BorderFactory.createEmptyBorder(0, 7, 0, right)));
         }
     }
 

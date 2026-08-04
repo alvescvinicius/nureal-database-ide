@@ -1933,10 +1933,6 @@ public class MainWindow extends JFrame {
 		JComponent quickActionsGroup = new JPanel();
 		quickActionsGroup.setOpaque(false);
 		quickActionsGroup.setLayout(new BoxLayout(quickActionsGroup, BoxLayout.Y_AXIS));
-		// Placeholder (SPEC-0007): "Favoritos" ainda nao existe no app (sem
-		// "favoritar" query salva de verdade fora do menu de contexto) —
-		// aparece desabilitado em vez de fingir que funciona.
-		quickActionsGroup.add(sidebarRow(IconType.FAVORITE, "Favoritos", false, "Favoritos — em breve", null));
 		quickActionsGroup.add(sidebarRow(IconType.CHAT, "Chat com IA", true, null, this::openAiChat));
 
 		JComponent toolsGroup = new JPanel();
@@ -2174,6 +2170,11 @@ public class MainWindow extends JFrame {
 
 	private JComponent buildEditorArea() {
 		editorTabs = new JTabbedPane();
+		// Padrao do Swing (WRAP_TAB_LAYOUT) empilha as abas em VARIAS linhas
+		// quando nao cabem mais numa so — pedido explicito do usuario para
+		// manter SEMPRE uma unica linha, com setinhas de rolagem (estilo
+		// navegador/VS Code) quando ha abas demais para caber.
+		editorTabs.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
 		// Sem isto, o FlatLaf reserva um respiro antes da primeira aba (a area
 		// de abas tem um inset esquerdo proprio, independente do painel que a
 		// contem) — a primeira aba ficava alguns pixels mais a direita que o
@@ -2480,8 +2481,24 @@ public class MainWindow extends JFrame {
 			if (c == plusTab || c == keep) {
 				continue;
 			}
+			if (c instanceof SqlEditorPane sep) {
+				// Mesma limpeza de closeQueryTab: os resultados de uma aba
+				// fechada nao fazem mais sentido sem ela (ver resultsByTab).
+				resultsController.forgetTab(sep);
+			}
 			editorTabs.removeTabAt(i);
 		}
+		// A aba mantida (keep) JA estava selecionada ANTES do loop acima —
+		// remover as outras nunca muda o indice selecionado, entao NENHUM
+		// ChangeEvent dispara (e e o ChangeListener de editorTabs, ver
+		// buildEditorArea, quem normalmente aciona refreshSqlEditorsCount).
+		// Sem esta chamada explicita, a lista lateral "SQL" (ver
+		// sqlEditorsListModel) ficava com referencias fantasma aos
+		// componentes ja removidos: indexOfComponent devolvia -1 pra eles e o
+		// renderer caia no toString() padrao do Swing em vez do titulo da
+		// aba — bug relatado pelo usuario (linhas tipo
+		// "com.nureal.ide.ui.SqlEditorPane[,0,33,...").
+		refreshSqlEditorsCount();
 		scheduleSave();
 	}
 

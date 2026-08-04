@@ -12,6 +12,7 @@ import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTable;
+import javax.swing.RowFilter;
 import javax.swing.RowSorter;
 import javax.swing.SortOrder;
 import javax.swing.table.JTableHeader;
@@ -53,6 +54,10 @@ final class ResultGrid extends JPanel {
     private static final int DEFAULT_ROW_HEIGHT_BASE_PX = 22;
 
     private final JTable table;
+    /** Modelo bruto (indices de LINHA/COLUNA de MODELO, nao de view) — usado por {@link #distinctValuesFor} para calcular a lista "em cascata" do autofiltro por coluna sem depender do filtro atual da view. */
+    private final ResultTableModel model;
+    /** Filtro "por valor" estilo Excel (autofiltro por coluna) — ver {@link ColumnFilterPopup}/{@link #onFilterIconClicked}. */
+    private final ColumnValueFilter columnValueFilter = new ColumnValueFilter();
     /** Exposto via {@link #scrollPane()} pra quem precisar reagir a rolagem (ver {@code ResultsAreaController}, carregamento automatico de mais linhas). */
     private JScrollPane scrollPane;
     /** Alterna grade <-> {@link ResultRecordView} — ver {@link #toggleRecordView}. */
@@ -71,13 +76,14 @@ final class ResultGrid extends JPanel {
     private final SelectionManager selection;
     /**
      * Notificado sempre que a selecao de celulas muda, com a contagem de
-     * celulas selecionadas e a soma dos valores numericos entre elas
-     * ({@code null} quando nenhuma e numerica) — ver {@link #updateSelectionSummary()}.
-     * {@code MainWindow} liga isto a {@link ResultStatusBar#updateSelectionSummary}.
-     * Default no-op: a grade funciona sozinha (testes, uso fora do MainWindow)
-     * mesmo sem ninguem ouvindo.
+     * celulas selecionadas e as funcoes agregadas (soma, media, minimo,
+     * maximo) entre os valores numericos dela — ver {@link SelectionStats} e
+     * {@link #updateSelectionSummary()}. {@code MainWindow} liga isto a
+     * {@link ResultStatusBar#updateSelectionSummary}. Default no-op: a grade
+     * funciona sozinha (testes, uso fora do MainWindow) mesmo sem ninguem
+     * ouvindo.
      */
-    private java.util.function.BiConsumer<Integer, java.math.BigDecimal> onSelectionSummary = (count, sum) -> { };
+    private java.util.function.Consumer<SelectionStats> onSelectionSummary = stats -> { };
 
     /**
      * Reaplica o fundo/borda/cor de texto do {@link #buildFilterBar} — sao
@@ -126,6 +132,7 @@ final class ResultGrid extends JPanel {
         // volta false e a grade permanece somente-leitura, como sempre foi.
         this.editController = new GridEditController(model);
         model.setEditController(editController);
+        this.model = model;
 
         this.table = buildTable(model, scale, rowHeightBasePx);
         ColumnMetadataResolver resolver = installRenderers(model, connectionManager, schema, metadataCache);
@@ -139,7 +146,9 @@ final class ResultGrid extends JPanel {
 
         JComponent corner = RowNumberGutter.corner();
         this.headerRenderer = new ColumnHeaderRenderer(sorter);
-        JTableHeader header = ResultTableHeader.install(table, sorter, selection, metadataSource, headerRenderer);
+        headerRenderer.setFilterActiveSource(columnValueFilter::isActive);
+        JTableHeader header = ResultTableHeader.install(table, sorter, selection, metadataSource, headerRenderer,
+                this::onFilterIconClicked);
         applyHeaderHeight(header, scale);
         selection.installCorner(corner, this::persistLayout);
 
@@ -259,6 +268,17 @@ final class ResultGrid extends JPanel {
                     colMeta.foreignKey(), localValues);
         };
         ResultContextMenu.install(table, sorter, metadataSource, filterController, exportExcel, fkOrigin);
+        // Mesmo fkOrigin do menu de contexto, so que disparado pelo icone de
+        // FK pintado na propria celula (ver AbstractTypedCellRenderer/
+        // SelectionManager#installFkOriginHandler) — pedido explicito do
+        // usuario para nao precisar do menu de contexto so pra isso.
+        selection.installFkOriginHandler(metadataSource, (viewRow, viewCol) -> {
+            int modelColumn = table.convertColumnIndexToModel(viewCol);
+            ColumnMetadata meta = metadataSource.metadataFor(modelColumn);
+            if (meta != null && meta.hasForeignKey()) {
+                fkOrigin.openOrigin(meta, viewRow);
+            }
+        });
         ResultHeaderContextMenu.install(table, header, sorter, metadataSource, filterController, this::persistLayout);
         ResultContextMenu.installOnCorner(corner, table, sorter, metadataSource, filterController, exportExcel);
 
@@ -385,7 +405,7 @@ final class ResultGrid extends JPanel {
     }
 
     /** Liga o callback de resumo de selecao (ver campo {@link #onSelectionSummary}). */
-    void onSelectionSummary(java.util.function.BiConsumer<Integer, java.math.BigDecimal> listener) {
+    void onSelectionSummary(java.util.function.Consumer<SelectionStats> listener) {
         this.onSelectionSummary = listener;
     }
 
@@ -492,21 +512,24 @@ final class ResultGrid extends JPanel {
     }
 
     /**
-     * Recalcula quantas celulas estao selecionadas e a soma dos valores
-     * numericos entre elas, e repassa para quem estiver ouvindo (ver
-     * {@link #onSelectionSummary}). Iterar {@code isCellSelected} sobre o
-     * produto linhas-selecionadas x colunas-selecionadas (em vez de assumir
-     * que toda combinacao esta selecionada) e o jeito robusto de contar a
-     * selecao de fato — no Swing, linhas e colunas selecionadas sao dois
-     * modelos independentes, e o retangulo que os dois juntos "sugerem" nem
-     * sempre e o que esta realmente marcado.
+     * Recalcula quantas celulas estao selecionadas e as funcoes agregadas
+     * (soma, media, minimo, maximo) dos valores numericos entre elas, e
+     * repassa para quem estiver ouvindo (ver {@link #onSelectionSummary}).
+     * Iterar {@code isCellSelected} sobre o produto linhas-selecionadas x
+     * colunas-selecionadas (em vez de assumir que toda combinacao esta
+     * selecionada) e o jeito robusto de contar a selecao de fato — no Swing,
+     * linhas e colunas selecionadas sao dois modelos independentes, e o
+     * retangulo que os dois juntos "sugerem" nem sempre e o que esta
+     * realmente marcado.
      */
     private void updateSelectionSummary() {
         int[] rows = table.getSelectedRows();
         int[] cols = table.getSelectedColumns();
         int count = 0;
+        int numericCount = 0;
         java.math.BigDecimal sum = java.math.BigDecimal.ZERO;
-        boolean hasNumeric = false;
+        java.math.BigDecimal min = null;
+        java.math.BigDecimal max = null;
         for (int row : rows) {
             for (int col : cols) {
                 if (!table.isCellSelected(row, col)) {
@@ -516,11 +539,17 @@ final class ResultGrid extends JPanel {
                 java.math.BigDecimal n = numericValue(table.getValueAt(row, col));
                 if (n != null) {
                     sum = sum.add(n);
-                    hasNumeric = true;
+                    numericCount++;
+                    min = (min == null || n.compareTo(min) < 0) ? n : min;
+                    max = (max == null || n.compareTo(max) > 0) ? n : max;
                 }
             }
         }
-        onSelectionSummary.accept(count, hasNumeric ? sum : null);
+        java.math.BigDecimal average = numericCount > 0
+                ? sum.divide(java.math.BigDecimal.valueOf(numericCount), java.math.MathContext.DECIMAL64)
+                : null;
+        onSelectionSummary.accept(new SelectionStats(count, numericCount,
+                numericCount > 0 ? sum : null, average, min, max));
     }
 
     /** {@code null} para qualquer coisa que nao seja um numero (texto, data, nulo, booleano...). */
@@ -592,10 +621,7 @@ final class ResultGrid extends JPanel {
                 + "&bull; <b>NULL</b> / <b>NOT NULL</b><br>"
                 + "Entende data e numero mesmo em colunas de texto.</html>");
 
-        Runnable apply = () -> {
-            int modelColumn = filterColumnBox.getSelectedIndex() - 1;
-            sorter.rowSorter().setRowFilter(SmartCellFilter.build(filterField.getText(), modelColumn));
-        };
+        Runnable apply = this::applyFilters;
         filterField.onTextChange(apply);
         // O combo de colunas ja funciona como "busca de coluna" (JComboBox
         // pesquisa por digitacao nativamente): alem de restringir o filtro a
@@ -659,9 +685,106 @@ final class ResultGrid extends JPanel {
     }
 
     private void clearFilterUi() {
+        columnValueFilter.clearAll();
         filterField.setText("");
         filterColumnBox.setSelectedIndex(0);
         columnSearchField.setText("");
+        applyFilters();
+        table.getTableHeader().repaint();
+    }
+
+    /**
+     * Recombina o filtro de texto "inteligente" (barra de filtro) com o
+     * autofiltro por valores de cada coluna (ver {@link ColumnValueFilter}) —
+     * os dois se somam (E logico), nunca um substitui o outro. Chamado sempre
+     * que qualquer um dos dois muda.
+     */
+    private void applyFilters() {
+        int modelColumn = filterColumnBox.getSelectedIndex() - 1;
+        RowFilter<Object, Object> smart = SmartCellFilter.build(filterField.getText(), modelColumn);
+        RowFilter<Object, Object> columns = columnValueFilter.buildRowFilter();
+        List<RowFilter<Object, Object>> combined = new ArrayList<>();
+        if (smart != null) {
+            combined.add(smart);
+        }
+        if (columns != null) {
+            combined.add(columns);
+        }
+        sorter.rowSorter().setRowFilter(combined.isEmpty() ? null
+                : (combined.size() == 1 ? combined.get(0) : RowFilter.andFilter(combined)));
+    }
+
+    /**
+     * Icone de funil clicado no cabecalho (ver {@link ResultTableHeader.FilterIconHandler}):
+     * monta a lista "em cascata" de valores distintos desta coluna (ver
+     * {@link #distinctValuesFor}) e abre o {@link ColumnFilterPopup} ancorado
+     * logo abaixo do cabecalho.
+     */
+    private void onFilterIconClicked(int viewColumn, java.awt.Point anchor) {
+        int modelColumn = table.convertColumnIndexToModel(viewColumn);
+        Map<String, String> valueLabels = distinctValuesFor(modelColumn);
+        Set<String> allPossible = valueLabels.keySet();
+        Set<String> checked = columnValueFilter.isActive(modelColumn)
+                ? columnValueFilter.allowedValues(modelColumn)
+                : allPossible;
+        ColumnFilterPopup.show(table.getTableHeader(), anchor, valueLabels, checked,
+                selected -> {
+                    columnValueFilter.setAllowedValues(modelColumn, selected, allPossible);
+                    applyFilters();
+                    table.getTableHeader().repaint();
+                },
+                () -> {
+                    columnValueFilter.clear(modelColumn);
+                    applyFilters();
+                    table.getTableHeader().repaint();
+                });
+    }
+
+    /**
+     * Valores distintos de {@code targetModelColumn} (chave = valor bruto,
+     * ver {@link ColumnValueFilter#stringValue}; texto exibido igual, exceto
+     * "" -&gt; "(vazios)"), EM CASCATA: so conta linha que bate com os
+     * filtros JA ATIVOS nas OUTRAS colunas (ver
+     * {@link ColumnValueFilter#rowMatchesExcluding}) e com o filtro de texto
+     * "inteligente" da barra de filtro — mesma logica de
+     * {@link SmartCellFilter}, aplicada direto no MODELO (nao na view), pra
+     * nao depender do RowFilter combinado ja estar montado.
+     */
+    private Map<String, String> distinctValuesFor(int targetModelColumn) {
+        String filterText = filterField.getText();
+        int filterColumn = filterColumnBox.getSelectedIndex() - 1;
+        java.util.function.Predicate<String> smartPredicate =
+                (filterText == null || filterText.isBlank()) ? null : SmartCellFilter.buildPredicate(filterText);
+
+        Set<String> sortedKeys = ColumnValueFilter.newSortedSet();
+        int rowCount = model.getRowCount();
+        for (int row = 0; row < rowCount; row++) {
+            if (!columnValueFilter.rowMatchesExcluding(model, row, targetModelColumn)) {
+                continue;
+            }
+            if (smartPredicate != null && !rowMatchesSmartFilter(smartPredicate, filterColumn, row)) {
+                continue;
+            }
+            sortedKeys.add(ColumnValueFilter.stringValue(model.getValueAt(row, targetModelColumn)));
+        }
+
+        Map<String, String> labels = new LinkedHashMap<>();
+        for (String key : sortedKeys) {
+            labels.put(key, key.isEmpty() ? "(vazios)" : key);
+        }
+        return labels;
+    }
+
+    private boolean rowMatchesSmartFilter(java.util.function.Predicate<String> predicate, int filterColumn, int row) {
+        if (filterColumn < 0) {
+            for (int c = 0; c < model.getColumnCount(); c++) {
+                if (predicate.test(ColumnValueFilter.stringValue(model.getValueAt(row, c)))) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        return predicate.test(ColumnValueFilter.stringValue(model.getValueAt(row, filterColumn)));
     }
 
     /**

@@ -154,7 +154,15 @@ final class ColumnAutoFit {
     private static int charsToPixels(JTable table, int chars) {
         FontMetrics cellMetrics = table.getFontMetrics(table.getFont());
         int charWidth = cellMetrics.charWidth('0');
-        return Math.max(charWidth * chars + CELL_PADDING, SAFETY_FLOOR_PX);
+        // Soma a "chrome" fixa do cabecalho (icone de filtro + zona de
+        // ordenacao + preenchimentos, ver headerChromeWidth) — sem isto, os
+        // {@code chars} pedidos aqui descrevem o espaco TOTAL da coluna, nao
+        // so o do NOME, e o FlatLaf reduz o rotulo inteiro a "..." assim que
+        // sobra menos espaco que essa chrome fixa (visivel ate em colunas de
+        // nome curtissimo, tipo "id"). Bug relatado pelo usuario no modo
+        // MINIMIZED (ver shrinkToMinimum): a chrome cresceu (icone de filtro
+        // novo) mas este calculo continuou ignorando ela por completo.
+        return Math.max(charWidth * chars + CELL_PADDING + headerChromeWidth(table), SAFETY_FLOOR_PX);
     }
 
     /** Ajusta TODAS as colunas visiveis ao conteudo. Disparado por acao explicita do usuario (ver nota de classe). */
@@ -316,14 +324,30 @@ final class ColumnAutoFit {
      */
     private static final int HEADER_SAFETY_MARGIN = 4;
 
+    /** Espaco (px) entre o icone de filtro e a zona de ordenacao dentro do cabecalho — mesmo {@code hgap} do {@code BorderLayout(2, 0)} de {@code ColumnHeaderRenderer#rightZone}. */
+    private static final int HEADER_FILTER_SORT_GAP = 2;
+
+    /**
+     * Espaco (px) que o cabecalho SEMPRE reserva, independente do texto do
+     * nome — preenchimentos + as duas zonas fixas a direita (icone de filtro
+     * e zona de ordenacao, ver {@link ColumnHeaderRenderer#rightZone}).
+     * Usada tanto por {@link #headerWidth} (autofit por conteudo) quanto por
+     * {@link #charsToPixels} (larguras uniformes/minimizadas) — QUALQUER
+     * calculo de largura de coluna precisa contar esta chrome, senao o nome
+     * inteiro vira "..." (FlatLaf ellipsiza o rotulo assim que o espaco
+     * restante fica menor que ela) mesmo em colunas de nome curtissimo.
+     */
+    private static int headerChromeWidth(JTable table) {
+        return HEADER_PADDING + HEADER_LABEL_GAP
+                + ColumnHeaderRenderer.FILTER_ZONE_WIDTH + HEADER_FILTER_SORT_GAP
+                + ColumnHeaderRenderer.SORT_ZONE_WIDTH + HEADER_SAFETY_MARGIN;
+    }
+
     private static int headerWidth(JTable table, TableColumn column) {
         FontMetrics headerMetrics = table.getTableHeader()
                 .getFontMetrics(table.getTableHeader().getFont().deriveFont(Font.BOLD));
         int width = headerMetrics.stringWidth(String.valueOf(column.getHeaderValue()));
-        width += HEADER_PADDING;
-        width += HEADER_LABEL_GAP;
-        width += ColumnHeaderRenderer.SORT_ZONE_WIDTH;
-        width += HEADER_SAFETY_MARGIN;
+        width += headerChromeWidth(table);
         // Sem reserva para icone de PK/FK: o cabecalho nao mostra mais esse
         // icone (removido a pedido do usuario — poluia o header); a mesma
         // informacao continua no popup de hover/dialogo "Informacoes da coluna".
@@ -348,7 +372,17 @@ final class ColumnAutoFit {
                 maxWidth = width;
             }
         }
-        return maxWidth + CELL_PADDING + extra.left + extra.right;
+        int width = maxWidth + CELL_PADDING + extra.left + extra.right;
+        // Coluna de chave estrangeira: reserva o mesmo espaco fixo que
+        // AbstractTypedCellRenderer usa pro icone de "ir para a origem" —
+        // sem isto, o autofit calculava a largura so pelo TEXTO e o icone
+        // acabava cortando/sobrepondo o valor exibido na mesma coluna que
+        // acabou de ser "expandida".
+        ColumnMetadata meta = AbstractTypedCellRenderer.resolveMetadata(table, viewColumn);
+        if (meta != null && meta.hasForeignKey()) {
+            width += AbstractTypedCellRenderer.FK_ICON_ZONE_WIDTH;
+        }
+        return width;
     }
 
     /** Usa o proprio renderer da coluna para formatar o valor (datas, etc.), quando disponivel. */

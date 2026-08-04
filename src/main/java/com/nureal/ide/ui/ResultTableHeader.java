@@ -35,8 +35,20 @@ final class ResultTableHeader {
     private ResultTableHeader() {
     }
 
+    /** Recebe o clique no icone de funil (ver {@link ColumnHeaderRenderer}) — implementado por {@link ResultGrid}, que abre o {@link ColumnFilterPopup}. */
+    @FunctionalInterface
+    interface FilterIconHandler {
+        void onFilterIconClicked(int viewColumn, Point anchor);
+    }
+
     static JTableHeader install(JTable table, ColumnSorter sorter, SelectionManager selection,
             ColumnHeaderRenderer.MetadataSource metadataSource, ColumnHeaderRenderer renderer) {
+        return install(table, sorter, selection, metadataSource, renderer, null);
+    }
+
+    static JTableHeader install(JTable table, ColumnSorter sorter, SelectionManager selection,
+            ColumnHeaderRenderer.MetadataSource metadataSource, ColumnHeaderRenderer renderer,
+            FilterIconHandler filterIconHandler) {
         JTableHeader header = new JTableHeader(table.getColumnModel());
         header.setReorderingAllowed(false);
         header.setDefaultRenderer(renderer);
@@ -69,7 +81,7 @@ final class ResultTableHeader {
         boolean[] allColumnsSelectedAtGestureStart = { false };
 
         header.addMouseListener(buildMouseListener(header, table, sorter, selection, renderer,
-                dragAnchorColumn, allColumnsSelectedAtGestureStart));
+                dragAnchorColumn, allColumnsSelectedAtGestureStart, filterIconHandler));
         header.addMouseMotionListener(buildMouseMotionListener(header, table, selection, renderer, dragAnchorColumn));
 
         table.setTableHeader(header);
@@ -79,7 +91,7 @@ final class ResultTableHeader {
 
     private static MouseAdapter buildMouseListener(JTableHeader header, JTable table, ColumnSorter sorter,
             SelectionManager selection, ColumnHeaderRenderer renderer, int[] dragAnchorColumn,
-            boolean[] allColumnsSelectedAtGestureStart) {
+            boolean[] allColumnsSelectedAtGestureStart, FilterIconHandler filterIconHandler) {
         return new MouseAdapter() {
             @Override
             public void mousePressed(MouseEvent e) {
@@ -107,6 +119,9 @@ final class ResultTableHeader {
                 }
                 if (arrowAtPoint(header, viewColumn, e.getPoint()) != null) {
                     return; // clique na setinha de ordenacao — decidido no RELEASE, nao arrasta
+                }
+                if (filterIconAtPoint(header, viewColumn, e.getPoint())) {
+                    return; // clique no icone de filtro — decidido no RELEASE, nao arrasta
                 }
                 if (e.isShiftDown() || e.isControlDown()) {
                     return; // Shift/Ctrl ja tem seu proprio significado (decidido no RELEASE); nao encadeia com arrasto
@@ -193,6 +208,12 @@ final class ResultTableHeader {
                     int modelColumn = table.getColumnModel().getColumn(viewColumn).getModelIndex();
                     sorter.setDirection(modelColumn, arrow, e.isControlDown());
                     header.repaint();
+                } else if (!onDivider && filterIconHandler != null && filterIconAtPoint(header, viewColumn, e.getPoint())) {
+                    // Clique no icone de funil (ver ColumnHeaderRenderer): abre
+                    // o popup de autofiltro por valores, ancorado logo abaixo
+                    // do cabecalho desta coluna.
+                    Rectangle rect = header.getHeaderRect(viewColumn);
+                    filterIconHandler.onFilterIconClicked(viewColumn, new Point(rect.x, rect.y + rect.height));
                 } else if (e.isShiftDown() || e.isControlDown()) {
                     // Clique simples (sem modificador) ja foi resolvido no
                     // PRESS acima (dragAnchorColumn) — repetir aqui so
@@ -228,9 +249,11 @@ final class ResultTableHeader {
                 boolean overDivider = columnAtDivider(header, e.getPoint()) >= 0;
                 boolean overSortZone = !overDivider && viewColumn >= 0
                         && arrowAtPoint(header, viewColumn, e.getPoint()) != null;
+                boolean overFilterIcon = !overDivider && !overSortZone && viewColumn >= 0
+                        && filterIconAtPoint(header, viewColumn, e.getPoint());
                 header.setCursor(Cursor.getPredefinedCursor(overDivider
                         ? Cursor.E_RESIZE_CURSOR
-                        : (overSortZone ? Cursor.HAND_CURSOR : Cursor.DEFAULT_CURSOR)));
+                        : ((overSortZone || overFilterIcon) ? Cursor.HAND_CURSOR : Cursor.DEFAULT_CURSOR)));
             }
 
             @Override
@@ -272,6 +295,22 @@ final class ResultTableHeader {
             return null;
         }
         return (p.y < rect.y + rect.height / 2.0) ? SortOrder.ASCENDING : SortOrder.DESCENDING;
+    }
+
+    /**
+     * Zona clicavel do icone de funil (autofiltro, ver
+     * {@link ColumnHeaderRenderer}): faixa fixa imediatamente a ESQUERDA da
+     * zona de ordenacao (ver {@link #arrowAtPoint}), mesma largura reservada
+     * no renderer ({@link ColumnHeaderRenderer#FILTER_ZONE_WIDTH}) — a altura
+     * INTEIRA do cabecalho conta (nao ha divisao superior/inferior como nas
+     * setinhas).
+     */
+    private static boolean filterIconAtPoint(JTableHeader header, int viewColumn, Point p) {
+        Rectangle rect = header.getHeaderRect(viewColumn);
+        int sortZoneStart = rect.x + rect.width - ColumnHeaderRenderer.SORT_ZONE_WIDTH - 6;
+        int filterZoneEnd = sortZoneStart - 2;
+        int filterZoneStart = filterZoneEnd - ColumnHeaderRenderer.FILTER_ZONE_WIDTH;
+        return p.x >= filterZoneStart && p.x < filterZoneEnd;
     }
 
     /**
