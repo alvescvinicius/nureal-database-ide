@@ -10,7 +10,6 @@ import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Cursor;
-import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
@@ -33,23 +32,29 @@ import com.nureal.ide.compartilhado.designsystem.NBadge;
 import com.nureal.ide.compartilhado.designsystem.NTheme;
 
 /**
- * Indicador "Conexao Ativa" — pilula arredondada mostrando nome/host/engine/
- * status da conexao ativa, sempre visivel independente de qual painel/aba
- * esta em foco.
+ * Indicador "Conexao Ativa" — pilula arredondada mostrando SO o nome da
+ * conexao ativa (status por cor do dot, ver {@link #render}) — pedido
+ * explicito do usuario apos um bug relatado com captura de tela ("coloque
+ * apenas o nome da conexao mesmo... aproveite ao maximo o espaco pra evitar
+ * nomes cortados... sem interferir no botao de adicionar conexao, que ta
+ * bugado ficando sobreposta"): host/porta/usuario/engine SAIRAM da pilula
+ * (ficavam grandes demais pra coluna estreita da sidebar, forcando o layout
+ * a quebrar) — quem quiser esses detalhes abre o dropdown "Conexoes salvas"
+ * que a pilula ja abre ao clicar.
  * <p>
  * Ja foi um CARD vertical na sidebar (SPEC-0007 "Sidebar Workspace"), depois
  * um card mais rico com selos, depois uma barra esticada pela largura
- * inteira da janela, depois um pill CENTRALIZADO numa linha propria por
- * cima de tudo (3 linhas, depois 1) — toda essa familia de versao "linha
- * inteira no topo" sempre sobrava uma faixa de altura fixa so pra isto,
- * empurrando a arvore de objetos e o editor SQL pra baixo, mesmo comprimida
- * a 1 linha (feedback do usuario com captura de tela: "espaco perdido").
- * Agora vive EMBUTIDA na propria barra de acoes (ver
- * {@code MainWindow#buildToolbar}, ao lado do botao "Salvar"), sem nenhuma
- * linha/altura extra dedicada — pedido explicito do usuario ("e se colocar
- * ao lado do botao salvar... menos espaco gasto atoa"). Continua sem
- * inventar dado nenhum (ex.: a referencia visual original tambem sugeria um
- * selo de charset, que o app nao consulta em lugar nenhum hoje — ficou de
+ * inteira da janela, depois um pill centralizado numa linha propria por
+ * cima de tudo, depois embutida dentro da barra de acoes do editor (ao lado
+ * do "Salvar") — e agora de volta ao topo FIXO da coluna da sidebar (ver
+ * {@code MainWindow#buildLeftSide}/{@code #buildConnectionBar}), acima da
+ * busca unificada e das abas Objetos/SQL/Salvas/Historico. Decisao final do
+ * usuario: "dois cabecalhos independentes" — esta pilula alinhada acima de
+ * "Objetos" (coluna da sidebar) e "Executar" alinhado ao inicio das abas do
+ * editor (coluna do editor), cada um o topo da PROPRIA coluna, sem precisar
+ * sincronizar com a posicao do divisor arrastavel entre elas. Continua sem
+ * inventar dado nenhum (ex.: uma referencia visual sugeriu em algum momento
+ * um selo de charset, que o app nao consulta em lugar nenhum hoje — ficou de
  * fora, ver {@link #render}).
  */
 final class ConnectionStatusCard extends JPanel {
@@ -67,8 +72,7 @@ final class ConnectionStatusCard extends JPanel {
 	private final JLabel dotIcon = new JLabel();
 	private final JLabel engineIcon = new JLabel();
 	private final JLabel nameLabel = new JLabel();
-	private final JLabel subLabel = new JLabel();
-	/** Painel clicavel (icones + textos + seta) que abre "Conexoes salvas" — fundo destacado no hover, ver construtor. */
+	/** Painel clicavel (icones + nome + seta) que abre "Conexoes salvas" — fundo destacado no hover, ver construtor. */
 	private final JPanel clickArea;
 
 	/**
@@ -87,8 +91,6 @@ final class ConnectionStatusCard extends JPanel {
 
 	private State state = State.DISCONNECTED;
 	private String lastName = "Sem conexao";
-	private String lastHost = " ";
-	private String lastEngine = " ";
 
 	private List<ActiveConnection> activeConnections = List.of();
 	private String activeConnectionName;
@@ -104,35 +106,10 @@ final class ConnectionStatusCard extends JPanel {
 	 */
 	private Color fill = NTheme.surfaceBackground();
 
-	/**
-	 * Altura fixa (mesma de Executar/Formatar/Explicar/Salvar, ver
-	 * {@code MainWindow#buildConnectionBar}) — {@code -1} = sem override,
-	 * usa a altura natural. So a ALTURA e fixada (ver {@link #getPreferredSize()}):
-	 * um {@code setPreferredSize} direto (largura+altura) congelaria a
-	 * LARGURA tambem no valor medido na 1a chamada (sempre desconectado,
-	 * texto curto) — ao conectar depois, nome+host+engine ficam bem mais
-	 * longos, mas o painel nunca mais crescia pra acomodar, entao o texto
-	 * "vazava" por cima do botao "Nova conexao" do lado — bug relatado pelo
-	 * usuario com captura de tela (o botao "sumia" ao conectar).
-	 */
-	private int fixedHeight = -1;
-
 	@Override
 	public void updateUI() {
 		super.updateUI();
 		fill = NTheme.surfaceBackground();
-	}
-
-	/** Fixa a ALTURA (ver {@link #fixedHeight}) sem travar a largura, que continua recalculada a cada texto/estado novo. */
-	void setFixedHeight(int height) {
-		this.fixedHeight = height;
-		revalidate();
-	}
-
-	@Override
-	public Dimension getPreferredSize() {
-		Dimension natural = super.getPreferredSize();
-		return (fixedHeight > 0) ? new Dimension(natural.width, fixedHeight) : natural;
 	}
 
 	@Override
@@ -153,28 +130,35 @@ final class ConnectionStatusCard extends JPanel {
 		setBorder(BorderFactory.createEmptyBorder(Spacing.XS, Spacing.SM, Spacing.XS, Spacing.SM));
 
 		nameLabel.setFont(nameLabel.getFont().deriveFont(java.awt.Font.BOLD, 12f));
-		subLabel.setFont(subLabel.getFont().deriveFont(11f));
 
 		JPanel iconsCol = new JPanel(new FlowLayout(FlowLayout.LEFT, Spacing.XS, 0));
 		iconsCol.setOpaque(false);
 		iconsCol.add(dotIcon);
 		iconsCol.add(engineIcon);
 
-		// UMA linha so (nome + subtitulo lado a lado, nao mais empilhados em
-		// 3 linhas com um rotulo "Conexao atual") — ver javadoc da classe.
-		JPanel textRow = new JPanel(new FlowLayout(FlowLayout.LEFT, Spacing.XS, 0));
-		textRow.setOpaque(false);
-		textRow.add(nameLabel);
-		textRow.add(subLabel);
-
 		Buttons.bindThemedIcon(chevron, IconType.CHEVRON_RIGHT, 10, () -> GridTheme.MUTED_TEXT);
 
-		clickArea = new JPanel(new FlowLayout(FlowLayout.LEFT, Spacing.SM, 0));
+		// BorderLayout (nao mais FlowLayout): FlowLayout SEMPRE da a cada
+		// filho a largura preferida INTEIRA, entao um nome de conexao longo
+		// nunca encolhia — ou vazava por cima do botao "+ Nova conexao" (a
+		// area clicavel toda simplesmente ficava mais larga que a coluna da
+		// sidebar), ou empurrava a coluna inteira mais larga, desalinhando o
+		// resto da janela (os dois bugs relatados pelo usuario com captura
+		// de tela). Aqui SO {@link #nameLabel} fica no CENTER — a UNICA
+		// regiao que o BorderLayout deixa encolher abaixo do preferido — e
+		// o JLabel do Swing ja trunca com "..." sozinho quando isso acontece
+		// (comportamento nativo de SwingUtilities#layoutCompoundLabel, sem
+		// precisar de nenhum limite de caracteres calculado na mao). Os
+		// icones (WEST) e a seta (EAST, dentro do proprio clickArea) ficam
+		// com largura FIXA, sempre visiveis por inteiro — e o
+		// {@link #switchRow} (fora do clickArea, EAST do painel inteiro)
+		// nunca e espremido, entao o botao "+" nunca mais fica sobreposto.
+		clickArea = new JPanel(new BorderLayout(Spacing.SM, 0));
 		clickArea.setOpaque(false);
 		clickArea.setBorder(BorderFactory.createEmptyBorder(2, Spacing.SM, 2, Spacing.SM));
-		clickArea.add(iconsCol);
-		clickArea.add(textRow);
-		clickArea.add(chevron);
+		clickArea.add(iconsCol, BorderLayout.WEST);
+		clickArea.add(nameLabel, BorderLayout.CENTER);
+		clickArea.add(chevron, BorderLayout.EAST);
 
 		switchButton = new JButton("Trocar");
 		Buttons.bindThemedIcon(switchButton, IconType.SWAP, 13, () -> GridTheme.MUTED_TEXT);
@@ -197,7 +181,11 @@ final class ConnectionStatusCard extends JPanel {
 		// aqui — evita adicionar switchButton/newConnectionButton so pra
 		// serem removidos/reordenados na primeira chamada.
 
-		add(clickArea, BorderLayout.WEST);
+		// clickArea no CENTER (nao mais WEST): CENTER e a UNICA regiao que o
+		// BorderLayout deixa encolher — e o encolhimento cascateia pro
+		// nameLabel LA DENTRO (que tambem esta no CENTER do clickArea, ver
+		// acima). switchRow continua EAST, largura fixa, protegida.
+		add(clickArea, BorderLayout.CENTER);
 		add(switchRow, BorderLayout.EAST);
 
 		// O clickArea INTEIRO (icones + textos + seta) abre "Conexoes
@@ -211,8 +199,7 @@ final class ConnectionStatusCard extends JPanel {
 				onManageConnections.run();
 			}
 		};
-		for (Component c : new Component[] { clickArea, iconsCol, dotIcon, engineIcon, textRow, nameLabel,
-				subLabel, chevron }) {
+		for (Component c : new Component[] { clickArea, iconsCol, dotIcon, engineIcon, nameLabel, chevron }) {
 			c.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 			c.addMouseListener(openConnections);
 			if (c instanceof JLabel jl) {
@@ -333,24 +320,19 @@ final class ConnectionStatusCard extends JPanel {
 	void showDisconnected() {
 		state = State.DISCONNECTED;
 		lastName = "Sem conexao";
-		lastHost = " ";
-		lastEngine = " ";
 		render();
 	}
 
 	void showConnecting(String name) {
 		state = State.CONNECTING;
 		lastName = name;
-		lastHost = " ";
-		lastEngine = " ";
 		render();
 	}
 
-	void showConnected(String name, String host, String engine) {
+	/** So o NOME da conexao (host/porta/usuario/engine ficaram de fora da pilula — ver javadoc de {@link #render}). */
+	void showConnected(String name) {
 		state = State.CONNECTED;
 		lastName = name;
-		lastHost = (host != null) ? host : " ";
-		lastEngine = (engine != null) ? engine : " ";
 		render();
 	}
 
@@ -366,15 +348,14 @@ final class ConnectionStatusCard extends JPanel {
 	}
 
 	private void render() {
-		// Typography.primary/tertiary reaplicados AQUI (nao mais so uma vez
-		// no construtor): nameLabel/subLabel ficavam com a cor do tema em
-		// que a barra foi CONSTRUIDA (sempre o escuro, ver App#main) gravada
-		// pra sempre — mesma familia de bug ja corrigida varias vezes nesta
-		// base. render() roda a cada troca de estado E a partir de
+		// Typography.primary reaplicado AQUI (nao mais so uma vez no
+		// construtor): nameLabel ficava com a cor do tema em que a barra
+		// foi CONSTRUIDA (sempre o escuro, ver App#main) gravada pra sempre
+		// — mesma familia de bug ja corrigida varias vezes nesta base.
+		// render() roda a cada troca de estado E a partir de
 		// refreshTheme() (chamado por MainWindow#toggleTheme), entao
 		// reaplicar aqui cobre os dois casos de uma vez.
 		Typography.primary(nameLabel);
-		Typography.tertiary(subLabel);
 		Color color = switch (state) {
 		case DISCONNECTED -> GridTheme.COLOR_LOGIC_FALSE;
 		case CONNECTING -> GridTheme.HEADER_HIGHLIGHT_BORDER;
@@ -383,31 +364,21 @@ final class ConnectionStatusCard extends JPanel {
 		dotIcon.setIcon(Icons.get(IconType.STATUS_DOT, 8, color));
 		Buttons.bindThemedIcon(engineIcon, IconType.DATABASE, 14, () -> GridTheme.MUTED_TEXT);
 
+		// SO o nome da conexao (nao mais usuario/host/engine juntos) —
+		// pedido explicito do usuario: "coloque apenas o nome da conexao
+		// mesmo". nameLabel esta no CENTER de um BorderLayout (ver
+		// construtor) — o proprio Swing trunca com "..." sozinho quando o
+		// espaco disponivel e menor que o texto (SwingUtilities#
+		// layoutCompoundLabel), aproveitando o MAXIMO de espaco disponivel
+		// antes de abreviar, em vez de um limite fixo de caracteres. O
+		// nome COMPLETO (nunca truncado) fica no tooltip, pra quando
+		// precisar conferir sem abrir o dropdown.
 		String name = switch (state) {
-		case DISCONNECTED -> "Nenhuma conexao selecionada";
+		case DISCONNECTED -> "Nenhuma conexao";
 		case CONNECTING, CONNECTED -> lastName;
 		};
-		// Sub-titulo: junta host+engine (dados JA disponiveis, nunca
-		// inventados — ver javadoc da classe) numa unica linha, ao lado do
-		// nome (nao mais embaixo dele) — desconectado nao tem sub-titulo
-		// proprio, o texto do nome ja diz tudo que precisa (evita repetir a
-		// mesma mensagem em duas linhas/label que a versao anterior tinha).
-		String sub = switch (state) {
-		case DISCONNECTED -> "";
-		case CONNECTING -> "Conectando...";
-		case CONNECTED -> {
-			StringBuilder sb = new StringBuilder(lastHost == null ? "" : lastHost.trim());
-			if (lastEngine != null && !lastEngine.isBlank()) {
-				if (sb.length() > 0) {
-					sb.append("  ·  ");
-				}
-				sb.append(lastEngine);
-			}
-			yield sb.length() > 0 ? sb.toString() : "Conectado";
-		}
-		};
 		nameLabel.setText(name);
-		subLabel.setVisible(!sub.isBlank());
-		subLabel.setText(sub.isBlank() ? "" : ("·  " + sub));
+		nameLabel.setToolTipText((state == State.CONNECTED || state == State.CONNECTING) ? lastName
+				: "Conexoes salvas");
 	}
 }

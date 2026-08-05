@@ -1377,6 +1377,24 @@ public class SqlEditorPane extends JPanel {
         return textArea.getText();
     }
 
+    /**
+     * Roda SO a instrucao sob o cursor (ate o ";" anterior/seguinte, ver
+     * {@link SqlStatementLocator}) — mesma acao de "Executar esta instrucao"
+     * no menu de contexto ({@link #buildEditorPopupMenu}), extraida aqui pra
+     * o dropdown "Executar ▾" da barra de ferramentas ({@code
+     * MainWindow#addRunFormatExplainButtons}) poder chamar sem duplicar a
+     * logica. Seleciona a instrucao primeiro e so entao chama {@link #onRun}
+     * — mesmo caminho do botao "Executar"/Ctrl+Enter, sem logica de execucao
+     * separada.
+     */
+    public void runStatementUnderCaret() {
+        int[] bounds = SqlStatementLocator.boundsAt(textArea.getText(), textArea.getCaretPosition());
+        if (bounds[1] > bounds[0]) {
+            textArea.select(bounds[0], bounds[1]);
+        }
+        onRun.run();
+    }
+
     /** Id da query salva a que esta aba esta ligada, ou {@code null} se nenhuma. */
     public String getSavedQueryId() {
         return savedQueryId;
@@ -1956,13 +1974,7 @@ public class SqlEditorPane extends JPanel {
         // a instrucao primeiro e so entao chamando onRun — mesmo caminho do
         // botao "Executar"/Ctrl+Enter, sem duplicar a logica de execucao.
         JMenuItem runStatement = new JMenuItem("Executar esta instrucao");
-        runStatement.addActionListener(e -> {
-            int[] bounds = SqlStatementLocator.boundsAt(textArea.getText(), textArea.getCaretPosition());
-            if (bounds[1] > bounds[0]) {
-                textArea.select(bounds[0], bounds[1]);
-            }
-            onRun.run();
-        });
+        runStatement.addActionListener(e -> runStatementUnderCaret());
         menu.add(runStatement);
 
         menu.addPopupMenuListener(new javax.swing.event.PopupMenuListener() {

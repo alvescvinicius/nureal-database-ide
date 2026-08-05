@@ -70,6 +70,7 @@ import javax.swing.JOptionPane;
 import javax.swing.JRadioButtonMenuItem;
 import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
+import javax.swing.JRootPane;
 import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
 import javax.swing.JTabbedPane;
@@ -240,6 +241,8 @@ public class MainWindow extends JFrame {
 	private ConnectionsPanel connectionsPanel;
 	/** Janela flutuante que hospeda {@link #connectionsPanel} quando aberta (ver {@link #showConnectionsPopup}) — {@code null} quando fechada. */
 	private JDialog connectionsPopupWindow;
+	/** Instante (ms) do ultimo fechamento por perda de foco — ver {@link #showConnectionsPopup} pro race que isto evita. */
+	private long connectionsPopupClosedAt;
 	/** Indicador de linguagem + busca no editor da toolbar (ver {@link #addLanguageAndSearch}) — largura reaplicada por {@link #refreshDynamicSizing} a cada mudanca de zoom/modo compacto, igual aos demais componentes dependentes de escala. */
 	private JLabel languageLabel;
 	private NSearchField editorSearchField;
@@ -852,21 +855,9 @@ public class MainWindow extends JFrame {
 		int rowHeight = addRunFormatExplainButtons(mainBar, gbc);
 		addSaveButton(mainBar, gbc, rowHeight);
 
-		// Conexao ativa embutida na PROPRIA barra de acoes (nao mais uma
-		// linha inteira por cima da janela, ver #buildConnectionBar) —
-		// pedido explicito do usuario ("e se colocar ao lado do botao
-		// salvar... menos espaco gasto atoa"): ficava sobrando uma faixa de
-		// altura fixa so pra isto antes, mesmo depois de comprimida pra 1
-		// linha. Do lado do Salvar, antes do espacador, e sizeada pelo
-		// proprio GridBagLayout (fill NONE) — nao ocupa mais espaco que o
-		// necessario pro conteudo dela.
-		gbc.gridx = 5;
-		gbc.insets = new Insets(0, Spacing.MD, 0, 0);
-		mainBar.add(buildConnectionBar(rowHeight), gbc);
-
 		// --- O ESPAÇADOR INVISÍVEL ---
 		// Ele joga tudo o que vier a partir daqui totalmente para a direita
-		gbc.gridx = 6;
+		gbc.gridx = 8;
 		gbc.weightx = 1.0;
 		gbc.insets = new Insets(0, 0, 0, 0);
 		mainBar.add(Box.createHorizontalGlue(), gbc);
@@ -897,6 +888,18 @@ public class MainWindow extends JFrame {
 		// acidente. Sobrescreve a margem padrao de NButton.Kind.PRIMARY de proposito.
 		runButton.setMargin(new Insets(Spacing.XS, Spacing.LG, Spacing.XS, Spacing.MD));
 
+		// "Executar ▾" — seta separada (mesmo espacamento uniforme do resto
+		// da barra, ver #addRunFormatExplainButtons mais abaixo) que abre
+		// "Executar esta instrucao" (SqlEditorPane#runStatementUnderCaret, ja
+		// existia so no menu de contexto do editor — ver
+		// SqlEditorPane#buildEditorPopupMenu), sem precisar clicar com o
+		// botao direito no editor primeiro.
+		JButton runMenuButton = new JButton(new com.formdev.flatlaf.icons.FlatMenuArrowIcon());
+		runMenuButton.setToolTipText("Opcoes de execucao");
+		runMenuButton.addActionListener(e -> buildRunMenu().show(runMenuButton, 0, runMenuButton.getHeight()));
+		Buttons.styleSecondary(runMenuButton);
+		runMenuButton.setMargin(new Insets(Spacing.XS, Spacing.SM, Spacing.XS, Spacing.SM));
+
 		// Sem icone aqui de proposito: o icone de "linhas" ficava estranho colado
 		// ao texto "Formatar" nesse tamanho — so texto. Estilo OUTLINE (contorno,
 		// sem preenchimento) — igual ao "Nova" do painel CONEXOES (ver
@@ -905,6 +908,12 @@ public class MainWindow extends JFrame {
 		// conjunto Formatar+seta e mais leve/discreto (mesma leitura de "acao
 		// secundaria" nos dois lugares da UI).
 		JButton formatButton = new NButton("Formatar", NButton.Kind.SECONDARY);
+		// Icone (IconType.FORMAT) adicionado de volta — pedido explicito do
+		// usuario numa revisao visual posterior (referencia mostrando
+		// "≡ Formatar"); bindThemedIcon (nao setIcon solto) pra nao "queimar"
+		// a cor do tema em que a janela abriu.
+		Buttons.bindThemedIcon(formatButton, IconType.FORMAT, 13, () -> GridTheme.MUTED_TEXT);
+		formatButton.setIconTextGap(6);
 		formatButton.setToolTipText("Formatar SQL (Ctrl+Shift+F)");
 		formatButton.addActionListener(e -> {
 			SqlEditorPane editor = currentEditor();
@@ -926,50 +935,85 @@ public class MainWindow extends JFrame {
 		// primaria "Executar"), rodando EXPLAIN FORMAT=JSON na instrucao atual
 		// sem executa-la de verdade.
 		JButton explainButton = new NButton("Explicar", NButton.Kind.SECONDARY);
+		// IconType.INFO (nao ha um icone dedicado de "plano de execucao" no
+		// catalogo do NDS): EXPLAIN mostra INFORMACAO sobre como a consulta
+		// roda, encaixe semantico razoavel sem inventar um icone novo so
+		// pra isto — mesmo pedido de icone visto em "Formatar".
+		Buttons.bindThemedIcon(explainButton, IconType.INFO, 13, () -> GridTheme.MUTED_TEXT);
+		explainButton.setIconTextGap(6);
 		explainButton.setToolTipText("Ver o plano de execucao (EXPLAIN) da consulta atual");
 		explainButton.addActionListener(e -> onExplain());
 		explainButton.setMargin(new Insets(Spacing.XS, Spacing.MD, Spacing.XS, Spacing.MD));
 
 		// O icone minusculo da seta rende um "preferred height" menor que o do
-		// texto "Executar"/"Formatar" — sem isto os tres ficam com alturas
-		// ligeiramente diferentes mesmo com a mesma margem vertical. Forca os
-		// tres a MESMA altura (a maior das tres), so a largura continua livre.
+		// texto "Executar"/"Formatar" — sem isto os componentes ficam com
+		// alturas ligeiramente diferentes mesmo com a mesma margem vertical.
+		// Forca todos a MESMA altura (a maior de todos), so a largura
+		// continua livre.
 		int rowHeight = Math.max(runButton.getPreferredSize().height,
-				Math.max(formatButton.getPreferredSize().height,
-						Math.max(formatMenuButton.getPreferredSize().height, explainButton.getPreferredSize().height)));
-		for (JButton b : new JButton[] { runButton, formatButton, formatMenuButton, explainButton }) {
+				Math.max(runMenuButton.getPreferredSize().height,
+						Math.max(formatButton.getPreferredSize().height, Math.max(formatMenuButton.getPreferredSize().height,
+								explainButton.getPreferredSize().height))));
+		for (JButton b : new JButton[] { runButton, runMenuButton, formatButton, formatMenuButton, explainButton }) {
 			Dimension d = b.getPreferredSize();
 			b.setPreferredSize(new Dimension(d.width, rowHeight));
 		}
 
-		// Adiciona os botões esquerdos um a um aplicando pequenos recuos à direita
-		// (insets)
+		// Espacamento UNIFORME (Spacing.SM) entre CADA elemento da barra, sem
+		// excecao — pedido explicito do usuario ("remova todas as margins
+		// entre eles e so coloque espaco entre, deixe uniforme"). Antes,
+		// alguns pares (Executar+seta, Formatar+seta) tinham inset ZERO
+		// ("colados") tentando imitar um split-button unico — mas o FlatLaf
+		// nao suporta raio assimetrico por botao (arc: 8 e sempre nos 4
+		// cantos, verificado no fonte da FlatButtonBorder), entao dois
+		// botoes com cantos arredondados encostados um no outro sem gap
+		// nenhum so pareciam DESALINHADOS/quebrados, nao um controle so —
+		// exatamente o que o usuario reportou. Gap identico em todo lugar
+		// remove essa inconsistencia visual de uma vez.
 		gbc.gridx = 0;
 		gbc.weightx = 0.0;
-		gbc.insets = new Insets(0, 0, 0, Spacing.MD); // Colado na esquerda, espaço apos o Executar
+		gbc.insets = new Insets(0, 0, 0, 0);
 		mainBar.add(runButton, gbc);
 
 		gbc.gridx = 1;
-		gbc.insets = new Insets(0, 0, 0, 0);
-		mainBar.add(formatButton, gbc);
+		gbc.insets = new Insets(0, Spacing.SM, 0, 0);
+		mainBar.add(runMenuButton, gbc);
 
 		gbc.gridx = 2;
-		// Colado direto em "Formatar" (sem gap) — pedido explicito do
-		// usuario apos revisao visual: os dois pareciam controles soltos
-		// e desalinhados. FlatButtonBorder (ver arc: 8 de Buttons#styleSecondary)
-		// so aceita um raio UNICO por botao, nao cantos assimetricos —
-		// verificado no fonte do FlatLaf 3.5.4 (sem suporte a
-		// "arc: tl,tr,br,bl" nesta versao) — entao a aproximacao possivel de
-		// "controle unico" e os dois colados sem espaco, cada um com seu
-		// proprio contorno arredondado, em vez de um "split button" com
-		// cantos internos retos.
-		gbc.insets = new Insets(0, 0, 0, 0);
-		mainBar.add(formatMenuButton, gbc);
+		gbc.insets = new Insets(0, Spacing.SM, 0, 0);
+		mainBar.add(formatButton, gbc);
 
 		gbc.gridx = 3;
-		gbc.insets = new Insets(0, Spacing.MD, 0, 0);
+		gbc.insets = new Insets(0, Spacing.SM, 0, 0);
+		mainBar.add(formatMenuButton, gbc);
+
+		gbc.gridx = 4;
+		gbc.insets = new Insets(0, Spacing.SM, 0, 0);
 		mainBar.add(explainButton, gbc);
 		return rowHeight;
+	}
+
+	/**
+	 * Menu do "Executar ▾" (seta ao lado do botao "Executar", mesmo padrao de
+	 * "Formatar ▾") — hoje so tem "Executar esta instrucao" (roda so a
+	 * instrucao sob o cursor, ver {@link SqlEditorPane#runStatementUnderCaret()}),
+	 * ja existia so no menu de contexto do editor. O clique DIRETO em
+	 * "Executar" continua com o comportamento de sempre (roda a selecao, se
+	 * houver, senao a aba inteira) — este menu so oferece a VARIANTE extra,
+	 * nao repete a acao padrao.
+	 */
+	private JPopupMenu buildRunMenu() {
+		JPopupMenu menu = new JPopupMenu();
+		JMenuItem runStatement = new JMenuItem("Executar esta instrucao");
+		runStatement.setToolTipText("Roda so a instrucao SQL sob o cursor, ate o \";\" anterior/seguinte");
+		runStatement.addActionListener(a -> {
+			SqlEditorPane editor = currentEditor();
+			if (editor != null) {
+				editor.runStatementUnderCaret();
+			}
+		});
+		menu.add(runStatement);
+		return menu;
 	}
 
 	/**
@@ -1000,9 +1044,45 @@ public class MainWindow extends JFrame {
 		Dimension saveDim = saveQueryButton.getPreferredSize();
 		saveQueryButton.setPreferredSize(new Dimension(saveDim.width, rowHeight));
 
-		gbc.gridx = 4;
-		gbc.insets = new Insets(0, Spacing.MD, 0, 0);
+		// "Salvar ▾" — mesmo padrao de "Executar ▾"/"Formatar ▾": a seta
+		// oferece "Salvar como nova query...", que FORCA uma copia nova mesmo
+		// quando a aba ja esta ligada a uma query salva (ver
+		// MainWindow#onSaveQuery(boolean)) — o clique DIRETO em "Salvar"
+		// continua sobrescrevendo sem perguntar, como sempre.
+		JButton saveMenuButton = new JButton(new com.formdev.flatlaf.icons.FlatMenuArrowIcon());
+		saveMenuButton.setToolTipText("Opcoes de salvamento");
+		saveMenuButton.addActionListener(e -> buildSaveMenu().show(saveMenuButton, 0, saveMenuButton.getHeight()));
+		Buttons.styleSecondary(saveMenuButton);
+		saveMenuButton.setMargin(new Insets(Spacing.XS, Spacing.SM, Spacing.XS, Spacing.SM));
+		saveMenuButton.setPreferredSize(new Dimension(saveMenuButton.getPreferredSize().width, rowHeight));
+
+		// Mesmo gap uniforme (Spacing.SM) do resto da barra — ver comentario em
+		// #addRunFormatExplainButtons.
+		gbc.gridx = 5;
+		gbc.insets = new Insets(0, Spacing.SM, 0, 0);
 		mainBar.add(saveQueryButton, gbc);
+
+		gbc.gridx = 6;
+		gbc.insets = new Insets(0, Spacing.SM, 0, 0);
+		mainBar.add(saveMenuButton, gbc);
+	}
+
+	/**
+	 * Menu do "Salvar ▾" — hoje so tem "Salvar como nova query...", que
+	 * chama {@link #onSaveQuery(boolean)} com {@code forceNew=true} (sempre
+	 * cria uma copia nova, mesmo se a aba ja estiver ligada a uma query
+	 * salva). Desabilitado quando a aba atual esta vazia, mesmo criterio de
+	 * {@link #updateSaveButtonState}.
+	 */
+	private JPopupMenu buildSaveMenu() {
+		JPopupMenu menu = new JPopupMenu();
+		JMenuItem saveAsNew = new JMenuItem("Salvar como nova query...");
+		SqlEditorPane editor = currentEditor();
+		boolean hasContent = editor != null && editor.fullText() != null && !editor.fullText().isBlank();
+		saveAsNew.setEnabled(hasContent);
+		saveAsNew.addActionListener(a -> onSaveQuery(true));
+		menu.add(saveAsNew);
+		return menu;
 	}
 
 	/**
@@ -1039,12 +1119,12 @@ public class MainWindow extends JFrame {
 		});
 		applyToolbarFieldSizes();
 
-		gbc.gridx = 7;
+		gbc.gridx = 9;
 		gbc.weightx = 0.0;
 		gbc.insets = new Insets(0, Spacing.LG, 0, 0);
 		mainBar.add(languageLabel, gbc);
 
-		gbc.gridx = 8;
+		gbc.gridx = 10;
 		gbc.insets = new Insets(0, Spacing.SM, 0, 0);
 		mainBar.add(editorSearchField, gbc);
 	}
@@ -1128,9 +1208,9 @@ public class MainWindow extends JFrame {
 		rightIcons.add(themeButton);
 		rightIcons.add(chatButton);
 
-		gbc.gridx = 9;
+		gbc.gridx = 11;
 		// CRITICO: weightx de volta pra 0 aqui — ficou em 1.0 desde o glue
-		// (gridx=6) e, com fill=NONE + anchor=BASELINE (centraliza
+		// (gridx=8) e, com fill=NONE + anchor=BASELINE (centraliza
 		// horizontalmente dentro da propria celula), metade do espaco extra
 		// da janela ia pra ESTA celula em vez de toda pro glue: os icones
 		// ficavam centralizados no meio da barra, longe da quina direita
@@ -1770,33 +1850,9 @@ public class MainWindow extends JFrame {
 	}
 
 	private void setConnectedState(String label) {
-		connectionCard.showConnected(label, activeWorkspaceHostLabel(), activeWorkspaceEngineLabel());
+		connectionCard.showConnected(label);
 		connectingWorkspaceName = null;
 		updateWorkspaceContextBar();
-	}
-
-	/** {@code usuario@host:porta} da conexao ativa (ver exemplo da SPEC-0007), ou {@code null} sem profile. */
-	private String activeWorkspaceHostLabel() {
-		if (activeWorkspace == null || activeWorkspace.profile == null) {
-			return null;
-		}
-		return activeWorkspace.profile.user() + "@" + activeWorkspace.profile.host()
-				+ ":" + activeWorkspace.profile.port();
-	}
-
-	/** {@code "MySQL 8.0"} (produto + versao major.minor) da conexao ativa, ou {@code null} sem metadados disponiveis. */
-	private String activeWorkspaceEngineLabel() {
-		String product = databaseProductNameForAi();
-		if (product == null) {
-			return null;
-		}
-		String version = databaseVersionForAi();
-		if (version == null) {
-			return product;
-		}
-		String[] parts = version.split("\\.");
-		String shortVersion = parts.length >= 2 ? parts[0] + "." + parts[1] : version;
-		return product + " " + shortVersion;
 	}
 
 	// ---------- Barra de contexto do workspace (conexao/banco/esquema ativos) ----------
@@ -1909,17 +1965,21 @@ public class MainWindow extends JFrame {
 
 	/**
 	 * Indicador "Conexao Ativa" — ja foi uma barra inteira acima de Executar/
-	 * Formatar/... (span da largura toda da janela, numa linha propria),
-	 * mas isso sobrava altura fixa so pra ela mesmo comprimida (feedback do
-	 * usuario com captura de tela: "espaco perdido"). Agora e chamada de
-	 * dentro de {@link #buildToolbar()}, embutida na PROPRIA barra de acoes
-	 * ao lado do botao "Salvar" — nenhuma linha/altura extra dedicada.
-	 * Chamada DEPOIS de {@link #connectionsPanel} existir (precisa dele pro
-	 * botao "+ Nova conexao" e pra seta abrir "Conexoes salvas" — ver
-	 * {@link #showConnectionsPopup}), que por sua vez precisa de
-	 * {@link #buildLeftSide()} ja ter rodado (ver {@link #buildUi()}).
+	 * Formatar/... (span da largura toda da janela), depois embutida DENTRO
+	 * da barra de acoes do editor, ao lado do botao "Salvar" — mas ai o
+	 * usuario pediu pra ela voltar a ficar alinhada acima de "Objetos" (topo
+	 * da PROPRIA coluna da sidebar), com "Executar" alinhado ao inicio das
+	 * abas do editor (topo da coluna do EDITOR) — duas colunas, dois
+	 * cabecalhos independentes, cada um alinhado com o que esta embaixo dele
+	 * sozinho, em vez de uma unica barra tentando acompanhar ao vivo a
+	 * posicao do divisor arrastavel entre as duas colunas (decisao explicita
+	 * do usuario: "dois cabecalhos independentes" em vez de "uma barra so
+	 * pra largura da janela inteira"). Chamada de dentro de
+	 * {@link #buildLeftSide()}, DEPOIS de {@link #connectionsPanel} existir
+	 * (precisa dele pro botao "+ Nova conexao" e pra seta abrir "Conexoes
+	 * salvas" — ver {@link #showConnectionsPopup}).
 	 */
-	private JComponent buildConnectionBar(int rowHeight) {
+	private JComponent buildConnectionBar() {
 		connectionCard = new ConnectionStatusCard();
 		connectionCard.setOnSwitchRequested(name -> {
 			Conexao w = workspaces.get(name);
@@ -1935,17 +1995,6 @@ public class MainWindow extends JFrame {
 		// nao precisar abrir o dropdown primeiro so pra cadastrar uma
 		// conexao nova.
 		connectionCard.setOnNewConnection(connectionsPanel::createNewConnection);
-		// MESMA altura de Executar/Formatar/Explicar/Salvar (rowHeight, ja
-		// calculado por #addRunFormatExplainButtons) — sem isto o card (com
-		// seu proprio padding interno) ficava um pouco mais alto/baixo que
-		// os botoes ao lado, desalinhando a barra inteira (pedido explicito
-		// do usuario: "precisa de alinhamento e espacamento, deixe tudo
-		// uniforme"). setFixedHeight (nao mais setPreferredSize direto): so
-		// trava a ALTURA, a largura continua recalculada a cada texto novo
-		// — ver javadoc de ConnectionStatusCard#fixedHeight pro bug que
-		// setPreferredSize direto causava (nome sumindo atras do "Nova
-		// conexao" ao conectar).
-		connectionCard.setFixedHeight(rowHeight);
 		return connectionCard;
 	}
 
@@ -1958,10 +2007,13 @@ public class MainWindow extends JFrame {
 	 * os 3 grupos sempre visiveis ao mesmo tempo (CONEXOES, WORKSPACE,
 	 * OBJETOS, FERRAMENTAS) — reversao confirmada explicitamente pelo usuario
 	 * (ver a pergunta obrigatoria do plano, respondida "Sim, confirmo a
-	 * reversao"). {@link ConnectionStatusCard} deixou de ficar fixo no topo
-	 * DESTA coluna — mudou pra dentro da barra de acoes do editor SQL, ao
-	 * lado do botao "Salvar" (ver {@link #buildConnectionBar}), apos
-	 * algumas revisoes visuais posteriores.
+	 * reversao"). {@link ConnectionStatusCard} passou por varias posicoes
+	 * (barra inteira no topo da janela, depois embutida na barra de acoes do
+	 * editor) e voltou a ser o topo FIXO desta coluna (ver
+	 * {@link #buildConnectionBar}, acima da busca unificada e das abas) —
+	 * pedido explicito do usuario pra ficar alinhada acima de "Objetos",
+	 * como "Executar" fica alinhado ao inicio das abas do editor (duas
+	 * colunas, dois cabecalhos independentes).
 	 * <p>
 	 * CONEXOES e OBJETOS reaproveitam {@link ConnectionsPanel} e
 	 * {@code ObjectExplorerController#buildObjectBrowser} INTEIROS (cada um
@@ -1979,12 +2031,9 @@ public class MainWindow extends JFrame {
 	 * mesmo tipo de reducao de escopo documentada na Fase 4.
 	 */
 	private JComponent buildLeftSide() {
-		// ConnectionsPanel e a barra de conexao (antigo ConnectionStatusCard
-		// da sidebar) deixaram de ficar aqui — ver #buildConnectionBar,
-		// chamado por #buildUi. Continua construido ANTES do resto da
-		// sidebar (buildConnectionBar precisa de connectionsPanel ja
-		// existente pra achar seu dono de dialogos, ver
-		// ConnectionsPanel#setOwnerWindow).
+		// ConnectionsPanel PRIMEIRO (buildConnectionBar, logo abaixo, precisa
+		// dele ja existente pra achar seu dono de dialogos, ver
+		// ConnectionsPanel#setOwnerWindow, e pro botao "+ Nova conexao").
 		connectionsPanel = new ConnectionsPanel(connectionStore, this::connectTo, this::disconnectFrom);
 		connectionsPanel.setOwnerWindow(this);
 		connectionsPanel.setRowHeight(scaledPx(resultRowHeightBasePx()));
@@ -1993,6 +2042,10 @@ public class MainWindow extends JFrame {
 		// da UI, e o zoom pode mudar entre uma abertura e outra.
 		savedQueriesPanel = new SavedQueriesPanel(savedQueryStore, this::openSavedQuery);
 		historyPanel = new HistoryPanel(historyStore, this::openHistoryEntry);
+
+		// Card "Conexao Ativa" — topo FIXO desta coluna, acima da busca e das
+		// abas (ver #buildConnectionBar/javadoc de #buildLeftSide).
+		JComponent connectionBar = buildConnectionBar();
 
 		// Busca unificada (Ctrl+K) — encaminha o texto pro filtro JA
 		// EXISTENTE de cada painel embutido (ver #applySidebarFilter), sem
@@ -2112,6 +2165,8 @@ public class MainWindow extends JFrame {
 		JPanel fixedTop = new JPanel();
 		fixedTop.setOpaque(false);
 		fixedTop.setLayout(new BoxLayout(fixedTop, BoxLayout.Y_AXIS));
+		fixedTop.add(connectionBar);
+		fixedTop.add(Box.createVerticalStrut(Spacing.SM));
 		fixedTop.add(searchRow);
 
 		JPanel contentColumn = new JPanel(new BorderLayout(0, Spacing.SM));
@@ -2163,6 +2218,18 @@ public class MainWindow extends JFrame {
 			connectionsPopupWindow.dispose();
 			return;
 		}
+		// Race relatada pelo usuario ("clico de novo deveria fechar, mas
+		// abre uma nova"): clicar no PROPRIO anchor pra fechar move o foco
+		// da janela ANTES do clique ser entregue ao MouseListener do
+		// anchor — o windowLostFocus abaixo ja dispensou o popup (e ja
+		// zerou connectionsPopupWindow, ver windowClosed) quando este metodo
+		// e chamado de novo pelo MESMO clique, entao o "if" acima acima
+		// nunca ve o popup como aberto e abre um novo por cima. Um cooldown
+		// bem curto trata "acabou de fechar por perda de foco" como o MESMO
+		// gesto de fechar, em vez de reabrir.
+		if (System.currentTimeMillis() - connectionsPopupClosedAt < 250) {
+			return;
+		}
 		// Mesma LARGURA do card de conexao (nao mais um valor fixo de
 		// 300px): pedido explicito do usuario ("poderia ter um visual
 		// melhor... acoplado") — com a mesma largura do card logo acima e
@@ -2177,6 +2244,18 @@ public class MainWindow extends JFrame {
 
 		JDialog popup = new JDialog(this, false);
 		popup.setUndecorated(true);
+		// CRITICO: App#main chama JDialog.setDefaultLookAndFeelDecorated(true)
+		// (pra janelas DE VERDADE ganharem a titlebar unificada do FlatLaf) —
+		// isso faz TODO JDialog, ja na construcao, herdar um windowDecorationStyle
+		// que pinta uma titlebar PROPRIA do FlatLaf (icone "N" + botao fechar
+		// "X") dentro do rootPane, por CIMA do conteudo. setUndecorated(true)
+		// so tira a moldura NATIVA do sistema operacional — nao desliga essa
+		// titlebar pintada pelo Swing/FlatLaf, que continuava aparecendo
+		// mesmo num popup "undecorated" (bug relatado pelo usuario: "essa
+		// lista que abre nao precisa de logo nem dessa barra superior").
+		// PLAIN_DIALOG some com ela, deixando so o conteudo de verdade
+		// (ConnectionsPanel) — like uma lista que expande, nao uma janela.
+		popup.getRootPane().setWindowDecorationStyle(JRootPane.NONE);
 		popup.setLayout(new BorderLayout());
 		popup.add(connectionsPanel, BorderLayout.CENTER);
 		popup.pack();
@@ -2197,6 +2276,7 @@ public class MainWindow extends JFrame {
 				// fechando o popup na hora errada mesmo com um dialogo
 				// filho ativo).
 				if (!isChildWindowShowing(popup)) {
+					connectionsPopupClosedAt = System.currentTimeMillis();
 					popup.dispose();
 				}
 			}
@@ -4097,6 +4177,20 @@ public class MainWindow extends JFrame {
 	 * "Salvar" da barra, por Ctrl+S ou pelo menu de contexto da aba.
 	 */
 	private void onSaveQuery() {
+		onSaveQuery(false);
+	}
+
+	/**
+	 * Igual a {@link #onSaveQuery()}, com {@code forceNew}: quando {@code
+	 * true}, ignora {@code editor.getSavedQueryId()} mesmo que a aba ja
+	 * esteja ligada a uma query salva — sempre pede um titulo NOVO e cria
+	 * uma copia separada, em vez de sobrescrever a original. Acionado por
+	 * "Salvar como nova query..." no dropdown "Salvar ▾" da barra.
+	 * A aba passa a apontar pra essa copia nova (ver
+	 * {@code editor.setSavedQueryId}) — um proximo "Salvar" comum atualiza a
+	 * COPIA, nao mais a query original.
+	 */
+	private void onSaveQuery(boolean forceNew) {
 		SqlEditorPane editor = currentEditor();
 		if (editor == null) {
 			return;
@@ -4108,7 +4202,7 @@ public class MainWindow extends JFrame {
 			return;
 		}
 		try {
-			String existingId = editor.getSavedQueryId();
+			String existingId = forceNew ? null : editor.getSavedQueryId();
 			if (existingId != null) {
 				savedQueryStore.updateSql(existingId, sql);
 				statusBar.setText(" Query atualizada.");

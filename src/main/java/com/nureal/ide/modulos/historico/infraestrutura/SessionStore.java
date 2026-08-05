@@ -148,7 +148,24 @@ public class SessionStore {
         }
     }
 
-    /** Grava todas as sessoes, criando a pasta se necessario. */
+    /**
+     * Grava todas as sessoes, criando a pasta se necessario.
+     * <p>
+     * Escreve num arquivo TEMPORARIO na mesma pasta e so entao move por cima
+     * do {@code session.conf} de verdade (nunca sobrescreve o arquivo real
+     * diretamente) — isto e gravado a cada poucos segundos com debounce (ver
+     * javadoc da classe: "a cada digitacao"), entao um antivirus escaneando o
+     * arquivo, o processo sendo encerrado a forca, ou o Windows Update
+     * reiniciando a maquina no meio de uma gravacao direta deixariam
+     * {@code session.conf} PELA METADE — a proxima abertura do app leria um
+     * arquivo truncado no meio de um bloco {@code [tab]}, com titulos
+     * genericos ("SQL Query" sem numero, ver o fallback em {@link #load})
+     * em vez dos titulos reais (bug relatado pelo usuario, mais comum no
+     * Windows por causa disso). Um {@code Files.move} com
+     * {@code ATOMIC_MOVE} troca o arquivo inteiro de uma vez so — ou o
+     * arquivo antigo continua intacto, ou o novo esta 100% escrito, nunca um
+     * meio-termo corrompido.
+     */
     public void save(Map<String, Session> sessions) throws IOException {
         Path parent = file.getParent();
         if (parent != null) {
@@ -174,7 +191,19 @@ public class SessionStore {
             sb.append('\n');
         }
 
-        Files.write(file, sb.toString().getBytes(StandardCharsets.UTF_8));
+        Path tmp = (parent != null) ? parent.resolve(FILE_NAME + ".tmp") : Paths.get(FILE_NAME + ".tmp");
+        Files.write(tmp, sb.toString().getBytes(StandardCharsets.UTF_8));
+        try {
+            Files.move(tmp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                    java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+        } catch (java.nio.file.AtomicMoveNotSupportedException ex) {
+            // Alguns sistemas de arquivos (raro, mas existe) nao suportam
+            // troca atomica mesmo dentro da MESMA pasta — nao-atomico ainda e
+            // estritamente melhor que escrever direto em cima do arquivo
+            // real (janela de corrupcao bem menor: so o "move" em si, nao o
+            // tempo INTEIRO de montar e escrever a string).
+            Files.move(tmp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        }
     }
 
     private static String nullToEmpty(String s) {
