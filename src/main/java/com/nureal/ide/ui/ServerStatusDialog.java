@@ -4,11 +4,13 @@ import java.awt.BorderLayout;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Window;
+import java.awt.event.KeyEvent;
 import javax.swing.JComponent;
 import javax.swing.JDialog;
 import javax.swing.JOptionPane;
 import javax.swing.JTabbedPane;
 import javax.swing.JTable;
+import javax.swing.KeyStroke;
 import javax.swing.table.DefaultTableModel;
 import javax.swing.table.TableRowSorter;
 
@@ -56,6 +58,11 @@ final class ServerStatusDialog {
             tabs.addTab("Status (SHOW GLOBAL STATUS)", buildTab(dialect.globalStatusQuery()));
             dialog.add(tabs, BorderLayout.CENTER);
 
+            // Esc fecha — mesmo atalho ja usado nos dialogs "de formulario
+            // guiado" (DDL/view/trigger/rotina/usuarios), faltava aqui
+            // (achado numa auditoria pedida pelo usuario).
+            dialog.getRootPane().registerKeyboardAction(e -> dialog.dispose(),
+                    KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), JComponent.WHEN_IN_FOCUSED_WINDOW);
             dialog.setSize(760, 560);
             dialog.setLocationRelativeTo(owner);
             dialog.setVisible(true);

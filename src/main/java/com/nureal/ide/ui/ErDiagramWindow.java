@@ -15,11 +15,13 @@ import javax.swing.JFileChooser;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.KeyStroke;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.BorderLayout;
 import java.awt.Component;
 import java.awt.FlowLayout;
 import java.awt.Window;
+import java.awt.event.KeyEvent;
 import java.io.File;
 import java.io.IOException;
 import java.util.List;
@@ -76,6 +78,11 @@ final class ErDiagramWindow {
             dialog.add(buildToolbar(), BorderLayout.NORTH);
             dialog.add(canvas, BorderLayout.CENTER);
             canvas.onScaleChange(scale -> zoomLabel.setText(Math.round(scale * 100) + "%"));
+            // Esc fecha — mesmo atalho ja usado nos dialogs "de formulario
+            // guiado" (DDL/view/trigger/rotina/usuarios), faltava aqui
+            // (achado numa auditoria pedida pelo usuario).
+            dialog.getRootPane().registerKeyboardAction(e -> dialog.dispose(),
+                    KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), JComponent.WHEN_IN_FOCUSED_WINDOW);
             dialog.setSize(1100, 720);
             dialog.setLocationRelativeTo(owner);
             dialog.setVisible(true);

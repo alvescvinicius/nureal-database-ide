@@ -100,17 +100,28 @@ final class ColumnValueFilter {
         return value == null ? "" : value.toString();
     }
 
-    /** Ordena valores tratando texto numerico como numero (1, 2, 10 em vez de 1, 10, 2) — mesma logica de comparacao do {@code SmartCellFilter}, so que so para exibir a lista do popup em ordem natural. */
+    /**
+     * Ordena valores tratando texto numerico como numero (1, 2, 10 em vez de
+     * 1, 10, 2) — reaproveita {@link SmartCellFilter#parseNumber} (aceita
+     * tanto "1234.56" quanto o formato BR "1.234,56"), a MESMA logica de
+     * reconhecimento numerico que a barra de filtro usa. Antes chamava
+     * {@code Double.parseDouble} direto, que rejeita o formato BR — um
+     * valor como "1.234,56" caia no fallback de comparacao TEXTUAL aqui
+     * (ordem alfabetica) mesmo sendo reconhecido como numero na barra de
+     * filtro, uma divergencia encontrada numa auditoria pedida pelo
+     * usuario.
+     */
     static Set<String> newSortedSet() {
         return new TreeSet<>((a, b) -> {
             if (a.isEmpty() != b.isEmpty()) {
                 return a.isEmpty() ? -1 : 1;
             }
-            try {
-                return Double.compare(Double.parseDouble(a), Double.parseDouble(b));
-            } catch (NumberFormatException ignore) {
-                return a.compareToIgnoreCase(b);
+            Double na = SmartCellFilter.parseNumber(a);
+            Double nb = SmartCellFilter.parseNumber(b);
+            if (na != null && nb != null) {
+                return Double.compare(na, nb);
             }
+            return a.compareToIgnoreCase(b);
         });
     }
 }

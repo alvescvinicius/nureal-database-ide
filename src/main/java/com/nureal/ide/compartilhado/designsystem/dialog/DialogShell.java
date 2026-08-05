@@ -2,8 +2,10 @@ package com.nureal.ide.compartilhado.designsystem.dialog;
 
 import javax.swing.JComponent;
 import javax.swing.JDialog;
+import javax.swing.KeyStroke;
 import java.awt.BorderLayout;
 import java.awt.Window;
+import java.awt.event.KeyEvent;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 
@@ -38,11 +40,18 @@ public final class DialogShell {
         this.dialog = dialog;
     }
 
-    /** Cria o {@link JDialog} (layout {@link BorderLayout}, fecha com dispose) sem exibi-lo ainda. */
+    /** Cria o {@link JDialog} (layout {@link BorderLayout}, fecha com dispose, Esc fecha) sem exibi-lo ainda. */
     public static DialogShell create(Window owner, String title, JDialog.ModalityType modality) {
         JDialog dialog = new JDialog(owner, title, modality);
         dialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
         dialog.setLayout(new BorderLayout());
+        // Mesmo atalho ja usado nos dialogs "de formulario guiado" (DDL/
+        // view/trigger/rotina/usuarios) — faltava aqui, no UNICO ponto
+        // compartilhado de construcao de dialog, entao qualquer consumidor
+        // futuro do DialogShell ja ganha de graca (achado numa auditoria
+        // pedida pelo usuario: Esc fechava so 5 de ~16 dialogs do app).
+        dialog.getRootPane().registerKeyboardAction(e -> dialog.dispose(),
+                KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), JComponent.WHEN_IN_FOCUSED_WINDOW);
         return new DialogShell(dialog);
     }
 

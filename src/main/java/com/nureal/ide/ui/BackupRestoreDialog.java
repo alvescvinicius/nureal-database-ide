@@ -24,6 +24,7 @@ import javax.swing.JScrollPane;
 import javax.swing.JTabbedPane;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
+import javax.swing.KeyStroke;
 import javax.swing.ListSelectionModel;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.BorderLayout;
@@ -32,6 +33,7 @@ import java.awt.Dialog;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Window;
+import java.awt.event.KeyEvent;
 import java.io.File;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
@@ -123,6 +125,11 @@ final class BackupRestoreDialog {
             tabs.addTab("Backup (mysqldump)", buildBackupTab());
             tabs.addTab("Restaurar (mysql)", buildRestoreTab());
             dialog.add(tabs, BorderLayout.CENTER);
+            // Esc fecha — mesmo atalho ja usado nos dialogs "de formulario
+            // guiado" (DDL/view/trigger/rotina/usuarios), faltava aqui
+            // (achado numa auditoria pedida pelo usuario).
+            dialog.getRootPane().registerKeyboardAction(e -> dialog.dispose(),
+                    KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), JComponent.WHEN_IN_FOCUSED_WINDOW);
             dialog.setSize(720, 620);
             dialog.setLocationRelativeTo(owner);
             dialog.setVisible(true);

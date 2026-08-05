@@ -19,8 +19,11 @@ import java.awt.Font;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
+import java.awt.Point;
 import java.awt.Rectangle;
+import java.awt.Window;
 import java.awt.event.ActionEvent;
+import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.event.WindowAdapter;
@@ -56,6 +59,7 @@ import javax.swing.JButton;
 import javax.swing.JCheckBoxMenuItem;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
+import javax.swing.JDialog;
 import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
@@ -128,7 +132,6 @@ import com.nureal.ide.modulos.iachat.apresentacao.ChatWindow;
 import com.nureal.ide.modulos.iachat.apresentacao.IdeContextAccessor;
 import com.nureal.ide.compartilhado.designsystem.NButton;
 import com.nureal.ide.compartilhado.designsystem.NSearchField;
-import com.nureal.ide.compartilhado.designsystem.NTheme;
 import com.nureal.ide.compartilhado.designsystem.NToast;
 
 /**
@@ -235,6 +238,8 @@ public class MainWindow extends JFrame {
 	private final ObjectExplorerController objectExplorer = new ObjectExplorerController(this);
 	private final ResultsAreaController resultsController = new ResultsAreaController(this);
 	private ConnectionsPanel connectionsPanel;
+	/** Janela flutuante que hospeda {@link #connectionsPanel} quando aberta (ver {@link #showConnectionsPopup}) — {@code null} quando fechada. */
+	private JDialog connectionsPopupWindow;
 	/** Indicador de linguagem + busca no editor da toolbar (ver {@link #addLanguageAndSearch}) — largura reaplicada por {@link #refreshDynamicSizing} a cada mudanca de zoom/modo compacto, igual aos demais componentes dependentes de escala. */
 	private JLabel languageLabel;
 	private NSearchField editorSearchField;
@@ -755,9 +760,13 @@ public class MainWindow extends JFrame {
 		// checkForUpdates() encontrar uma versao mais nova.
 		updateBanner = new UpdateBanner(
 				this::onInstallUpdate, this::onViewUpdateNotes, this::onSkipUpdate, this::onDismissUpdateBanner);
+
+		// buildLeftSide() PRIMEIRO (constroi connectionsPanel) — a barra de
+		// conexao (buildConnectionBar, chamada de dentro de buildToolbar())
+		// depende dele existir (botao "+ Nova conexao").
+		leftSide = buildLeftSide();
 		add(updateBanner, BorderLayout.NORTH);
 
-		leftSide = buildLeftSide();
 		resultsArea = resultsController.buildResultsArea();
 		editorAreaPanel = buildEditorArea();
 
@@ -821,15 +830,39 @@ public class MainWindow extends JFrame {
 		mainBar.setBorder(BorderFactory.createEmptyBorder(Spacing.SM, 0, Spacing.SM, Spacing.MD));
 
 		GridBagConstraints gbc = new GridBagConstraints();
-		// O segredo do alinhamento: força todos os elementos a compartilharem a mesma
-		// linha base vertical
-		gbc.anchor = GridBagConstraints.BASELINE;
+		// CENTER (nao mais BASELINE): a linha da barra ja mistura botoes de
+		// TEXTO (Executar/Formatar/Explicar/Salvar), um botao SO DE ICONE
+		// (a setinha de opcoes de formatacao) e um painel sem texto nenhum
+		// (o card de conexao) — BASELINE so faz sentido pra componentes com
+		// uma linha de texto de verdade, entao um botao so-de-icone e um
+		// JPanel puro (sem baseline proprio) cada um "resolvia" a propria
+		// posicao vertical de um jeito diferente, ficando um por cima/baixo
+		// dos outros (relatado pelo usuario com captura de tela: "Executar,
+		// Formatar, o icone de formatacoes estao desalinhados"). CENTER e
+		// robusto pros 3 tipos ao mesmo tempo — e como todos ja tem a MESMA
+		// altura fixada (rowHeight, ver #addRunFormatExplainButtons/
+		// #addSaveButton/#buildConnectionBar), centralizar da exatamente o
+		// mesmo resultado visual de "todos alinhados", sem depender de
+		// baseline de texto nenhum.
+		gbc.anchor = GridBagConstraints.CENTER;
 		gbc.fill = GridBagConstraints.NONE;
 		gbc.weighty = 1.0;
 		gbc.gridy = 0;
 
 		int rowHeight = addRunFormatExplainButtons(mainBar, gbc);
 		addSaveButton(mainBar, gbc, rowHeight);
+
+		// Conexao ativa embutida na PROPRIA barra de acoes (nao mais uma
+		// linha inteira por cima da janela, ver #buildConnectionBar) —
+		// pedido explicito do usuario ("e se colocar ao lado do botao
+		// salvar... menos espaco gasto atoa"): ficava sobrando uma faixa de
+		// altura fixa so pra isto antes, mesmo depois de comprimida pra 1
+		// linha. Do lado do Salvar, antes do espacador, e sizeada pelo
+		// proprio GridBagLayout (fill NONE) — nao ocupa mais espaco que o
+		// necessario pro conteudo dela.
+		gbc.gridx = 5;
+		gbc.insets = new Insets(0, Spacing.MD, 0, 0);
+		mainBar.add(buildConnectionBar(rowHeight), gbc);
 
 		// --- O ESPAÇADOR INVISÍVEL ---
 		// Ele joga tudo o que vier a partir daqui totalmente para a direita
@@ -1170,12 +1203,13 @@ public class MainWindow extends JFrame {
 		// Espacamento de linhas — pedido explicito do usuario, independente do
 		// Zoom acima (que escala a interface inteira): so a altura de linha
 		// dos componentes em formato de linha unica (icone + texto) — grade
-		// de resultados, arvore de Objetos, lista de Conexoes e lista de abas
-		// de SQL (ver #sqlEditorsList), que ja compartilhavam a MESMA
-		// constante de altura entre si (ver ConnectionsPanel#DEFAULT_ROW_HEIGHT)
-		// antes desta preferencia existir. Historico/Consultas Salvas ficam de
-		// fora: sao cards de DUAS linhas (48/52px), estrutura diferente o
-		// bastante pra essa mesma escala (18-34px) quebrar o layout deles.
+		// de resultados, arvore de Objetos e lista de abas de SQL (ver
+		// #sqlEditorsList). Historico/Consultas Salvas/Conexoes ficam de
+		// fora: sao cards de DUAS linhas, estrutura diferente o bastante pra
+		// essa mesma escala (18-34px) quebrar o layout deles — a lista de
+		// Conexoes passou a ser card de 2 linhas numa revisao visual
+		// (ConnectionRenderer), entao connectionsPanel.setRowHeight(...)
+		// abaixo virou no-op de proposito (ver seu javadoc).
 		JMenu rowSpacingMenu = new JMenu("Espacamento de linhas");
 		for (int i = 0; i < ROW_SPACING_LEVELS.length; i++) {
 			int idx = i;
@@ -1741,12 +1775,13 @@ public class MainWindow extends JFrame {
 		updateWorkspaceContextBar();
 	}
 
-	/** {@code usuario@host} da conexao ativa (ver exemplo da SPEC-0007), ou {@code null} sem profile. */
+	/** {@code usuario@host:porta} da conexao ativa (ver exemplo da SPEC-0007), ou {@code null} sem profile. */
 	private String activeWorkspaceHostLabel() {
 		if (activeWorkspace == null || activeWorkspace.profile == null) {
 			return null;
 		}
-		return activeWorkspace.profile.user() + "@" + activeWorkspace.profile.host();
+		return activeWorkspace.profile.user() + "@" + activeWorkspace.profile.host()
+				+ ":" + activeWorkspace.profile.port();
 	}
 
 	/** {@code "MySQL 8.0"} (produto + versao major.minor) da conexao ativa, ou {@code null} sem metadados disponiveis. */
@@ -1872,6 +1907,48 @@ public class MainWindow extends JFrame {
 		return currentSchema != null ? "Esquema: " + currentSchema.name() : activeWorkspace.name();
 	}
 
+	/**
+	 * Indicador "Conexao Ativa" — ja foi uma barra inteira acima de Executar/
+	 * Formatar/... (span da largura toda da janela, numa linha propria),
+	 * mas isso sobrava altura fixa so pra ela mesmo comprimida (feedback do
+	 * usuario com captura de tela: "espaco perdido"). Agora e chamada de
+	 * dentro de {@link #buildToolbar()}, embutida na PROPRIA barra de acoes
+	 * ao lado do botao "Salvar" — nenhuma linha/altura extra dedicada.
+	 * Chamada DEPOIS de {@link #connectionsPanel} existir (precisa dele pro
+	 * botao "+ Nova conexao" e pra seta abrir "Conexoes salvas" — ver
+	 * {@link #showConnectionsPopup}), que por sua vez precisa de
+	 * {@link #buildLeftSide()} ja ter rodado (ver {@link #buildUi()}).
+	 */
+	private JComponent buildConnectionBar(int rowHeight) {
+		connectionCard = new ConnectionStatusCard();
+		connectionCard.setOnSwitchRequested(name -> {
+			Conexao w = workspaces.get(name);
+			if (w != null) {
+				activateWorkspace(w);
+				statusBar.setText(" Workspace: " + name);
+			}
+		});
+		connectionCard.setOnManageConnections(() -> showConnectionsPopup(connectionCard.popupAnchor()));
+		// MESMA acao do botao "+" dentro do dropdown de conexoes
+		// (ConnectionsPanel#createNewConnection ja e so um encaminhamento
+		// pro onNew() de la, nenhuma logica duplicada aqui) — atalho pra
+		// nao precisar abrir o dropdown primeiro so pra cadastrar uma
+		// conexao nova.
+		connectionCard.setOnNewConnection(connectionsPanel::createNewConnection);
+		// MESMA altura de Executar/Formatar/Explicar/Salvar (rowHeight, ja
+		// calculado por #addRunFormatExplainButtons) — sem isto o card (com
+		// seu proprio padding interno) ficava um pouco mais alto/baixo que
+		// os botoes ao lado, desalinhando a barra inteira (pedido explicito
+		// do usuario: "precisa de alinhamento e espacamento, deixe tudo
+		// uniforme"). setFixedHeight (nao mais setPreferredSize direto): so
+		// trava a ALTURA, a largura continua recalculada a cada texto novo
+		// — ver javadoc de ConnectionStatusCard#fixedHeight pro bug que
+		// setPreferredSize direto causava (nome sumindo atras do "Nova
+		// conexao" ao conectar).
+		connectionCard.setFixedHeight(rowHeight);
+		return connectionCard;
+	}
+
 	// ---------- Lado esquerdo ----------
 
 	/**
@@ -1881,8 +1958,10 @@ public class MainWindow extends JFrame {
 	 * os 3 grupos sempre visiveis ao mesmo tempo (CONEXOES, WORKSPACE,
 	 * OBJETOS, FERRAMENTAS) — reversao confirmada explicitamente pelo usuario
 	 * (ver a pergunta obrigatoria do plano, respondida "Sim, confirmo a
-	 * reversao"). {@link ConnectionStatusCard} continua fixo no topo, fora da
-	 * area rolavel, exatamente como antes ("nao mexer" no plano).
+	 * reversao"). {@link ConnectionStatusCard} deixou de ficar fixo no topo
+	 * DESTA coluna — mudou pra dentro da barra de acoes do editor SQL, ao
+	 * lado do botao "Salvar" (ver {@link #buildConnectionBar}), apos
+	 * algumas revisoes visuais posteriores.
 	 * <p>
 	 * CONEXOES e OBJETOS reaproveitam {@link ConnectionsPanel} e
 	 * {@code ObjectExplorerController#buildObjectBrowser} INTEIROS (cada um
@@ -1900,46 +1979,20 @@ public class MainWindow extends JFrame {
 	 * mesmo tipo de reducao de escopo documentada na Fase 4.
 	 */
 	private JComponent buildLeftSide() {
-		// ConnectionsPanel deixou de ficar sempre visivel na sidebar (pedido
-		// explicito do protótipo: "card reduzido para apenas Ambiente/Schema/
-		// Banco", sem a lista completa de conexoes salvas ocupando espaco
-		// permanente) — continua existindo (guarda todo o estado/logica de
-		// conectar/desconectar/cores por workspace) so que agora dentro de um
-		// popup, aberto pela seta "Conexoes salvas" do ConnectionStatusCard
-		// (ver #showConnectionsPopup).
+		// ConnectionsPanel e a barra de conexao (antigo ConnectionStatusCard
+		// da sidebar) deixaram de ficar aqui — ver #buildConnectionBar,
+		// chamado por #buildUi. Continua construido ANTES do resto da
+		// sidebar (buildConnectionBar precisa de connectionsPanel ja
+		// existente pra achar seu dono de dialogos, ver
+		// ConnectionsPanel#setOwnerWindow).
 		connectionsPanel = new ConnectionsPanel(connectionStore, this::connectTo, this::disconnectFrom);
+		connectionsPanel.setOwnerWindow(this);
 		connectionsPanel.setRowHeight(scaledPx(resultRowHeightBasePx()));
 		// Tamanho do popup recalculado a cada abertura (ver #showConnectionsPopup),
 		// nao fixado aqui: precisa acompanhar zoom/modo compacto como o resto
 		// da UI, e o zoom pode mudar entre uma abertura e outra.
 		savedQueriesPanel = new SavedQueriesPanel(savedQueryStore, this::openSavedQuery);
 		historyPanel = new HistoryPanel(historyStore, this::openHistoryEntry);
-
-		// Active Connection Card: SEMPRE visivel, qualquer que seja a secao
-		// visivel/rolada da arvore abaixo (unico lugar do app mostrando
-		// conexao/host/engine/status — ver ConnectionStatusCard).
-		connectionCard = new ConnectionStatusCard();
-		connectionCard.setOnSwitchRequested(name -> {
-			Conexao w = workspaces.get(name);
-			if (w != null) {
-				activateWorkspace(w);
-				statusBar.setText(" Workspace: " + name);
-			}
-		});
-		connectionCard.setOnManageConnections(() -> showConnectionsPopup(connectionCard));
-		JPanel cardRow = new JPanel(new BorderLayout());
-		cardRow.setOpaque(false);
-		cardRow.setBorder(BorderFactory.createEmptyBorder(Spacing.SM, 0, Spacing.SM, 0));
-		cardRow.add(connectionCard, BorderLayout.CENTER);
-
-		// Sem logo/nome "Nureal" duplicado aqui: a barra de titulo customizada
-		// (FlatLaf.setDefaultLookAndFeelDecorated, ver App#main) ja mostra o
-		// icone e "Nureal Database IDE" no topo da janela — repetir a marca
-		// bem abaixo dela, de novo, so ocupava espaco vertical do paine de
-		// conexoes sem agregar informacao nova (pedido explicito do usuario).
-		JPanel topStack = new JPanel(new BorderLayout());
-		topStack.setOpaque(false);
-		topStack.add(cardRow, BorderLayout.CENTER);
 
 		// Busca unificada (Ctrl+K) — encaminha o texto pro filtro JA
 		// EXISTENTE de cada painel embutido (ver #applySidebarFilter), sem
@@ -2059,7 +2112,6 @@ public class MainWindow extends JFrame {
 		JPanel fixedTop = new JPanel();
 		fixedTop.setOpaque(false);
 		fixedTop.setLayout(new BoxLayout(fixedTop, BoxLayout.Y_AXIS));
-		fixedTop.add(topStack);
 		fixedTop.add(searchRow);
 
 		JPanel contentColumn = new JPanel(new BorderLayout(0, Spacing.SM));
@@ -2083,31 +2135,97 @@ public class MainWindow extends JFrame {
 	}
 
 	/**
-	 * Popup com a lista completa de conexoes salvas ({@link #connectionsPanel},
-	 * conectar/desconectar/criar/editar) — aberto a partir da seta "Conexoes
-	 * salvas" do {@link ConnectionStatusCard} (ver #buildLeftSide). Deixou de
-	 * ficar sempre visivel na sidebar (pedido explicito do protótipo), mas
-	 * continua acessivel de um clique, sem perder nenhuma funcionalidade.
+	 * Janela flutuante com a lista completa de conexoes salvas
+	 * ({@link #connectionsPanel}, conectar/desconectar/criar/editar) —
+	 * aberta a partir da seta "Conexoes salvas" do {@link ConnectionStatusCard}
+	 * (ver #buildLeftSide). Deixou de ficar sempre visivel na sidebar
+	 * (pedido explicito do protótipo), mas continua acessivel de um clique.
+	 * <p>
+	 * NAO e mais um {@link JPopupMenu} (era ate a v1.1.3): {@link ConnectionsPanel}
+	 * abre os PROPRIOS dialogos ({@code JOptionPane} de Nova/Editar conexao)
+	 * e o PROPRIO menu de contexto (clique direito), e um {@code JPopupMenu}
+	 * do Swing nao foi feito pra hospedar outro popup/dialogo dentro dele —
+	 * o {@code MenuSelectionManager} so acompanha UMA cadeia de popup ativa
+	 * por vez, entao o popup externo se fechava sozinho assim que o dialogo
+	 * interno tentava abrir, ou o menu de contexto nem chegava a aparecer.
+	 * Bug relatado pelo usuario: "no momento nao consigo editar uma conexao
+	 * e criar uma nova". {@link JDialog} sem borda (undecorated), NAO-MODAL,
+	 * que se fecha sozinho ao perder foco — mesmo efeito visual de "dropdown
+	 * acoplado ao card", mas suportando dialogos/menus filhos de verdade
+	 * (eles sao JANELAS PROPRIAS, donas={@code popup}, e {@link #isChildWindowShowing}
+	 * impede o fechamento automatico enquanto uma delas estiver aberta).
 	 */
 	private void showConnectionsPopup(JComponent anchor) {
+		// Clicar de novo com o popup ja aberto FECHA em vez de abrir outro
+		// por cima (mesmo comportamento de "toggle" que o JPopupMenu ja
+		// dava de graca).
+		if (connectionsPopupWindow != null && connectionsPopupWindow.isShowing()) {
+			connectionsPopupWindow.dispose();
+			return;
+		}
 		// Mesma LARGURA do card de conexao (nao mais um valor fixo de
 		// 300px): pedido explicito do usuario ("poderia ter um visual
 		// melhor... acoplado") — com a mesma largura do card logo acima e
-		// zero espaco entre os dois (ver #show abaixo, y = anchor.getHeight()),
-		// o popup le como uma EXTENSAO do card (um dropdown), nao como um
-		// menu generico solto em outro lugar da tela.
-		connectionsPanel.setPreferredSize(new Dimension(Math.max(anchor.getWidth(), scaledPx(260)), scaledPx(360)));
-		// Cantos arredondados com o MESMO raio dos cards do design system
-		// (ver NTheme#CARD_ARC) e uma borda fina na cor neutra do tema —
-		// antes era um JPopupMenu generico (retangular, borda padrao do
-		// L&F), destoando do resto da UI (cards/botoes todos arredondados).
+		// zero espaco entre os dois, o popup le como uma EXTENSAO do card
+		// (um dropdown), nao como uma janela generica solta na tela.
+		// Altura um pouco maior que antes (360->420): a lista de conexoes
+		// agora usa cartoes de 2 linhas (ver ConnectionRenderer), mais altos
+		// que a linha unica de antes — sem isto, menos linhas cabiam visiveis
+		// de cara na mesma altura.
+		connectionsPanel.setPreferredSize(new Dimension(Math.max(anchor.getWidth(), scaledPx(260)), scaledPx(420)));
 		connectionsPanel.setBorder(BorderFactory.createLineBorder(GridTheme.HEADER_BORDER, 1, true));
-		JPopupMenu popup = new JPopupMenu();
-		popup.putClientProperty(com.formdev.flatlaf.FlatClientProperties.STYLE, "arc: " + NTheme.CARD_ARC);
-		popup.setBorder(BorderFactory.createEmptyBorder());
+
+		JDialog popup = new JDialog(this, false);
+		popup.setUndecorated(true);
 		popup.setLayout(new BorderLayout());
 		popup.add(connectionsPanel, BorderLayout.CENTER);
-		popup.show(anchor, 0, anchor.getHeight());
+		popup.pack();
+
+		Point anchorLoc = anchor.getLocationOnScreen();
+		popup.setLocation(anchorLoc.x, anchorLoc.y + anchor.getHeight());
+
+		popup.getRootPane().registerKeyboardAction(e -> popup.dispose(),
+				KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), JComponent.WHEN_IN_FOCUSED_WINDOW);
+		popup.addWindowFocusListener(new WindowAdapter() {
+			@Override
+			public void windowLostFocus(WindowEvent e) {
+				// So fecha se NENHUMA janela filha (ex.: o dialogo de Nova/
+				// Editar conexao, ou o menu de contexto quando "pesado" o
+				// bastante pra virar janela propria) estiver aberta —
+				// checar isso em vez de e.getOppositeWindow() (que costuma
+				// vir null em varios ambientes/gerenciadores de janela,
+				// fechando o popup na hora errada mesmo com um dialogo
+				// filho ativo).
+				if (!isChildWindowShowing(popup)) {
+					popup.dispose();
+				}
+			}
+		});
+		popup.addWindowListener(new WindowAdapter() {
+			@Override
+			public void windowClosed(WindowEvent e) {
+				if (connectionsPopupWindow == popup) {
+					connectionsPopupWindow = null;
+				}
+				// O painel volta a nao ter pai nenhum ate a proxima
+				// abertura — remove-lo explicitamente evita mante-lo preso
+				// a uma janela ja descartada.
+				popup.getContentPane().removeAll();
+			}
+		});
+
+		connectionsPopupWindow = popup;
+		popup.setVisible(true);
+	}
+
+	/** {@code true} se {@code window} tiver alguma janela PROPRIA (filha) atualmente visivel — ver {@link #showConnectionsPopup}. */
+	private static boolean isChildWindowShowing(Window window) {
+		for (Window owned : window.getOwnedWindows()) {
+			if (owned.isShowing()) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/**
@@ -3568,7 +3686,12 @@ public class MainWindow extends JFrame {
 							: List.of(schema);
 					completionProvider.refresh(known, schemaName);
 					objectExplorer.populateTree(schema);
-					setConnectedState(schemaName);
+					// refreshConnectionIndicators (nao setConnectedState(schemaName)):
+					// o card de conexao deve continuar mostrando o NOME DA CONEXAO
+					// ("nureal-teste"), nao o esquema que acabou de ser aberto — bug
+					// relatado pelo usuario com captura de tela (o nome "trocava" pro
+					// esquema toda vez que ele selecionava um).
+					refreshConnectionIndicators();
 					updateWorkspaceContextBar();
 					statusBar.setText(" Esquema " + schemaName + "  (" + schema.tables().size() + " tabelas)");
 					if (onOpened != null) {
@@ -3798,7 +3921,9 @@ public class MainWindow extends JFrame {
 		metadataCache.set(schema);
 		completionProvider.refresh(ws != null ? ws.loadedSchemas.values() : List.of(schema), schemaName);
 		objectExplorer.populateTree(schema);
-		setConnectedState(schemaName);
+		// Ver comentario equivalente em #openSchema: mantem o nome da CONEXAO
+		// no card, nao o esquema.
+		refreshConnectionIndicators();
 		updateWorkspaceContextBar();
 		runStatements(editor);
 	}

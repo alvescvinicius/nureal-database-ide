@@ -8,16 +8,19 @@ import java.awt.Desktop;
 import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.Window;
+import java.awt.event.KeyEvent;
 import java.net.URI;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
+import javax.swing.JComponent;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
+import javax.swing.KeyStroke;
 
 import com.nureal.ide.modulos.atualizacao.dominio.entidades.GithubRelease;
 
@@ -71,6 +74,11 @@ final class ReleaseNotesDialog {
         footer.add(close);
         dialog.add(footer, BorderLayout.SOUTH);
 
+        // Esc fecha — mesmo atalho ja usado nos dialogs "de formulario
+        // guiado" (DDL/view/trigger/rotina/usuarios), faltava aqui (achado
+        // numa auditoria pedida pelo usuario).
+        dialog.getRootPane().registerKeyboardAction(e -> dialog.dispose(),
+                KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), JComponent.WHEN_IN_FOCUSED_WINDOW);
         dialog.pack();
         dialog.setLocationRelativeTo(owner);
         dialog.setVisible(true);

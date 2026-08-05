@@ -137,6 +137,12 @@ final class FkInspectorWindow {
         dialog.add(filterBar.panel(), BorderLayout.NORTH);
         dialog.add(center, BorderLayout.CENTER);
         dialog.add(south, BorderLayout.SOUTH);
+        // Esc fecha — mesmo atalho ja usado nos dialogs "de formulario
+        // guiado" (DDL/view/trigger/rotina/usuarios), faltava aqui (achado
+        // numa auditoria pedida pelo usuario).
+        dialog.getRootPane().registerKeyboardAction(e -> dialog.dispose(),
+                javax.swing.KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_ESCAPE, 0),
+                javax.swing.JComponent.WHEN_IN_FOCUSED_WINDOW);
         dialog.setSize(760, 480);
         dialog.setLocationRelativeTo(owner);
         dialog.setResizable(true);

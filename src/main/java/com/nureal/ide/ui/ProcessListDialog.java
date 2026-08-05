@@ -57,6 +57,17 @@ final class ProcessListDialog {
         private DefaultTableModel model;
         private JTable table;
         private Timer autoRefreshTimer;
+        /**
+         * Incrementado a cada {@link #refresh()}: o auto-refresh dispara uma
+         * consulta NOVA a cada 3s sem esperar a anterior terminar, entao duas
+         * podem estar "em voo" ao mesmo tempo — se o servidor demorar mais
+         * que 3s pra responder (justo quando um DBA estaria de olho neste
+         * monitor), a resposta mais LENTA/antiga pode chegar DEPOIS de uma
+         * mais nova e sobrescrever a grade com dados desatualizados. Cada
+         * callback so aplica o resultado se o numero de sequencia ainda for
+         * o mais recente — achado numa auditoria pedida pelo usuario.
+         */
+        private int refreshSeq;
 
         Session(Component parent, DatabaseDialect dialect, QueryRunner queryRunner, DdlAssistantDialog.DdlRunner runner) {
             this.owner = (DialogUtil.owner(parent) instanceof Window w) ? w : null;
@@ -134,14 +145,23 @@ final class ProcessListDialog {
         }
 
         private void refresh() {
+            int seq = ++refreshSeq;
             queryRunner.query(dialect.processListQuery(), rows -> {
+                if (seq != refreshSeq) {
+                    return; // resposta de uma consulta ja superada por outra mais recente — descarta
+                }
                 model.setRowCount(0);
                 for (Object[] row : rows) {
                     model.addRow(row);
                 }
-            }, ex -> JOptionPane.showMessageDialog(dialog,
-                    "Falha ao listar sessoes (a conexao pode nao ter privilegio PROCESS):\n" + ex.getMessage(),
-                    "Sessoes ativas", JOptionPane.ERROR_MESSAGE));
+            }, ex -> {
+                if (seq != refreshSeq) {
+                    return;
+                }
+                JOptionPane.showMessageDialog(dialog,
+                        "Falha ao listar sessoes (a conexao pode nao ter privilegio PROCESS):\n" + ex.getMessage(),
+                        "Sessoes ativas", JOptionPane.ERROR_MESSAGE);
+            });
         }
 
         private void onKill() {

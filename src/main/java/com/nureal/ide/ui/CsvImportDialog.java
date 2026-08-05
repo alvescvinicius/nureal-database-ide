@@ -7,6 +7,7 @@ import java.awt.Component;
 import java.awt.Dialog;
 import java.awt.FlowLayout;
 import java.awt.Window;
+import java.awt.event.KeyEvent;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -26,6 +27,7 @@ import javax.swing.JProgressBar;
 import javax.swing.JScrollPane;
 import javax.swing.JTabbedPane;
 import javax.swing.JTable;
+import javax.swing.KeyStroke;
 import javax.swing.table.DefaultTableModel;
 
 import com.nureal.ide.modulos.metadados.dominio.entidades.ColumnInfo;
@@ -105,6 +107,11 @@ final class CsvImportDialog {
             dialog.add(info, BorderLayout.NORTH);
             dialog.add(tabs, BorderLayout.CENTER);
             dialog.add(buildFooter(), BorderLayout.SOUTH);
+            // Esc fecha — mesmo atalho ja usado nos dialogs "de formulario
+            // guiado" (DDL/view/trigger/rotina/usuarios), faltava aqui
+            // (achado numa auditoria pedida pelo usuario).
+            dialog.getRootPane().registerKeyboardAction(e -> dialog.dispose(),
+                    KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), JComponent.WHEN_IN_FOCUSED_WINDOW);
             dialog.setSize(820, 560);
             dialog.setLocationRelativeTo(owner);
             dialog.setVisible(true);

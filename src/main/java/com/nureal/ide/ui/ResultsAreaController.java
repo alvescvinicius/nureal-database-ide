@@ -2,6 +2,7 @@ package com.nureal.ide.ui;
 import com.nureal.ide.compartilhado.designsystem.IconType;
 import com.nureal.ide.compartilhado.designsystem.Icons;
 import com.nureal.ide.compartilhado.designsystem.Buttons;
+import com.nureal.ide.compartilhado.designsystem.NEmptyState;
 import com.nureal.ide.compartilhado.designsystem.Typography;
 import com.nureal.ide.compartilhado.designsystem.GridTheme;
 
@@ -144,14 +145,20 @@ final class ResultsAreaController {
 		headerIcons.add(orientationToggle);
 		headerIcons.add(expandResultsButton);
 
-		JPanel header = new JPanel(new BorderLayout());
-		header.setOpaque(false);
-		header.add(owner.sectionHeader("RESULTADOS"), BorderLayout.WEST);
-		header.add(headerIcons, BorderLayout.EAST);
+		// SEM barra "RESULTADOS" separada (redesenho pedido pelo usuario:
+		// "cada pixel precisa justificar sua existencia" — um titulo que so
+		// repete o que a propria posicao na tela ja comunica nao ajuda em
+		// nada e custava uma linha inteira de altura, tirada do editor/grade,
+		// que sao os 2 componentes mais usados da sessao). As acoes da grade
+		// (orientacao/expandir) vao na MESMA linha das abas via
+		// "JTabbedPane.trailingComponent" (propriedade nativa do FlatLaf pra
+		// isso), nao mais numa barra decorativa acima delas. So aparecem
+		// junto com as proprias abas (nenhum resultado ainda -> nenhuma
+		// linha de acoes tambem, ver #showEmptyState).
+		resultTabs.putClientProperty("JTabbedPane.trailingComponent", headerIcons);
 
-		JPanel panel = new JPanel(new BorderLayout(0, 8));
+		JPanel panel = new JPanel(new BorderLayout());
 		panel.setBorder(BorderFactory.createEmptyBorder(4, 8, 8, 8));
-		panel.add(header, BorderLayout.NORTH);
 		panel.add(overlayStack(resultsCards), BorderLayout.CENTER);
 		return panel;
 	}
@@ -283,32 +290,18 @@ final class ResultsAreaController {
 		}
 	}
 
+	/**
+	 * NEmptyState (design system): ponto UNICO da receita "icone + titulo +
+	 * subtitulo" — antes esta era uma de 4 copias praticamente identicas
+	 * (achado numa auditoria pedida pelo usuario), ja divergida das outras
+	 * 3 (icone 46px em vez de 40, espacamento 12/4 em vez de 10/2, fonte do
+	 * titulo 14f em vez de 13f, e faltava {@code setOpaque(false)} no
+	 * painel central — um retangulo de fundo fora do tema podia aparecer
+	 * atras do icone/texto, ja que {@code JPanel} e opaco por padrao).
+	 */
 	private JComponent buildEmptyState() {
-		JLabel icon = new JLabel();
-		Buttons.bindThemedIcon(icon, IconType.TABLE, 46, () -> GridTheme.MUTED_TEXT);
-		icon.setAlignmentX(Component.CENTER_ALIGNMENT);
-
-		JLabel title = new JLabel("Execute uma consulta para ver os resultados");
-		title.setFont(title.getFont().deriveFont(14f));
-		Typography.primary(title);
-		title.setAlignmentX(Component.CENTER_ALIGNMENT);
-
-		JLabel sub = new JLabel("Os resultados da consulta aparecerao aqui");
-		Typography.tertiary(sub);
-		sub.setAlignmentX(Component.CENTER_ALIGNMENT);
-
-		JPanel box = new JPanel();
-		box.setOpaque(false);
-		box.setLayout(new BoxLayout(box, BoxLayout.Y_AXIS));
-		box.add(icon);
-		box.add(Box.createVerticalStrut(12));
-		box.add(title);
-		box.add(Box.createVerticalStrut(4));
-		box.add(sub);
-
-		JPanel center = new JPanel(new GridBagLayout());
-		center.add(box);
-		return center;
+		return NEmptyState.of(IconType.TABLE, "Execute uma consulta para ver os resultados",
+				"Os resultados da consulta aparecerao aqui");
 	}
 
 	private void showEmptyState() {
@@ -359,7 +352,18 @@ final class ResultsAreaController {
 				content = new JScrollPane(area);
 			}
 			resultTabs.addTab(r.title(), content);
-			resultTabs.setToolTipTextAt(resultTabs.getTabCount() - 1, MainWindow.sqlTooltip(r.sql()));
+			int idx = resultTabs.getTabCount() - 1;
+			resultTabs.setToolTipTextAt(idx, MainWindow.sqlTooltip(r.sql()));
+			// Icone/cor de apoio por tipo de instrucao (SELECT/UPDATE/INSERT/
+			// DELETE/CREATE TABLE) — identifica o tipo de operacao sem
+			// precisar ler o nome da aba inteiro. Erro sobrescreve pro icone
+			// de erro (vermelho), independente do tipo: uma instrucao que
+			// falhou e mais importante de notar do que o que ela TENTAVA
+			// fazer.
+			SqlStatementLabel.Kind kind = SqlStatementLabel.kindOf(r.sql());
+			IconType tabIcon = r.error() ? IconType.ERROR : SqlStatementLabel.iconFor(kind);
+			Color tabColor = r.error() ? GridTheme.ACCENT_ERROR : SqlStatementLabel.colorFor(kind);
+			resultTabs.setIconAt(idx, Icons.get(tabIcon, 13, tabColor));
 			error = error || r.error();
 		}
 		if (resultTabs.getTabCount() > 0) {
@@ -736,6 +740,16 @@ final class ResultsAreaController {
 
 			@Override
 			protected void done() {
+				// A aba pode ter sido fechada (ver MainWindow#closeOpenCursors)
+				// enquanto esta consulta em segundo plano ainda rodava — nesse
+				// caso o cursor ja foi removido de openCursors, e aplicar o
+				// resultado mutaria um ResultTableModel que ninguem mais
+				// exibe (nada quebra visualmente, mas e trabalho e mutacao de
+				// estado inuteis) — achado numa auditoria pedida pelo
+				// usuario. Mesmo guard em #loadAll.
+				if (!openCursors.contains(c)) {
+					return;
+				}
 				try {
 					List<Vector<Object>> rows = get();
 					int before = r.model().getRowCount();
@@ -784,6 +798,13 @@ final class ResultsAreaController {
 
 			@Override
 			protected void process(List<Vector<Object>> chunks) {
+				// Mesmo guard de #loadPage: a aba pode ter sido fechada
+				// enquanto este "carregar tudo" ainda rodava em segundo
+				// plano — sem isto, cada leva de linhas continuaria sendo
+				// aplicada a um modelo que ninguem mais exibe.
+				if (!openCursors.contains(c)) {
+					return;
+				}
 				int before = r.model().getRowCount();
 				for (Vector<Object> row : chunks) {
 					r.model().addRow(row);
@@ -794,9 +815,13 @@ final class ResultsAreaController {
 
 			@Override
 			protected void done() {
+				boolean stillOpen = openCursors.contains(c);
 				c.exhausted = true;
 				c.close();
 				openCursors.remove(c);
+				if (!stillOpen) {
+					return;
+				}
 				try {
 					get();
 					owner.statusBar().setText(" Todas as linhas carregadas (" + r.model().getRowCount() + ").");

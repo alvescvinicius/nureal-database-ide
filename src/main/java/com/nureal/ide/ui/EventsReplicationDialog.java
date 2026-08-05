@@ -14,6 +14,7 @@ import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTable;
 import javax.swing.JTabbedPane;
+import javax.swing.KeyStroke;
 import javax.swing.table.DefaultTableModel;
 import javax.swing.table.TableRowSorter;
 import java.awt.BorderLayout;
@@ -21,6 +22,7 @@ import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Window;
+import java.awt.event.KeyEvent;
 import java.util.function.Consumer;
 
 /**
@@ -79,6 +81,11 @@ final class EventsReplicationDialog {
                             "Sem posicao de binary log — o log binario pode estar desligado nesta instancia."));
             dialog.add(tabs, BorderLayout.CENTER);
 
+            // Esc fecha — mesmo atalho ja usado nos dialogs "de formulario
+            // guiado" (DDL/view/trigger/rotina/usuarios), faltava aqui
+            // (achado numa auditoria pedida pelo usuario).
+            dialog.getRootPane().registerKeyboardAction(e -> dialog.dispose(),
+                    KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), JComponent.WHEN_IN_FOCUSED_WINDOW);
             dialog.setSize(880, 560);
             dialog.setLocationRelativeTo(owner);
             dialog.setVisible(true);

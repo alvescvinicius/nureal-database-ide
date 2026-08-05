@@ -4,6 +4,10 @@ import com.nureal.ide.compartilhado.designsystem.Icons;
 import com.nureal.ide.compartilhado.designsystem.Buttons;
 import com.nureal.ide.compartilhado.designsystem.Typography;
 import com.nureal.ide.compartilhado.designsystem.GridTheme;
+import com.nureal.ide.compartilhado.designsystem.NAccent;
+import com.nureal.ide.compartilhado.designsystem.NBadge;
+import com.nureal.ide.compartilhado.designsystem.NEmptyState;
+import com.nureal.ide.compartilhado.designsystem.Spacing;
 
 import com.nureal.ide.modulos.conexoes.dominio.entidades.ConnectionProfile;
 import com.nureal.ide.modulos.conexoes.dominio.contratos.ConnectionRepository;
@@ -30,10 +34,8 @@ import java.awt.CardLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Font;
-import java.awt.Graphics;
-import java.awt.Graphics2D;
-import java.awt.GridBagLayout;
-import java.awt.RenderingHints;
+import java.awt.FlowLayout;
+import java.awt.Window;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.io.IOException;
@@ -53,21 +55,6 @@ public class ConnectionsPanel extends JPanel {
 
     private static final long serialVersionUID = 1L;
 
-    /**
-     * Altura padrao (nao-escalada) do cartao de conexao — reduzida de 54 para
-     * 34 quando o cartao passou a mostrar so o nome (ver {@link ConnectionRenderer}),
-     * de 34 para 26 (com uma unica linha de texto, 34 ficava bem mais alto que
-     * a arvore de Objetos), e agora de 26 para 24: desde que a arvore de
-     * Objetos ganhou icone de tipo em toda linha abrivel (Rodada 2, ver
-     * {@code ObjectTreeCellRenderer#typeIcon}), as duas listas passaram a
-     * carregar a MESMA composicao "icone pequeno + texto", entao nao havia
-     * mais motivo pra manter alturas diferentes so por seguranca. Este valor
-     * agora e a UNICA fonte de verdade tambem para a arvore de Objetos (ver
-     * {@code MainWindow#buildObjectBrowser}/{@code #refreshDynamicSizing}) —
-     * as duas compartilham a mesma constante em vez de dois numeros magicos
-     * proximos, mas nao identicos, em arquivos diferentes.
-     */
-    static final int DEFAULT_ROW_HEIGHT = 24;
 
     private final ConnectionRepository store;
     private final Consumer<ConnectionProfile> connectAction;
@@ -85,6 +72,8 @@ public class ConnectionsPanel extends JPanel {
     private final JPanel listCards = new JPanel(new CardLayout());
     private JLabel emptyTitle;
     private JLabel emptySub;
+    /** Botao "+ Criar nova conexao" do estado vazio — visivel so quando NAO ha nenhuma conexao cadastrada (ver {@link #updateEmptyState}); escondido quando o estado vazio e de BUSCA sem resultado (criar uma conexao nao ajudaria ali). */
+    private JButton emptyCreateButton;
     private final Set<String> connectedNames = new HashSet<>();
     private List<ConnectionProfile> all = new ArrayList<>();
     private String connectingName;
@@ -92,6 +81,17 @@ public class ConnectionsPanel extends JPanel {
      * ver {@link #setActiveName}. Diferente de "conectada": varias podem estar
      * conectadas ao mesmo tempo, mas so uma tem suas abas na tela. */
     private String activeName;
+    /**
+     * Janela usada como dono dos dialogos deste painel (Nova/Editar/Excluir)
+     * quando informada — ver {@link #setOwnerWindow}/{@link #dialogOwner}.
+     * Sem isto, {@code DialogUtil.owner(this)} so resolve corretamente
+     * enquanto este painel estiver DENTRO de alguma janela (ex.: o popup de
+     * "Conexoes salvas" quando aberto) — um atalho que abre "Nova conexao"
+     * SEM passar por esse popup primeiro (ver {@code MainWindow}, botao
+     * "+ Nova conexao" da barra de conexao) precisa de um dono valido mesmo
+     * com o painel momentaneamente sem pai nenhum.
+     */
+    private Window ownerOverride;
 
     public ConnectionsPanel(ConnectionRepository store, Consumer<ConnectionProfile> connectAction,
             Consumer<ConnectionProfile> disconnectAction) {
@@ -129,32 +129,26 @@ public class ConnectionsPanel extends JPanel {
         }
     }
 
+    /**
+     * Busca + "Nova conexao" numa linha so — sem o titulo "CONEXOES" de
+     * antes: agora que este painel abre a partir da barra de conexao no
+     * topo da janela (ver {@code MainWindow#buildConnectionBar}), o
+     * contexto ja esta claro sem repetir o titulo (visual alinhado a uma
+     * referencia trazida pelo usuario). Botao com TEXTO "Nova conexao" (nao
+     * mais so icone) — mais descobrivel como acao principal deste dropdown.
+     */
     private JComponent buildHeader() {
-        // Ver Typography#sectionHeader: MESMA receita de "OBJETOS" (MainWindow),
-        // "HISTORICO" e "QUERIES SALVAS" — ponto unico, sem copia colada.
-        JLabel title = Typography.sectionHeader("CONEXOES");
-
-        // Botao SO DE ICONE (nao mais texto "Nova" com contorno) — antes este
-        // era o UNICO cabecalho de painel lateral com um idioma de botao
-        // diferente do painel de Objetos (que ja usa icones-so no cabecalho,
-        // ver MainWindow#buildObjectBrowserPanel/createSchemaButton). Spec de
-        // padronizacao visual: "todos os paineis devem possuir cabecalhos
-        // iguais" — mesmo icone (IconType.NEW), mesmo tamanho (13) e mesma
-        // cor (GridTheme.MUTED_TEXT) que o botao equivalente do painel de
-        // Objetos, mesmo estilo (Buttons#styleIconButton).
-        // Buttons.iconButton (nao mais "new JButton(Icons.get(...))" solto):
-        // o icone se refaz sozinho a cada troca de tema — antes ficava
-        // congelado na cor MUTED_TEXT do tema em que a janela abriu (mesmo
-        // bug sistemico corrigido no botao equivalente do painel de Objetos,
-        // ver javadoc de Buttons#iconButton).
-        JButton novo = Buttons.iconButton(IconType.NEW, 13, () -> GridTheme.MUTED_TEXT);
+        JButton novo = new JButton("Nova conexao");
+        // Contorno (Buttons.styleSecondary), nao preenchido: o botao verde
+        // SOLIDO principal desta tela e o da barra de conexao no topo (ver
+        // MainWindow#buildConnectionBar) — este aqui, dentro do dropdown, e
+        // uma acao secundaria/de apoio, mesma hierarquia visual do resto do
+        // app (Executar em destaque, Formatar/Explicar em contorno).
+        Buttons.bindThemedIcon(novo, IconType.NEW, 13, () -> GridTheme.BRAND_GREEN);
+        novo.setIconTextGap(6);
+        Buttons.styleSecondary(novo);
         novo.setToolTipText("Nova conexao");
         novo.addActionListener(e -> onNew());
-
-        JPanel titleRow = new JPanel(new BorderLayout());
-        titleRow.setOpaque(false);
-        titleRow.add(title, BorderLayout.WEST);
-        titleRow.add(novo, BorderLayout.EAST);
 
         // Busca por nome/host/schema — pedido explicito do usuario, que tem
         // ~15 conexoes salvas na empresa e precisava de um jeito rapido de
@@ -162,16 +156,23 @@ public class ConnectionsPanel extends JPanel {
         // do campo de busca do SavedQueriesPanel).
         search.onTextChange(this::applyFilter);
 
-        JPanel header = new JPanel(new BorderLayout(0, 6));
+        JPanel header = new JPanel(new BorderLayout(Spacing.SM, 0));
         header.setOpaque(false);
-        header.add(titleRow, BorderLayout.NORTH);
-        header.add(search, BorderLayout.SOUTH);
+        header.add(search, BorderLayout.CENTER);
+        header.add(novo, BorderLayout.EAST);
         return header;
     }
 
     private JComponent buildList() {
         list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-        list.setFixedCellHeight(DEFAULT_ROW_HEIGHT);
+        // SEM altura fixa (nao mais list.setFixedCellHeight(24)):
+        // o cartao de 2 linhas do ConnectionRenderer (nome + usuario@host:porta,
+        // mais icones) precisa de mais altura que a linha unica de antes —
+        // uma altura FIXA cortaria a segunda linha. Sem fixedCellHeight, o
+        // JList mede a altura de cada linha pelo PROPRIO preferredSize do
+        // renderer, que já reflete zoom (fonte escala com o resto do app via
+        // UIManager, ver MainWindow#applyZoomFont) sem precisar de um numero
+        // calculado a parte — ver {@link #setRowHeight}.
         // Sem isto, JList usa o default de 8 linhas "fantasma" pra calcular a
         // altura PREFERIDA (Scrollable#getPreferredScrollableViewportSize),
         // mesmo com a lista vazia ou com so 1-2 itens de verdade — na sidebar
@@ -200,6 +201,15 @@ public class ConnectionsPanel extends JPanel {
             public void mouseClicked(MouseEvent e) {
                 if (e.getClickCount() == 2) {
                     connectSelected();
+                    return;
+                }
+                // Icone "..." de cada linha (ver ConnectionRenderer): abre o
+                // MESMO menu do clique direito, so que com um alvo visivel e
+                // descobrivel — pedido explicito do usuario ("verifique uma
+                // forma boa para o funcionamento e design" apos uma
+                // referencia visual mostrando esse icone em cada linha).
+                if (e.getClickCount() == 1 && isMenuIconClick(e)) {
+                    showRowMenu(e.getPoint());
                 }
             }
 
@@ -230,32 +240,25 @@ public class ConnectionsPanel extends JPanel {
      * manter um UNICO "idioma" de estado vazio em toda a IDE.
      */
     private JComponent buildEmptyState() {
-        JLabel icon = new JLabel();
-        Buttons.bindThemedIcon(icon, IconType.CONNECTION, 40, () -> GridTheme.MUTED_TEXT);
-        icon.setAlignmentX(Component.CENTER_ALIGNMENT);
+        // NEmptyState (design system, ver seu javadoc): ponto UNICO da
+        // receita "icone + titulo + subtitulo" — antes esta era uma de 4
+        // copias praticamente identicas (achado numa auditoria pedida pelo
+        // usuario) ja com metricas divergentes entre si.
+        NEmptyState state = new NEmptyState(IconType.CONNECTION, "", "");
+        emptyTitle = state.titleLabel();
+        emptySub = state.subtitleLabel();
 
-        emptyTitle = new JLabel();
-        emptyTitle.setFont(emptyTitle.getFont().deriveFont(13f));
-        Typography.primary(emptyTitle);
-        emptyTitle.setAlignmentX(Component.CENTER_ALIGNMENT);
-
-        emptySub = new JLabel();
-        Typography.tertiary(emptySub);
-        emptySub.setAlignmentX(Component.CENTER_ALIGNMENT);
-
-        JPanel box = new JPanel();
-        box.setOpaque(false);
-        box.setLayout(new BoxLayout(box, BoxLayout.Y_AXIS));
-        box.add(icon);
-        box.add(Box.createVerticalStrut(10));
-        box.add(emptyTitle);
-        box.add(Box.createVerticalStrut(2));
-        box.add(emptySub);
-
-        JPanel center = new JPanel(new GridBagLayout());
-        center.setOpaque(false);
-        center.add(box);
-        return center;
+        // CTA visivel so quando NAO ha NENHUMA conexao cadastrada (ver
+        // #updateEmptyState) — visual trazido pelo usuario ("+ Criar nova
+        // conexao"). Mesma acao do botao "Nova conexao" do cabecalho
+        // ({@link #onNew()}), nenhuma logica nova.
+        emptyCreateButton = new JButton("Criar nova conexao");
+        Buttons.bindThemedIcon(emptyCreateButton, IconType.NEW, 14, () -> Color.WHITE);
+        emptyCreateButton.setIconTextGap(6);
+        Buttons.stylePrimary(emptyCreateButton);
+        emptyCreateButton.addActionListener(e -> onNew());
+        state.addAction(emptyCreateButton);
+        return state;
     }
 
     /**
@@ -271,12 +274,16 @@ public class ConnectionsPanel extends JPanel {
             return;
         }
         String query = search.getText() == null ? "" : search.getText().trim();
-        if (all.isEmpty()) {
+        boolean nothingCreatedYet = all.isEmpty();
+        if (nothingCreatedYet) {
             emptyTitle.setText("Nenhuma conexao cadastrada");
-            emptySub.setText("Clique em + para criar a primeira");
+            emptySub.setText("Crie sua primeira conexao para comecar");
         } else {
             emptyTitle.setText("Nenhuma conexao encontrada");
             emptySub.setText(query.isEmpty() ? "Tente outro termo de busca" : "Nada bate com \"" + query + "\"");
+        }
+        if (emptyCreateButton != null) {
+            emptyCreateButton.setVisible(nothingCreatedYet);
         }
     }
 
@@ -284,7 +291,32 @@ public class ConnectionsPanel extends JPanel {
         if (!e.isPopupTrigger()) {
             return;
         }
+        showRowMenu(e.getPoint());
+    }
+
+    /**
+     * Zona clicavel do icone "..." de cada linha (ver {@link ConnectionRenderer}):
+     * faixa fixa na ponta direita da celula, mesma largura reservada no
+     * renderer ({@link ConnectionRenderer#MENU_ICON_ZONE_WIDTH}) — mesma
+     * receita ja usada em {@code ResultTableHeader#filterIconAtPoint} pro
+     * icone de funil do cabecalho da grade.
+     */
+    private boolean isMenuIconClick(MouseEvent e) {
         int idx = list.locationToIndex(e.getPoint());
+        if (idx < 0) {
+            return false;
+        }
+        java.awt.Rectangle cell = list.getCellBounds(idx, idx);
+        if (cell == null) {
+            return false;
+        }
+        int zoneStart = cell.x + cell.width - ConnectionRenderer.MENU_ICON_ZONE_WIDTH;
+        return e.getX() >= zoneStart;
+    }
+
+    /** Menu de contexto (Conectar/Desconectar/Editar/Excluir) da linha sob {@code point} — usado tanto pelo clique direito ({@link #maybeMenu}) quanto pelo icone "..." visivel em cada linha ({@link #isMenuIconClick}). */
+    private void showRowMenu(java.awt.Point point) {
+        int idx = list.locationToIndex(point);
         if (idx >= 0) {
             list.setSelectedIndex(idx);
         }
@@ -315,7 +347,28 @@ public class ConnectionsPanel extends JPanel {
         menu.addSeparator();
         menu.add(edit);
         menu.add(delete);
-        menu.show(list, e.getX(), e.getY());
+        menu.show(list, point.x, point.y);
+    }
+
+    /** Ver javadoc de {@link #ownerOverride}. */
+    void setOwnerWindow(Window w) {
+        this.ownerOverride = w;
+    }
+
+    /** Janela/componente usado como dono de dialogos abertos por este painel — ver {@link #ownerOverride}. */
+    private Component dialogOwner() {
+        return (ownerOverride != null) ? ownerOverride : DialogUtil.owner(this);
+    }
+
+    /**
+     * Abre "Nova conexao" de fora (ver {@code MainWindow}, botao "+ Nova
+     * conexao" da barra de conexao no topo da janela) — MESMA logica do
+     * botao "+" do cabecalho deste painel ({@link #onNew()}), so exposta
+     * como ponto de entrada publico pra nao duplicar a criacao/validacao/
+     * persistencia de uma nova conexao em dois lugares.
+     */
+    public void createNewConnection() {
+        onNew();
     }
 
     /** Recarrega a lista a partir do arquivo. */
@@ -326,7 +379,7 @@ public class ConnectionsPanel extends JPanel {
             all = new ArrayList<>();
             // Centraliza na JANELA (nao neste painel, que fica na lateral) —
             // ver DialogUtil.
-            JOptionPane.showMessageDialog(DialogUtil.owner(this),
+            JOptionPane.showMessageDialog(dialogOwner(),
                     "Nao foi possivel ler as conexoes:\n" + e.getMessage(),
                     "Conexoes", JOptionPane.WARNING_MESSAGE);
         }
@@ -417,7 +470,7 @@ public class ConnectionsPanel extends JPanel {
         try {
             store.save(all);
         } catch (IOException e) {
-            JOptionPane.showMessageDialog(DialogUtil.owner(this),
+            JOptionPane.showMessageDialog(dialogOwner(),
                     "Nao foi possivel salvar as conexoes:\n" + e.getMessage(),
                     "Conexoes", JOptionPane.ERROR_MESSAGE);
         }
@@ -457,7 +510,7 @@ public class ConnectionsPanel extends JPanel {
     }
 
     private void onNew() {
-        ConnectionProfile created = ConnectionEditDialog.show(this, null, name -> nameTaken(name, null));
+        ConnectionProfile created = ConnectionEditDialog.show(dialogOwner(), null, name -> nameTaken(name, null));
         if (created != null) {
             all.add(created);
             persist();
@@ -471,7 +524,7 @@ public class ConnectionsPanel extends JPanel {
         if (selected == null) {
             return;
         }
-        ConnectionProfile edited = ConnectionEditDialog.show(this, selected, name -> nameTaken(name, selected));
+        ConnectionProfile edited = ConnectionEditDialog.show(dialogOwner(), selected, name -> nameTaken(name, selected));
         if (edited != null) {
             int idx = all.indexOf(selected);
             if (idx >= 0) {
@@ -506,9 +559,15 @@ public class ConnectionsPanel extends JPanel {
         if (p == null) {
             return;
         }
-        int ok = JOptionPane.showConfirmDialog(DialogUtil.owner(this),
+        // WARNING_MESSAGE (nao mais o icone de pergunta padrao): mesmo
+        // icone que ObjectDdlActions ja usa pra confirmar exclusao de view/
+        // trigger/rotina — os dois sao acoes IRREVERSIVEIS, entao devem
+        // parecer igualmente alarmantes (inconsistencia encontrada numa
+        // auditoria pedida pelo usuario: excluir uma conexao parecia mais
+        // "neutro" que excluir um objeto do banco).
+        int ok = JOptionPane.showConfirmDialog(dialogOwner(),
                 "Excluir a conexao \"" + p.name() + "\"?",
-                "Excluir conexao", JOptionPane.YES_NO_OPTION);
+                "Excluir conexao", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
         if (ok == JOptionPane.YES_OPTION) {
             all.remove(p);
             persist();
@@ -540,9 +599,18 @@ public class ConnectionsPanel extends JPanel {
         search.setText(text);
     }
 
-    /** Ajusta a altura de cada cartao da lista (usado pelo zoom/modo compacto). */
+    /**
+     * Chamado pelo zoom/modo compacto (ver {@code MainWindow#refreshDynamicSizing})
+     * pra manter a densidade das listas do app em sincronia — DELIBERADAMENTE
+     * NAO forca mais uma altura fixa por linha aqui: o cartao de 2 linhas do
+     * {@link ConnectionRenderer} (nome + usuario@host:porta, mais icones)
+     * precisa de mais altura que a linha unica que este numero foi pensado
+     * pra descrever, e a fonte ja escala sozinha com o zoom (ver
+     * MainWindow#applyZoomFont), entao o JList mede a altura certa por conta
+     * propria a partir do preferredSize do renderer. Mantido como metodo (em
+     * vez de remover) pra nao quebrar o chamador existente.
+     */
     public void setRowHeight(int height) {
-        list.setFixedCellHeight(height);
         list.revalidate();
         list.repaint();
     }
@@ -583,111 +651,155 @@ public class ConnectionsPanel extends JPanel {
 
     /**
      * Pequeno circulo de status (verde = conectado, ambar = conectando, cinza
-     * = desconectado). Visibilidade de pacote (nao private): reaproveitado
-     * por {@link ObjectTreeCellRenderer} para a MESMA bolinha na raiz da
-     * arvore de objetos (schema), garantindo o mesmo indicador visual da
-     * conexao em dois lugares diferentes da UI.
+     * = desconectado), 10px. Visibilidade de pacote (nao private):
+     * reaproveitado por {@link ObjectTreeCellRenderer} para a MESMA bolinha
+     * na raiz da arvore de objetos (schema), garantindo o mesmo indicador
+     * visual da conexao em dois lugares diferentes da UI.
+     * <p>
+     * Delega pro MESMO {@code IconType.STATUS_DOT} do design system que
+     * {@code ConnectionStatusCard}/{@code HistoryPanel} ja usam (em vez de
+     * pintar um oval a mao aqui) — antes existiam DUAS implementacoes
+     * independentes do mesmo conceito visual (uma pintada a mao aqui, outra
+     * via {@code Icons.get} nos outros dois lugares), achado numa auditoria
+     * pedida pelo usuario. Mantido como metodo/assinatura proprios (em vez
+     * de trocar os 4 chamadores pra {@code Icons.get} direto) so pra nao
+     * mexer em call sites que ja funcionam — a UNICA pintura de verdade
+     * agora mora em {@link Icons}.
      */
     static Icon statusDot(Color color) {
-        return new Icon() {
-            @Override
-            public int getIconWidth() {
-                return 10;
-            }
-
-            @Override
-            public int getIconHeight() {
-                return 10;
-            }
-
-            @Override
-            public void paintIcon(Component c, Graphics g, int x, int y) {
-                Graphics2D g2 = (Graphics2D) g.create();
-                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
-                        RenderingHints.VALUE_ANTIALIAS_ON);
-                g2.setColor(color);
-                g2.fillOval(x + 1, y + 1, 8, 8);
-                g2.dispose();
-            }
-        };
+        return Icons.get(IconType.STATUS_DOT, 10, color);
     }
 
     /**
-     * Renderiza cada conexao como uma linha compacta: status + so o nome
-     * dado pelo usuario (sem a segunda linha "usuario@host:porta/schema") —
-     * pedido explicito de quem tem muitas conexoes salvas (~15 na empresa) e
-     * queria ver mais linhas de uma vez sem rolar. O destino completo continua
-     * disponivel via tooltip, para quem precisar conferir sem abrir "Editar".
+     * Renderiza cada conexao como um cartao de 2 linhas (nome em destaque +
+     * "usuario@host:porta" discreto), com icone de status, icone de banco,
+     * selo "ATUAL" e um icone "..." pra abrir o mesmo menu do clique direito
+     * — visual alinhado a uma referencia trazida pelo usuario. NAO e mais um
+     * {@code JLabel} ({@code DefaultListCellRenderer}), e sim um
+     * {@code JPanel} com sub-componentes proprios: um label so aceita UMA
+     * linha/icone, e o cartao da referencia precisa de duas linhas de texto
+     * mais 3 icones.
      */
-    private final class ConnectionRenderer extends javax.swing.DefaultListCellRenderer {
+    private final class ConnectionRenderer extends JPanel implements javax.swing.ListCellRenderer<ConnectionProfile> {
         private static final long serialVersionUID = 1L;
 
+        /** Largura da faixa clicavel do icone "..." (ver {@link ConnectionsPanel#isMenuIconClick}). */
+        static final int MENU_ICON_ZONE_WIDTH = 30;
+
+        private final JLabel dot = new JLabel();
+        private final JLabel dbIcon = new JLabel();
+        private final JLabel nameLabel = new JLabel();
+        private final JLabel subLabel = new JLabel();
+        private final JLabel menuIcon = new JLabel();
+        private final JPanel trailing = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
+
+        ConnectionRenderer() {
+            super(new BorderLayout(8, 0));
+            setOpaque(false);
+            setBorder(BorderFactory.createEmptyBorder(6, 12, 6, 8));
+
+            JPanel leadingIcons = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
+            leadingIcons.setOpaque(false);
+            leadingIcons.add(dot);
+            leadingIcons.add(dbIcon);
+
+            JPanel textStack = new JPanel();
+            textStack.setOpaque(false);
+            textStack.setLayout(new BoxLayout(textStack, BoxLayout.Y_AXIS));
+            nameLabel.setAlignmentX(LEFT_ALIGNMENT);
+            subLabel.setAlignmentX(LEFT_ALIGNMENT);
+            subLabel.setFont(subLabel.getFont().deriveFont(10f));
+            textStack.add(nameLabel);
+            textStack.add(subLabel);
+
+            trailing.setOpaque(false);
+            Buttons.bindThemedIcon(menuIcon, IconType.MORE, 16, () -> GridTheme.MUTED_TEXT);
+            menuIcon.setToolTipText("Conectar, editar ou excluir");
+
+            add(leadingIcons, BorderLayout.WEST);
+            add(textStack, BorderLayout.CENTER);
+            add(trailing, BorderLayout.EAST);
+        }
+
         @Override
-        public Component getListCellRendererComponent(
-                JList<?> list, Object value, int index,
-                boolean isSelected, boolean cellHasFocus) {
-            super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
-            setHorizontalAlignment(SwingConstants.LEFT);
-            setBorder(BorderFactory.createEmptyBorder(4, 12, 4, 12));
-            setIconTextGap(10);
+        public Component getListCellRendererComponent(JList<? extends ConnectionProfile> list, ConnectionProfile p,
+                int index, boolean isSelected, boolean cellHasFocus) {
+            setOpaque(false);
+            setBackground(null);
             // Hover (linha sob o mouse, sem selecionar) — mesmo destaque suave
             // da arvore de Objetos e da grade de resultados (ver
-            // TreeHoverTracker/GridTheme.HOVER_BACKGROUND); faltava aqui antes.
-            // Selecao sempre tem prioridade visual: so pinta hover quando a
-            // linha NAO esta selecionada.
+            // TreeHoverTracker/GridTheme.HOVER_BACKGROUND). Selecao sempre
+            // tem prioridade visual: so pinta hover quando a linha NAO esta
+            // selecionada.
             boolean hovered = !isSelected && index == TreeHoverTracker.hoverRow(list);
-            if (hovered) {
+            if (isSelected) {
+                setOpaque(true);
+                setBackground(list.getSelectionBackground());
+            } else if (hovered) {
                 setOpaque(true);
                 setBackground(GridTheme.HOVER_BACKGROUND);
             }
-            if (value instanceof ConnectionProfile p) {
-                // Cor do dot: status de conexao (conectado/conectando/ocioso) —
-                // sinal PRINCIPAL, nao muda com a identidade do workspace.
-                // A tarja lateral (cor propria da conexao, ver
-                // #colorForWorkspace) so aparece na conexao ATIVA
-                // (a dona das abas visiveis no editor agora, ver setActiveName) —
-                // com varias conectadas ao mesmo tempo, e o unico jeito de saber
-                // qual delas e a que esta na tela sem clicar em cada uma.
-                Color dotColor;
-                boolean connected = connectedNames.contains(p.name());
-                boolean active = p.name().equals(activeName);
-                if (connected) {
-                    // Mesmo verde de MainWindow#setConnectedState (ACCENT da
-                    // marca) — antes um literal PROPRIO (0x059669, que so por
-                    // coincidencia ja era EXATAMENTE o mesmo valor de ACCENT).
-                    dotColor = MainWindow.ACCENT;
-                } else if (p.name().equals(connectingName)) {
-                    // Mesmo ambar de MainWindow#setConnectingState.
-                    dotColor = GridTheme.HEADER_HIGHLIGHT_BORDER;
-                } else {
-                    dotColor = new Color(0xC4C9D1);
-                }
-                setIcon(statusDot(dotColor));
-                setBorder(active
-                        ? BorderFactory.createCompoundBorder(
-                                BorderFactory.createMatteBorder(0, 3, 0, 0, colorForWorkspace(p.name())),
-                                BorderFactory.createEmptyBorder(4, 9, 4, 12))
-                        : BorderFactory.createEmptyBorder(4, 12, 4, 12));
-                // Tarja lateral (acima) sozinha e sutil demais pra "achar" a
-                // workspace ativa numa lista de ~15 conexoes so de bater o
-                // olho (precisa reparar na borda fina de 3px). Um tingimento
-                // MUITO leve (12%) da mesma cor de identidade no fundo inteiro
-                // da linha da o mesmo sinal com muito mais area — so quando
-                // nem selecionada nem em hover, que continuam com prioridade
-                // visual maior (ver acima).
-                if (active && !isSelected && !hovered) {
-                    setOpaque(true);
-                    setBackground(tint(list.getBackground(), colorForWorkspace(p.name()), 0.12f));
-                }
-                // A tarja lateral colorida (acima) e o UNICO sinal hoje de
-                // qual conexao esta ativa — quem nao distingue bem cor (ou so
-                // olhou rapido) nao teria como saber sem ela. Sufixo textual
-                // simples como segundo sinal, independente de cor (pedido da
-                // revisao: "identificar... sem depender apenas de cores").
-                setText(active ? p.name() + "  ·  atual" : p.name());
-                setFont(getFont().deriveFont(connectedNames.contains(p.name()) ? Font.BOLD : Font.PLAIN));
-                setToolTipText(p.user() + "@" + p.host() + ":" + p.port() + "/" + p.schema());
+
+            // Cor do dot: status de conexao (conectado/conectando/ocioso) —
+            // sinal PRINCIPAL, nao muda com a identidade do workspace. A
+            // tarja lateral (cor propria da conexao, ver #colorForWorkspace)
+            // so aparece na conexao ATIVA (a dona das abas visiveis no
+            // editor agora, ver setActiveName) — com varias conectadas ao
+            // mesmo tempo, e o unico jeito de saber qual delas esta na tela
+            // sem clicar em cada uma.
+            Color dotColor;
+            boolean connected = connectedNames.contains(p.name());
+            boolean active = p.name().equals(activeName);
+            if (connected) {
+                // Mesmo verde de MainWindow#setConnectedState (ACCENT da
+                // marca) — antes um literal PROPRIO (0x059669, que so por
+                // coincidencia ja era EXATAMENTE o mesmo valor de ACCENT).
+                dotColor = MainWindow.ACCENT;
+            } else if (p.name().equals(connectingName)) {
+                // Mesmo ambar de MainWindow#setConnectingState.
+                dotColor = GridTheme.HEADER_HIGHLIGHT_BORDER;
+            } else {
+                dotColor = new Color(0xC4C9D1);
             }
+            dot.setIcon(statusDot(dotColor));
+            Buttons.bindThemedIcon(dbIcon, IconType.DATABASE, 14, () -> GridTheme.MUTED_TEXT);
+
+            setBorder(active
+                    ? BorderFactory.createCompoundBorder(
+                            BorderFactory.createMatteBorder(0, 3, 0, 0, colorForWorkspace(p.name())),
+                            BorderFactory.createEmptyBorder(6, 9, 6, 8))
+                    : BorderFactory.createEmptyBorder(6, 12, 6, 8));
+            // Tarja lateral (acima) sozinha e sutil demais pra "achar" a
+            // workspace ativa numa lista de ~15 conexoes so de bater o
+            // olho (precisa reparar na borda fina de 3px). Um tingimento
+            // MUITO leve (12%) da mesma cor de identidade no fundo inteiro
+            // da linha da o mesmo sinal com muito mais area — so quando
+            // nem selecionada nem em hover, que continuam com prioridade
+            // visual maior (ver acima).
+            if (active && !isSelected && !hovered) {
+                setOpaque(true);
+                setBackground(tint(list.getBackground(), colorForWorkspace(p.name()), 0.12f));
+            }
+
+            nameLabel.setForeground(isSelected ? list.getSelectionForeground() : GridTheme.HEADER_FOREGROUND);
+            nameLabel.setFont(nameLabel.getFont().deriveFont(connected ? Font.BOLD : Font.PLAIN, 12f));
+            nameLabel.setText(p.name());
+            subLabel.setForeground(isSelected ? list.getSelectionForeground() : GridTheme.MUTED_TEXT);
+            subLabel.setText(p.user() + "@" + p.host() + ":" + p.port());
+
+            // "ATUAL" (selo, nao mais um sufixo de texto colado no nome) —
+            // o UNICO sinal antes disto era a tarja lateral colorida; um
+            // segundo sinal independente de cor continua valendo (pedido da
+            // revisao: "identificar... sem depender apenas de cores"), so
+            // que agora como selo visivel (mesma linguagem do NBadge usado
+            // no resto do app) em vez de "  ·  atual" grudado no nome.
+            trailing.removeAll();
+            if (active) {
+                trailing.add(new NBadge("ATUAL", NAccent.NEUTRAL));
+            }
+            trailing.add(menuIcon);
+
+            setToolTipText(p.user() + "@" + p.host() + ":" + p.port() + "/" + p.schema());
             return this;
         }
     }

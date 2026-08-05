@@ -3,6 +3,7 @@ import com.nureal.ide.compartilhado.designsystem.Buttons;
 import com.nureal.ide.compartilhado.designsystem.IconType;
 import com.nureal.ide.compartilhado.designsystem.Typography;
 import com.nureal.ide.compartilhado.designsystem.GridTheme;
+import com.nureal.ide.compartilhado.designsystem.NEmptyState;
 
 import com.nureal.ide.core.log.AppLogger;
 import com.nureal.ide.modulos.historico.infraestrutura.SavedQueryStore;
@@ -26,15 +27,10 @@ import javax.swing.ListSelectionModel;
 import javax.swing.SwingConstants;
 import java.awt.BorderLayout;
 import java.awt.CardLayout;
-import java.awt.Color;
 import java.awt.Component;
-import java.awt.GridBagLayout;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.io.IOException;
-import java.time.Instant;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -165,32 +161,13 @@ public class SavedQueriesPanel extends JPanel {
      * simplesmente ficava em branco quando vazia).
      */
     private JComponent buildEmptyState() {
-        JLabel icon = new JLabel();
-        Buttons.bindThemedIcon(icon, IconType.SAVE, 40, () -> GridTheme.MUTED_TEXT);
-        icon.setAlignmentX(Component.CENTER_ALIGNMENT);
-
-        emptyTitle = new JLabel();
-        emptyTitle.setFont(emptyTitle.getFont().deriveFont(13f));
-        Typography.primary(emptyTitle);
-        emptyTitle.setAlignmentX(Component.CENTER_ALIGNMENT);
-
-        emptySub = new JLabel();
-        Typography.tertiary(emptySub);
-        emptySub.setAlignmentX(Component.CENTER_ALIGNMENT);
-
-        JPanel box = new JPanel();
-        box.setOpaque(false);
-        box.setLayout(new BoxLayout(box, BoxLayout.Y_AXIS));
-        box.add(icon);
-        box.add(Box.createVerticalStrut(10));
-        box.add(emptyTitle);
-        box.add(Box.createVerticalStrut(2));
-        box.add(emptySub);
-
-        JPanel center = new JPanel(new GridBagLayout());
-        center.setOpaque(false);
-        center.add(box);
-        return center;
+        // NEmptyState (design system): ponto UNICO da receita "icone +
+        // titulo + subtitulo" — antes esta era uma de 4 copias praticamente
+        // identicas (achado numa auditoria pedida pelo usuario).
+        NEmptyState state = new NEmptyState(IconType.SAVE, "", "");
+        emptyTitle = state.titleLabel();
+        emptySub = state.subtitleLabel();
+        return state;
     }
 
     /** Mostra a lista ou o estado vazio, com o texto certo pro caso (sem query salva ainda vs. busca sem resultado). */
@@ -270,9 +247,12 @@ public class SavedQueriesPanel extends JPanel {
     }
 
     private void deleteSelected(Query q) {
+        // WARNING_MESSAGE: mesmo icone usado nas demais confirmacoes de
+        // acao irreversivel do app (ver ConnectionsPanel#onDelete) —
+        // inconsistencia encontrada numa auditoria pedida pelo usuario.
         int ok = JOptionPane.showConfirmDialog(DialogUtil.owner(this),
                 "Excluir a query \"" + q.title() + "\"? Esta acao nao pode ser desfeita.",
-                "Excluir query", JOptionPane.YES_NO_OPTION);
+                "Excluir query", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
         if (ok != JOptionPane.YES_OPTION) {
             return;
         }
@@ -347,34 +327,6 @@ public class SavedQueriesPanel extends JPanel {
         updateEmptyState(filtered.isEmpty());
     }
 
-    private static String relativeTime(long epochMillis) {
-        if (epochMillis <= 0) {
-            return "";
-        }
-        long diffSec = Math.max(0, (System.currentTimeMillis() - epochMillis) / 1000);
-        if (diffSec < 60) {
-            return "agora";
-        }
-        long min = diffSec / 60;
-        if (min < 60) {
-            return "ha " + min + " min";
-        }
-        long hours = min / 60;
-        if (hours < 24) {
-            return "ha " + hours + "h";
-        }
-        long days = hours / 24;
-        if (days < 7) {
-            return "ha " + days + " dia(s)";
-        }
-        return absoluteTime(epochMillis);
-    }
-
-    private static String absoluteTime(long epochMillis) {
-        return DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm:ss")
-                .format(Instant.ofEpochMilli(epochMillis).atZone(ZoneId.systemDefault()));
-    }
-
     /** Cartao de cada query: estrela (se favorita) + titulo em negrito + "atualizado ha X". */
     private final class QueryRenderer extends DefaultListCellRenderer {
         private static final long serialVersionUID = 1L;
@@ -385,29 +337,31 @@ public class SavedQueriesPanel extends JPanel {
             super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
             setHorizontalAlignment(SwingConstants.LEFT);
             setBorder(BorderFactory.createEmptyBorder(6, 12, 6, 12));
+            // Hover (linha sob o mouse, sem selecionar) — mesmo destaque
+            // suave de ConnectionsPanel#ConnectionRenderer/arvore de
+            // Objetos/grade de resultados (GridTheme.HOVER_BACKGROUND);
+            // faltava aqui apesar do painel ja instalar TreeHoverTracker —
+            // inconsistencia encontrada numa auditoria pedida pelo usuario.
+            // Selecao sempre tem prioridade visual.
+            boolean hovered = !isSelected && index == TreeHoverTracker.hoverRow(list);
+            if (hovered) {
+                setOpaque(true);
+                setBackground(GridTheme.HOVER_BACKGROUND);
+            }
             if (value instanceof Query q) {
                 // Cor de selecao ja e o cinza neutro (ver #buildList), nao mais
                 // o verde solido do L&F — sub-texto acompanha a MESMA cor de
                 // selecao/mudo reativa ao tema, nao dois literais proprios.
-                String subColor = hex(isSelected ? GridTheme.SELECTION_FOREGROUND : GridTheme.MUTED_TEXT);
+                String subColor = HtmlText.hex(isSelected ? GridTheme.SELECTION_FOREGROUND : GridTheme.MUTED_TEXT);
                 String family = getFont().getFamily();
                 String star = q.favorite() ? "★ " : "";
                 setText("<html><div style='font-family:" + family + ";line-height:1.5'>"
-                        + star + "<b>" + escape(q.title()) + "</b><br>"
+                        + star + "<b>" + HtmlText.escape(q.title()) + "</b><br>"
                         + "<span style='color:" + subColor + ";font-size:10px'>"
-                        + escape(relativeTime(q.updatedAt())) + "</span></div></html>");
-                setToolTipText("Atualizado em " + absoluteTime(q.updatedAt()));
+                        + HtmlText.escape(RelativeTime.relative(q.updatedAt())) + "</span></div></html>");
+                setToolTipText("Atualizado em " + RelativeTime.absolute(q.updatedAt()));
             }
             return this;
-        }
-
-        private static String escape(String s) {
-            return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
-        }
-
-        /** Mesma conversao Color->hex de {@code ObjectTreeCellRenderer#columnHtml} — HTML embutido so aceita string. */
-        private static String hex(Color c) {
-            return String.format("#%06X", c.getRGB() & 0xFFFFFF);
         }
     }
 }

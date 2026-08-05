@@ -145,8 +145,18 @@ final class SmartCellFilter {
         return null;
     }
 
-    /** Interpreta numero (aceita 1234.56 e 1.234,56); null se nao for numero. */
-    private static Double parseNumber(String raw) {
+    /**
+     * Interpreta numero (aceita 1234.56 e 1.234,56); null se nao for numero.
+     * Visibilidade de pacote (nao {@code private}): tambem usado por
+     * {@link ColumnValueFilter#newSortedSet} pra ordenar a lista do popup de
+     * autofiltro — o javadoc de {@code newSortedSet} ja dizia "mesma logica
+     * de comparacao do SmartCellFilter", mas antes desta correcao ele
+     * reimplementava um {@code Double.parseDouble} cru em vez de chamar
+     * este metodo, entao um valor em formato BR ("1.234,56") ordenava como
+     * TEXTO no popup mesmo sendo reconhecido como numero na barra de
+     * filtro — divergencia encontrada numa auditoria pedida pelo usuario.
+     */
+    static Double parseNumber(String raw) {
         if (raw == null) {
             return null;
         }

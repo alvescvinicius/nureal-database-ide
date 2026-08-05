@@ -54,6 +54,11 @@ final class SqlExecutionEngine {
 			}
 			String sql = statements.get(i);
 			int n = i + 1;
+			// Kind calculado ANTES de rodar (so olha o texto): usado tanto no
+			// titulo de sucesso quanto no de erro, pra uma instrucao que falha
+			// ainda mostrar um nome reconhecivel (ex.: "DELETE log_acesso" em
+			// vermelho) em vez do generico "Erro N" sempre que possivel.
+			SqlStatementLabel.Kind kind = SqlStatementLabel.kindOf(sql);
 			long t0 = System.nanoTime();
 			Statement st = null;
 			try {
@@ -63,7 +68,7 @@ final class SqlExecutionEngine {
 				onStatementChange.accept(st);
 				boolean hasResultSet = st.execute(sql);
 				long execMs = (System.nanoTime() - t0) / 1_000_000L;
-				results.add(buildStatementResult(st, sql, n, hasResultSet, execMs));
+				results.add(buildStatementResult(st, sql, n, kind, hasResultSet, execMs));
 			} catch (SQLException ex) {
 				if (st != null) {
 					try {
@@ -73,7 +78,8 @@ final class SqlExecutionEngine {
 					}
 				}
 				long execMs = (System.nanoTime() - t0) / 1_000_000L;
-				results.add(QueryResult.message("Erro " + n, sql, "Erro: " + ex.getMessage(), true, execMs));
+				String title = SqlStatementLabel.title(sql, kind, "Erro " + n);
+				results.add(QueryResult.message(title, sql, "Erro: " + ex.getMessage(), true, execMs));
 				break;
 			} finally {
 				onStatementChange.accept(null);
@@ -83,27 +89,47 @@ final class SqlExecutionEngine {
 	}
 
 	/** Monta o {@link QueryResult} de UMA instrucao ja executada com sucesso (grade de linhas OU contagem afetada). */
-	private static QueryResult buildStatementResult(Statement st, String sql, int n, boolean hasResultSet, long execMs)
-			throws SQLException {
+	private static QueryResult buildStatementResult(Statement st, String sql, int n, SqlStatementLabel.Kind kind,
+			boolean hasResultSet, long execMs) throws SQLException {
 		if (hasResultSet) {
 			ResultSet rs = st.getResultSet();
-			ResultTableModel model = createModel(rs);
-			long t1 = System.nanoTime();
-			int read = appendPage(model, rs, PAGE_SIZE);
-			long fetchMs = (System.nanoTime() - t1) / 1_000_000L;
-			boolean hasMore = read == PAGE_SIZE;
-			ResultCursor cursor = null;
-			if (hasMore) {
-				cursor = new ResultCursor(st, rs);
-			} else {
-				rs.close();
-				st.close();
+			// try/catch explicito (nao so confiar no fechamento em cascata
+			// de rs quando o CHAMADOR fecha st no catch dele, ver
+			// #executeStatements): se createModel/appendPage lancar no meio
+			// da leitura, rs nunca era fechado por ESTE metodo — funcionava
+			// na pratica com drivers JDBC que fecham ResultSets abertos ao
+			// fechar o Statement pai (MySQL Connector/J faz isso), mas nao e
+			// garantido pela API, e nenhum ResultCursor seria criado pra
+			// rastrear esse rs em openCursors — achado numa auditoria
+			// pedida pelo usuario.
+			try {
+				ResultTableModel model = createModel(rs);
+				long t1 = System.nanoTime();
+				int read = appendPage(model, rs, PAGE_SIZE);
+				long fetchMs = (System.nanoTime() - t1) / 1_000_000L;
+				boolean hasMore = read == PAGE_SIZE;
+				ResultCursor cursor = null;
+				if (hasMore) {
+					cursor = new ResultCursor(st, rs);
+				} else {
+					rs.close();
+					st.close();
+				}
+				String title = SqlStatementLabel.title(sql, kind, "Resultado " + n);
+				return QueryResult.grid(title, sql, model, execMs, fetchMs, cursor);
+			} catch (SQLException | RuntimeException ex) {
+				try {
+					rs.close();
+				} catch (SQLException ignore) {
+					// ignora
+				}
+				throw ex;
 			}
-			return QueryResult.grid("Resultado " + n, sql, model, execMs, fetchMs, cursor);
 		}
 		int updated = st.getUpdateCount();
 		st.close();
-		return QueryResult.message("Comando " + n, sql, updated + " linha(s) afetada(s)", false, execMs);
+		String title = SqlStatementLabel.title(sql, kind, "Comando " + n);
+		return QueryResult.message(title, sql, updated + " linha(s) afetada(s)", false, execMs);
 	}
 
 	/**

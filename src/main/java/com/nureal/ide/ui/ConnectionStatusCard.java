@@ -4,38 +4,55 @@ import com.nureal.ide.compartilhado.designsystem.Icons;
 import com.nureal.ide.compartilhado.designsystem.Buttons;
 import com.nureal.ide.compartilhado.designsystem.Typography;
 import com.nureal.ide.compartilhado.designsystem.GridTheme;
+import com.nureal.ide.compartilhado.designsystem.Spacing;
 
 import java.awt.BorderLayout;
 import java.awt.Color;
+import java.awt.Component;
 import java.awt.Cursor;
+import java.awt.Dimension;
 import java.awt.FlowLayout;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.util.List;
 import java.util.function.Consumer;
 
+import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JCheckBoxMenuItem;
+import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
 
 import com.nureal.ide.compartilhado.designsystem.NAccent;
 import com.nureal.ide.compartilhado.designsystem.NBadge;
-import com.nureal.ide.compartilhado.designsystem.NCard;
+import com.nureal.ide.compartilhado.designsystem.NTheme;
 
 /**
- * Card "Conexao Ativa" da sidebar (SPEC-0007 "Sidebar Workspace"): unico
- * lugar do app mostrando nome/host/engine/status da conexao ativa — sempre
- * visivel, independente de qual secao do rail esta selecionada (nunca
- * desaparece ao trocar de Conexoes/Objetos/Consultas/Historico).
+ * Indicador "Conexao Ativa" — pilula arredondada mostrando nome/host/engine/
+ * status da conexao ativa, sempre visivel independente de qual painel/aba
+ * esta em foco.
  * <p>
- * Substitui o antigo par {@code connStatusLabel}/{@code connProgress} do
- * rodape (removido, ver {@code MainWindow#buildFooter}): a MESMA informacao
- * que antes ficava numa barra fixa no fundo da janela ("Conectado: x"),
- * proibida pela spec ("nunca mostrar Conectado na barra inferior").
+ * Ja foi um CARD vertical na sidebar (SPEC-0007 "Sidebar Workspace"), depois
+ * um card mais rico com selos, depois uma barra esticada pela largura
+ * inteira da janela, depois um pill CENTRALIZADO numa linha propria por
+ * cima de tudo (3 linhas, depois 1) — toda essa familia de versao "linha
+ * inteira no topo" sempre sobrava uma faixa de altura fixa so pra isto,
+ * empurrando a arvore de objetos e o editor SQL pra baixo, mesmo comprimida
+ * a 1 linha (feedback do usuario com captura de tela: "espaco perdido").
+ * Agora vive EMBUTIDA na propria barra de acoes (ver
+ * {@code MainWindow#buildToolbar}, ao lado do botao "Salvar"), sem nenhuma
+ * linha/altura extra dedicada — pedido explicito do usuario ("e se colocar
+ * ao lado do botao salvar... menos espaco gasto atoa"). Continua sem
+ * inventar dado nenhum (ex.: a referencia visual original tambem sugeria um
+ * selo de charset, que o app nao consulta em lugar nenhum hoje — ficou de
+ * fora, ver {@link #render}).
  */
-final class ConnectionStatusCard extends NCard {
+final class ConnectionStatusCard extends JPanel {
 
 	private static final long serialVersionUID = 1L;
 
@@ -47,30 +64,26 @@ final class ConnectionStatusCard extends NCard {
 	record ActiveConnection(String name, String label) {
 	}
 
+	private final JLabel dotIcon = new JLabel();
+	private final JLabel engineIcon = new JLabel();
 	private final JLabel nameLabel = new JLabel();
-	private final JLabel hostLabel = new JLabel();
-	private final JLabel engineLabel = new JLabel();
-	private final JLabel statusLabel = new JLabel();
+	private final JLabel subLabel = new JLabel();
+	/** Painel clicavel (icones + textos + seta) que abre "Conexoes salvas" — fundo destacado no hover, ver construtor. */
+	private final JPanel clickArea;
 
 	/**
-	 * Botao "trocar conexao ativa" (icone ⇄) + selo com a contagem de
+	 * Botao "trocar conexao ativa" (icone ⇄ + texto) + selo com a contagem de
 	 * conexoes conectadas AGORA (nao a lista completa de conexoes salvas) —
 	 * pedido explicito do usuario: focar outra conexao ja conectada, SEM
 	 * desconectar as demais. So aparece com 2+ conexoes conectadas
 	 * simultaneamente (com 0 ou 1, nao ha nada pra trocar).
 	 */
 	private final JButton switchButton;
-	/**
-	 * Seta de "gerenciar conexoes" (estilo dropdown, mesmo icone ja usado em
-	 * {@code MainWindow#addRunFormatExplainButtons} pro menu de opcoes de
-	 * formatacao) — SEMPRE visivel, ao contrario de {@link #switchButton}
-	 * (que so aparece com 2+ conexoes conectadas). Abre a lista completa de
-	 * conexoes salvas (ver {@link #setOnManageConnections}), que deixou de
-	 * ficar sempre visivel na sidebar (pedido explicito do protótipo:
-	 * "card reduzido para apenas Ambiente/Schema/Banco").
-	 */
-	private final JButton manageButton;
-	private final JPanel switchRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 2, 0));
+	private final JPanel switchRow = new JPanel(new FlowLayout(FlowLayout.LEFT, Spacing.XS, 0));
+	/** "+ Nova conexao", sempre visivel — ver {@link #setOnNewConnection}. */
+	private final JButton newConnectionButton;
+	/** Seta "▾" no fim do {@link #clickArea} — so o icone, nao um botao clicavel separado (o painel inteiro ja e clicavel, ver {@link #openConnections}). */
+	private final JLabel chevron = new JLabel();
 
 	private State state = State.DISCONNECTED;
 	private String lastName = "Sem conexao";
@@ -81,88 +94,157 @@ final class ConnectionStatusCard extends NCard {
 	private String activeConnectionName;
 	private Consumer<String> onSwitchRequested = name -> { };
 	private Runnable onManageConnections = () -> { };
-	/** {@code true} enquanto o mouse esta em cima do card (ou de qualquer filho dele) — ver {@link #fillColor()}. */
-	private boolean hovering;
+	private Runnable onNewConnection = () -> { };
+
+	/**
+	 * Fundo elevado ({@link NTheme#surfaceBackground()}) da pilula, recalculado
+	 * em {@link #updateUI()} — mesma familia de cuidado ja documentada em
+	 * {@link com.nureal.ide.compartilhado.designsystem.NCard} pra nao "queimar"
+	 * a cor do tema em que o app foi ABERTO.
+	 */
+	private Color fill = NTheme.surfaceBackground();
+
+	/**
+	 * Altura fixa (mesma de Executar/Formatar/Explicar/Salvar, ver
+	 * {@code MainWindow#buildConnectionBar}) — {@code -1} = sem override,
+	 * usa a altura natural. So a ALTURA e fixada (ver {@link #getPreferredSize()}):
+	 * um {@code setPreferredSize} direto (largura+altura) congelaria a
+	 * LARGURA tambem no valor medido na 1a chamada (sempre desconectado,
+	 * texto curto) — ao conectar depois, nome+host+engine ficam bem mais
+	 * longos, mas o painel nunca mais crescia pra acomodar, entao o texto
+	 * "vazava" por cima do botao "Nova conexao" do lado — bug relatado pelo
+	 * usuario com captura de tela (o botao "sumia" ao conectar).
+	 */
+	private int fixedHeight = -1;
+
+	@Override
+	public void updateUI() {
+		super.updateUI();
+		fill = NTheme.surfaceBackground();
+	}
+
+	/** Fixa a ALTURA (ver {@link #fixedHeight}) sem travar a largura, que continua recalculada a cada texto/estado novo. */
+	void setFixedHeight(int height) {
+		this.fixedHeight = height;
+		revalidate();
+	}
+
+	@Override
+	public Dimension getPreferredSize() {
+		Dimension natural = super.getPreferredSize();
+		return (fixedHeight > 0) ? new Dimension(natural.width, fixedHeight) : natural;
+	}
+
+	@Override
+	protected void paintComponent(Graphics g) {
+		Graphics2D g2 = (Graphics2D) g.create();
+		g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+		g2.setColor(fill);
+		g2.fillRoundRect(0, 0, getWidth(), getHeight(), NTheme.CARD_ARC, NTheme.CARD_ARC);
+		g2.setColor(GridTheme.HEADER_BORDER);
+		g2.drawRoundRect(0, 0, getWidth() - 1, getHeight() - 1, NTheme.CARD_ARC, NTheme.CARD_ARC);
+		g2.dispose();
+		super.paintComponent(g);
+	}
 
 	ConnectionStatusCard() {
-		super(NAccent.NEUTRAL, null);
-		statusLabel.setFont(statusLabel.getFont().deriveFont(java.awt.Font.BOLD, 11f));
+		super(new BorderLayout());
+		setOpaque(false);
+		setBorder(BorderFactory.createEmptyBorder(Spacing.XS, Spacing.SM, Spacing.XS, Spacing.SM));
 
-		switchButton = Buttons.iconButton(IconType.SWAP, 13, () -> GridTheme.MUTED_TEXT);
+		nameLabel.setFont(nameLabel.getFont().deriveFont(java.awt.Font.BOLD, 12f));
+		subLabel.setFont(subLabel.getFont().deriveFont(11f));
+
+		JPanel iconsCol = new JPanel(new FlowLayout(FlowLayout.LEFT, Spacing.XS, 0));
+		iconsCol.setOpaque(false);
+		iconsCol.add(dotIcon);
+		iconsCol.add(engineIcon);
+
+		// UMA linha so (nome + subtitulo lado a lado, nao mais empilhados em
+		// 3 linhas com um rotulo "Conexao atual") — ver javadoc da classe.
+		JPanel textRow = new JPanel(new FlowLayout(FlowLayout.LEFT, Spacing.XS, 0));
+		textRow.setOpaque(false);
+		textRow.add(nameLabel);
+		textRow.add(subLabel);
+
+		Buttons.bindThemedIcon(chevron, IconType.CHEVRON_RIGHT, 10, () -> GridTheme.MUTED_TEXT);
+
+		clickArea = new JPanel(new FlowLayout(FlowLayout.LEFT, Spacing.SM, 0));
+		clickArea.setOpaque(false);
+		clickArea.setBorder(BorderFactory.createEmptyBorder(2, Spacing.SM, 2, Spacing.SM));
+		clickArea.add(iconsCol);
+		clickArea.add(textRow);
+		clickArea.add(chevron);
+
+		switchButton = new JButton("Trocar");
+		Buttons.bindThemedIcon(switchButton, IconType.SWAP, 13, () -> GridTheme.MUTED_TEXT);
+		switchButton.setIconTextGap(4);
+		Buttons.styleSecondary(switchButton);
 		switchButton.setToolTipText("Trocar conexao ativa");
 		switchButton.addActionListener(e -> showSwitchMenu());
 
-		manageButton = new JButton(new com.formdev.flatlaf.icons.FlatMenuArrowIcon());
-		manageButton.setToolTipText("Conexoes salvas");
-		manageButton.addActionListener(e -> onManageConnections.run());
-		Buttons.styleIconButton(manageButton);
+		// SO icone (nao mais "+ Nova conexao" com texto): pedido explicito do
+		// usuario apos o bug acima ("reduzido a um icone de adicionar e
+		// sempre visivel") — um botao so-de-icone tem largura fixa pequena,
+		// entao mesmo textos de nome/host mais longos no futuro nao tem
+		// como "engolir" o espaco dele de novo.
+		newConnectionButton = Buttons.iconButton(IconType.NEW, 15, () -> GridTheme.BRAND_GREEN);
+		newConnectionButton.setToolTipText("Nova conexao");
+		newConnectionButton.addActionListener(e -> onNewConnection.run());
 
 		switchRow.setOpaque(false);
-		switchRow.add(manageButton);
+		// Populado por #updateSwitchRow (chamado no fim do construtor), nao
+		// aqui — evita adicionar switchButton/newConnectionButton so pra
+		// serem removidos/reordenados na primeira chamada.
 
-		JPanel nameRow = new JPanel(new BorderLayout());
-		nameRow.setOpaque(false);
-		nameRow.add(nameLabel, BorderLayout.WEST);
-		nameRow.add(switchRow, BorderLayout.EAST);
-		// O CARD INTEIRO (nao so a linha do nome) abre "Conexoes salvas" —
-		// pedido explicito do usuario apos achar a setinha pouco funcional/
-		// dificil de acertar, e depois relatar que nem a linha do nome
-		// reagia ao passar o mouse (provavelmente porque so tentou em cima
-		// de host/engine/status, que nao faziam parte do alvo). Cobrir TODO
-		// o card, nao so um pedaco especifico, elimina essa ambiguidade — o
-		// unico ponto que NAO deve disparar isto e switchRow (setinha +
-		// botao de trocar), que continua capturando o PROPRIO clique
-		// primeiro (Swing entrega ao filho mais especifico sob o cursor,
-		// nunca aos dois ao mesmo tempo). O listener vai em CADA componente
-		// visivel do card (nao so no painel externo): eventos de mouse em
-		// Swing nao "borbulham" sozinhos do filho pro pai (diferente do
-		// DOM) — um clique/hover em cima do TEXTO de qualquer rotulo vai
-		// direto pro rotulo, nunca alcançaria um listener so no card.
+		add(clickArea, BorderLayout.WEST);
+		add(switchRow, BorderLayout.EAST);
+
+		// O clickArea INTEIRO (icones + textos + seta) abre "Conexoes
+		// salvas" — mesmo cuidado ja aplicado quando isto era um card na
+		// sidebar: o listener vai em CADA componente visivel dele (nao so
+		// no painel), porque eventos de mouse em Swing nao "borbulham"
+		// sozinhos do filho pro pai.
 		MouseAdapter openConnections = new MouseAdapter() {
 			@Override
 			public void mouseClicked(MouseEvent e) {
 				onManageConnections.run();
 			}
 		};
-		for (java.awt.Component c : new java.awt.Component[] {
-				this, nameRow, nameLabel, hostLabel, engineLabel, statusLabel }) {
+		for (Component c : new Component[] { clickArea, iconsCol, dotIcon, engineIcon, textRow, nameLabel,
+				subLabel, chevron }) {
 			c.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 			c.addMouseListener(openConnections);
 			if (c instanceof JLabel jl) {
 				jl.setToolTipText("Conexoes salvas");
 			}
 		}
-		// Fundo destacado (GridTheme.HOVER_BACKGROUND) enquanto o mouse esta
-		// em cima do card — pedido explicito do usuario: so o cursor virar
-		// maozinha nao deixava claro que tinha uma acao ali ("faltou uma
-		// sombra de selecao"). SO no CARD (nao em cada filho tambem, como o
-		// listener de clique acima): getMousePosition() de um Container ja
-		// retorna nao-nulo quando o mouse esta sobre um FILHO dele (ver
-		// javadoc de Component#getMousePosition), entao o mouseExited do
-		// card (disparado ao mover pra cima de um filho, que "rouba" o
-		// evento) so desliga o hover quando o mouse de fato SAIU do card
-		// inteiro — sem isto, o fundo "piscaria" toda vez que o mouse
-		// cruzasse a borda de um rotulo interno.
-		addMouseListener(new MouseAdapter() {
+		// Fundo destacado (GridTheme.HOVER_BACKGROUND) so no clickArea
+		// (nao na barra inteira) enquanto o mouse esta em cima — mesmo
+		// pedido explicito de quando isto era um card ("faltou uma sombra
+		// de selecao"). getMousePosition() (nao e.getOppositeComponent()):
+		// retorna nao-nulo quando o mouse esta sobre um FILHO do clickArea
+		// tambem, entao o mouseExited (disparado ao mover pra cima de um
+		// filho, que "rouba" o evento) so desliga o hover quando o mouse de
+		// fato SAIU da area inteira — sem isto, o fundo "piscaria" toda vez
+		// que o mouse cruzasse a borda de um rotulo interno.
+		clickArea.setOpaque(false);
+		clickArea.addMouseListener(new MouseAdapter() {
 			@Override
 			public void mouseEntered(MouseEvent e) {
-				hovering = true;
-				repaint();
+				clickArea.setOpaque(true);
+				clickArea.setBackground(GridTheme.HOVER_BACKGROUND);
+				clickArea.repaint();
 			}
 
 			@Override
 			public void mouseExited(MouseEvent e) {
-				if (getMousePosition() == null) {
-					hovering = false;
-					repaint();
+				if (clickArea.getMousePosition() == null) {
+					clickArea.setOpaque(false);
+					clickArea.repaint();
 				}
 			}
 		});
-
-		addContent(nameRow);
-		addContent(hostLabel);
-		addContent(engineLabel);
-		addContent(statusLabel);
 
 		updateSwitchRow();
 		render();
@@ -186,9 +268,19 @@ final class ConnectionStatusCard extends NCard {
 		this.onSwitchRequested = (callback != null) ? callback : name -> { };
 	}
 
-	/** Chamado quando o usuario clica na seta de "Conexoes salvas" (ver {@link #manageButton}). */
+	/** Chamado quando o usuario clica no {@link #clickArea} (icones/nome/seta) — abre "Conexoes salvas". */
 	void setOnManageConnections(Runnable callback) {
 		this.onManageConnections = (callback != null) ? callback : () -> { };
+	}
+
+	/** Chamado quando o usuario clica em "+ Nova conexao". */
+	void setOnNewConnection(Runnable callback) {
+		this.onNewConnection = (callback != null) ? callback : () -> { };
+	}
+
+	/** Componente contra o qual o dropdown "Conexoes salvas" deve se ancorar (posicao/largura) — {@code this} mesmo, ja que a pilula E este painel. */
+	JComponent popupAnchor() {
+		return this;
 	}
 
 	/**
@@ -222,13 +314,18 @@ final class ConnectionStatusCard extends NCard {
 	 * classe (ver {@link #refreshTheme()}).
 	 */
 	private void updateSwitchRow() {
+		// removeAll (nao so remove(switchButton)): sem isto, um selo
+		// (NBadge) novo se somava a cada chamada em vez de substituir o
+		// anterior — a MESMA contagem de conexoes conectadas acumulava
+		// varios selos identicos se #updateSwitchRow rodasse de novo com o
+		// numero ja em 2+ (ex.: troca de tema com 2+ conexoes conectadas).
 		switchRow.removeAll();
-		switchRow.add(switchButton);
 		switchButton.setVisible(activeConnections.size() > 1);
 		if (activeConnections.size() > 1) {
+			switchRow.add(switchButton);
 			switchRow.add(new NBadge(String.valueOf(activeConnections.size()), NAccent.NEUTRAL));
 		}
-		switchRow.add(manageButton);
+		switchRow.add(newConnectionButton);
 		switchRow.revalidate();
 		switchRow.repaint();
 	}
@@ -270,41 +367,47 @@ final class ConnectionStatusCard extends NCard {
 
 	private void render() {
 		// Typography.primary/tertiary reaplicados AQUI (nao mais so uma vez
-		// no construtor): nameLabel/hostLabel/engineLabel ficavam com a cor
-		// do tema em que o card foi CONSTRUIDO (sempre o escuro, ver
-		// App#main) gravada pra sempre — so o statusLabel (linha abaixo,
-		// "Conectado"/"Desconectado") ja lia a cor certa a cada render()
-		// porque a sua vinha de uma variavel LOCAL (color, calculada aqui
-		// mesmo), nao de uma chamada unica no construtor. render() roda a
-		// cada troca de estado E a partir de refreshTheme() (chamado por
-		// MainWindow#toggleTheme), entao reaplicar aqui cobre os dois casos
-		// de uma vez — bug relatado pelo usuario ("continuo nao enxergando
-		// nada aqui" no tema claro, com captura mostrando nome/host/engine
-		// quase invisiveis contra o fundo claro do card).
+		// no construtor): nameLabel/subLabel ficavam com a cor do tema em
+		// que a barra foi CONSTRUIDA (sempre o escuro, ver App#main) gravada
+		// pra sempre — mesma familia de bug ja corrigida varias vezes nesta
+		// base. render() roda a cada troca de estado E a partir de
+		// refreshTheme() (chamado por MainWindow#toggleTheme), entao
+		// reaplicar aqui cobre os dois casos de uma vez.
 		Typography.primary(nameLabel);
-		Typography.tertiary(hostLabel);
-		Typography.tertiary(engineLabel);
+		Typography.tertiary(subLabel);
 		Color color = switch (state) {
 		case DISCONNECTED -> GridTheme.COLOR_LOGIC_FALSE;
 		case CONNECTING -> GridTheme.HEADER_HIGHLIGHT_BORDER;
 		case CONNECTED -> GridTheme.COLOR_LOGIC_TRUE;
 		};
-		String statusText = switch (state) {
-		case DISCONNECTED -> "Desconectado";
-		case CONNECTING -> "Conectando...";
-		case CONNECTED -> "Conectado";
-		};
-		nameLabel.setIcon(Icons.get(IconType.STATUS_DOT, 8, color));
-		nameLabel.setText(lastName);
-		hostLabel.setText(lastHost);
-		engineLabel.setText(lastEngine);
-		statusLabel.setForeground(color);
-		statusLabel.setText(statusText);
-	}
+		dotIcon.setIcon(Icons.get(IconType.STATUS_DOT, 8, color));
+		Buttons.bindThemedIcon(engineIcon, IconType.DATABASE, 14, () -> GridTheme.MUTED_TEXT);
 
-	/** Fundo do card: destacado (hover) enquanto o mouse esta em cima — ver {@link #hovering}. */
-	@Override
-	protected Color fillColor() {
-		return hovering ? GridTheme.HOVER_BACKGROUND : super.fillColor();
+		String name = switch (state) {
+		case DISCONNECTED -> "Nenhuma conexao selecionada";
+		case CONNECTING, CONNECTED -> lastName;
+		};
+		// Sub-titulo: junta host+engine (dados JA disponiveis, nunca
+		// inventados — ver javadoc da classe) numa unica linha, ao lado do
+		// nome (nao mais embaixo dele) — desconectado nao tem sub-titulo
+		// proprio, o texto do nome ja diz tudo que precisa (evita repetir a
+		// mesma mensagem em duas linhas/label que a versao anterior tinha).
+		String sub = switch (state) {
+		case DISCONNECTED -> "";
+		case CONNECTING -> "Conectando...";
+		case CONNECTED -> {
+			StringBuilder sb = new StringBuilder(lastHost == null ? "" : lastHost.trim());
+			if (lastEngine != null && !lastEngine.isBlank()) {
+				if (sb.length() > 0) {
+					sb.append("  ·  ");
+				}
+				sb.append(lastEngine);
+			}
+			yield sb.length() > 0 ? sb.toString() : "Conectado";
+		}
+		};
+		nameLabel.setText(name);
+		subLabel.setVisible(!sub.isBlank());
+		subLabel.setText(sub.isBlank() ? "" : ("·  " + sub));
 	}
 }

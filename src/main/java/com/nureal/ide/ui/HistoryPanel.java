@@ -4,6 +4,7 @@ import com.nureal.ide.compartilhado.designsystem.IconType;
 import com.nureal.ide.compartilhado.designsystem.Icons;
 import com.nureal.ide.compartilhado.designsystem.Typography;
 import com.nureal.ide.compartilhado.designsystem.GridTheme;
+import com.nureal.ide.compartilhado.designsystem.NEmptyState;
 
 import com.nureal.ide.modulos.historico.infraestrutura.ExecutionHistoryStore;
 import com.nureal.ide.modulos.historico.infraestrutura.ExecutionHistoryStore.Entry;
@@ -29,15 +30,11 @@ import java.awt.BorderLayout;
 import java.awt.CardLayout;
 import java.awt.Color;
 import java.awt.Component;
-import java.awt.GridBagLayout;
 import java.awt.Toolkit;
 import java.awt.datatransfer.StringSelection;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.io.IOException;
-import java.time.Instant;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -167,32 +164,13 @@ public class HistoryPanel extends JPanel {
      * lista simplesmente ficava em branco quando vazia).
      */
     private JComponent buildEmptyState() {
-        JLabel icon = new JLabel();
-        Buttons.bindThemedIcon(icon, IconType.HISTORY, 40, () -> GridTheme.MUTED_TEXT);
-        icon.setAlignmentX(Component.CENTER_ALIGNMENT);
-
-        emptyTitle = new JLabel();
-        emptyTitle.setFont(emptyTitle.getFont().deriveFont(13f));
-        Typography.primary(emptyTitle);
-        emptyTitle.setAlignmentX(Component.CENTER_ALIGNMENT);
-
-        emptySub = new JLabel();
-        Typography.tertiary(emptySub);
-        emptySub.setAlignmentX(Component.CENTER_ALIGNMENT);
-
-        JPanel box = new JPanel();
-        box.setOpaque(false);
-        box.setLayout(new BoxLayout(box, BoxLayout.Y_AXIS));
-        box.add(icon);
-        box.add(Box.createVerticalStrut(10));
-        box.add(emptyTitle);
-        box.add(Box.createVerticalStrut(2));
-        box.add(emptySub);
-
-        JPanel center = new JPanel(new GridBagLayout());
-        center.setOpaque(false);
-        center.add(box);
-        return center;
+        // NEmptyState (design system): ponto UNICO da receita "icone +
+        // titulo + subtitulo" — antes esta era uma de 4 copias praticamente
+        // identicas (achado numa auditoria pedida pelo usuario).
+        NEmptyState state = new NEmptyState(IconType.HISTORY, "", "");
+        emptyTitle = state.titleLabel();
+        emptySub = state.subtitleLabel();
+        return state;
     }
 
     /** Mostra a lista ou o estado vazio, com o texto certo pro caso (sem historico ainda vs. busca sem resultado). */
@@ -262,9 +240,12 @@ public class HistoryPanel extends JPanel {
 
     private void clearForActiveConnection() {
         String label = activeConnection == null ? "sem conexao" : activeConnection;
+        // WARNING_MESSAGE: mesmo icone usado nas demais confirmacoes de
+        // acao irreversivel do app (ver ConnectionsPanel#onDelete) —
+        // inconsistencia encontrada numa auditoria pedida pelo usuario.
         int ok = JOptionPane.showConfirmDialog(DialogUtil.owner(this),
                 "Limpar todo o historico de execucoes de \"" + label + "\"? Esta acao nao pode ser desfeita.",
-                "Limpar historico", JOptionPane.YES_NO_OPTION);
+                "Limpar historico", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
         if (ok != JOptionPane.YES_OPTION) {
             return;
         }
@@ -330,34 +311,6 @@ public class HistoryPanel extends JPanel {
         updateEmptyState(filtered.isEmpty());
     }
 
-    private static String relativeTime(long epochMillis) {
-        if (epochMillis <= 0) {
-            return "";
-        }
-        long diffSec = Math.max(0, (System.currentTimeMillis() - epochMillis) / 1000);
-        if (diffSec < 60) {
-            return "agora";
-        }
-        long min = diffSec / 60;
-        if (min < 60) {
-            return "ha " + min + " min";
-        }
-        long hours = min / 60;
-        if (hours < 24) {
-            return "ha " + hours + "h";
-        }
-        long days = hours / 24;
-        if (days < 7) {
-            return "ha " + days + " dia(s)";
-        }
-        return absoluteTime(epochMillis);
-    }
-
-    private static String absoluteTime(long epochMillis) {
-        return DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm:ss")
-                .format(Instant.ofEpochMilli(epochMillis).atZone(ZoneId.systemDefault()));
-    }
-
     /** Cartao de cada execucao: bolinha de status + SQL (1 linha) + "ha X · Yms". */
     private final class EntryRenderer extends DefaultListCellRenderer {
         private static final long serialVersionUID = 1L;
@@ -368,6 +321,18 @@ public class HistoryPanel extends JPanel {
             super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
             setHorizontalAlignment(SwingConstants.LEFT);
             setBorder(BorderFactory.createEmptyBorder(6, 12, 6, 12));
+            // Hover (linha sob o mouse, sem selecionar) — mesmo destaque
+            // suave de ConnectionsPanel#ConnectionRenderer/arvore de
+            // Objetos/grade de resultados (GridTheme.HOVER_BACKGROUND);
+            // faltava aqui apesar do painel ja instalar TreeHoverTracker
+            // (so usava a posicao do mouse pro CURSOR, nunca pra pintar a
+            // linha) — inconsistencia encontrada numa auditoria pedida pelo
+            // usuario. Selecao sempre tem prioridade visual.
+            boolean hovered = !isSelected && index == TreeHoverTracker.hoverRow(list);
+            if (hovered) {
+                setOpaque(true);
+                setBackground(GridTheme.HOVER_BACKGROUND);
+            }
             if (value instanceof Entry e) {
                 // Bolinha de status: icone de verdade (mesma receita do
                 // ConnectionStatusCard), nao mais o caractere HTML "&#9679;"
@@ -383,19 +348,19 @@ public class HistoryPanel extends JPanel {
                 // Sub-texto: cor de selecao (a linha inteira agora usa o MESMO
                 // cinza neutro da grade/arvore, nao mais o verde solido do L&F —
                 // ver #buildList) OU o cinza mudo de sempre fora da selecao.
-                String subColor = hex(isSelected ? GridTheme.SELECTION_FOREGROUND : GridTheme.MUTED_TEXT);
+                String subColor = HtmlText.hex(isSelected ? GridTheme.SELECTION_FOREGROUND : GridTheme.MUTED_TEXT);
                 String family = getFont().getFamily();
-                String preview = escape(oneLine(e.sql(), 70));
-                String meta = relativeTime(e.executedAt()) + "  ·  " + e.durationMs() + "ms"
-                        + (e.schema() != null ? "  ·  " + escape(e.schema()) : "");
+                String preview = HtmlText.escape(oneLine(e.sql(), 70));
+                String meta = RelativeTime.relative(e.executedAt()) + "  ·  " + e.durationMs() + "ms"
+                        + (e.schema() != null ? "  ·  " + HtmlText.escape(e.schema()) : "");
                 setText("<html><div style='font-family:" + family + ";line-height:1.5'>"
                         + "<b>" + preview + "</b><br>"
                         + "<span style='color:" + subColor + ";font-size:10px'>" + meta + "</span></div></html>");
-                String tooltip = absoluteTime(e.executedAt());
+                String tooltip = RelativeTime.absolute(e.executedAt());
                 if (e.resultSummary() != null && !e.resultSummary().isBlank()) {
                     tooltip += "\n" + e.resultSummary();
                 }
-                setToolTipText("<html>" + escape(tooltip).replace("\n", "<br>") + "</html>");
+                setToolTipText("<html>" + HtmlText.escape(tooltip).replace("\n", "<br>") + "</html>");
             }
             return this;
         }
@@ -406,15 +371,6 @@ public class HistoryPanel extends JPanel {
                 flat = flat.substring(0, maxLen - 1) + "…";
             }
             return flat;
-        }
-
-        private static String escape(String s) {
-            return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
-        }
-
-        /** Mesma conversao Color->hex de {@code ObjectTreeCellRenderer#columnHtml} — HTML embutido so aceita string. */
-        private static String hex(Color c) {
-            return String.format("#%06X", c.getRGB() & 0xFFFFFF);
         }
     }
 }

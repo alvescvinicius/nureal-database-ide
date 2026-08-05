@@ -285,14 +285,10 @@ final class ObjectTreeCellRenderer extends DefaultTreeCellRenderer {
 
     /** Nome da coluna em negrito + tipo em cinza mudo, ex.: <b>id</b> : bigint. */
     private static String columnHtml(String name, String type) {
-        String hexMuted = String.format("#%06X", GridTheme.MUTED_TEXT.getRGB() & 0xFFFFFF);
-        String safeName = escape(name);
-        String safeType = escape(type == null ? "" : type);
+        String hexMuted = HtmlText.hex(GridTheme.MUTED_TEXT);
+        String safeName = HtmlText.escape(name);
+        String safeType = HtmlText.escape(type == null ? "" : type);
         return "<html><b>" + safeName + "</b><span style='color:" + hexMuted + "'> : " + safeType + "</span></html>";
-    }
-
-    private static String escape(String s) {
-        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 
     /**

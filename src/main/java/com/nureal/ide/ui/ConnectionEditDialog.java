@@ -1,5 +1,9 @@
 package com.nureal.ide.ui;
+import com.nureal.ide.compartilhado.designsystem.Buttons;
 import com.nureal.ide.compartilhado.designsystem.GridTheme;
+import com.nureal.ide.compartilhado.designsystem.Spacing;
+import com.nureal.ide.compartilhado.designsystem.Typography;
+import com.nureal.ide.compartilhado.designsystem.dialog.DialogShell;
 
 import com.nureal.ide.modulos.conexoes.infraestrutura.ConnectionManager;
 import com.nureal.ide.modulos.conexoes.dominio.entidades.ConnectionProfile;
@@ -8,13 +12,12 @@ import com.nureal.ide.modulos.dialeto.infraestrutura.MySqlDialect;
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
+import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JPasswordField;
-import javax.swing.JDialog;
 import javax.swing.JTextField;
-import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 import java.awt.Component;
 import java.awt.FlowLayout;
@@ -27,7 +30,16 @@ import java.sql.SQLException;
 import java.util.function.Predicate;
 
 /**
- * Formulario para criar ou editar uma conexao. Retorna null se cancelar.
+ * Formulario para criar ou editar uma conexao. Retorna {@code null} se
+ * cancelar.
+ * <p>
+ * Reescrito como {@link JDialog} de verdade via {@link DialogShell} (nao
+ * mais um {@code JOptionPane} generico) — mesmo motivo documentado em
+ * {@code MainWindow#showConnectionsPopup}: um {@code JOptionPane} some
+ * sozinho quando o {@code JPopupMenu} que o hospedava perde o foco pra ele
+ * mesmo, e nao redimensiona direito quando o texto do "Testar conexao"
+ * cresce. Ganha de graca, so por usar {@link DialogShell}: Esc fecha o
+ * dialogo (ver {@code DialogShell#create}).
  */
 public final class ConnectionEditDialog {
 
@@ -50,6 +62,11 @@ public final class ConnectionEditDialog {
      */
     public static ConnectionProfile show(Component parent, ConnectionProfile existing, Predicate<String> nameTaken) {
         ConnectionProfile base = (existing != null) ? existing : ConnectionProfile.mysqlDefault();
+        Window owner = (DialogUtil.owner(parent) instanceof Window w) ? w : null;
+        String title = (existing == null) ? "Nova conexao" : "Editar conexao";
+
+        DialogShell shell = DialogShell.create(owner, title, JDialog.ModalityType.APPLICATION_MODAL);
+        JDialog dialog = shell.dialog();
 
         JTextField name = new JTextField(base.name(), 22);
         JTextField host = new JTextField(base.host(), 22);
@@ -66,10 +83,11 @@ public final class ConnectionEditDialog {
                 base.savePassword());
 
         JPanel form = new JPanel(new GridBagLayout());
-        form.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+        form.setBorder(BorderFactory.createEmptyBorder(Spacing.MD, Spacing.MD, Spacing.SM, Spacing.MD));
         GridBagConstraints c = new GridBagConstraints();
         c.insets = new Insets(4, 4, 4, 4);
         c.anchor = GridBagConstraints.WEST;
+        c.fill = GridBagConstraints.HORIZONTAL;
 
         int row = 0;
         addRow(form, c, row++, "Nome:", name);
@@ -81,18 +99,103 @@ public final class ConnectionEditDialog {
 
         c.gridx = 1;
         c.gridy = row++;
+        c.weightx = 1;
         form.add(savePassword, c);
 
-        JPanel testRow = buildTestRow(host, port, schema, user, password);
+        JPanel testRow = buildTestRow(host, port, schema, user, password, dialog);
         c.gridx = 0;
         c.gridy = row++;
         c.gridwidth = 2;
         form.add(testRow, c);
         c.gridwidth = 1;
 
-        String title = (existing == null) ? "Nova conexao" : "Editar conexao";
-        Component owner = DialogUtil.owner(parent);
-        return resolveProfile(owner, form, title, name, host, port, schema, user, password, savePassword, nameTaken);
+        // Guarda o resultado FORA do listener (a acao do botao roda depois
+        // que setVisible(true) ja bloqueou aqui embaixo, ver o modal
+        // ApplicationModal do DialogShell.create) — so preenchido quando a
+        // validacao passa E o usuario confirma; cancelar/fechar deixa nulo.
+        ConnectionProfile[] result = new ConnectionProfile[1];
+        JButton save = new JButton("Salvar");
+        save.addActionListener(e -> {
+            ConnectionProfile resolved = validateAndBuild(
+                    dialog, name, host, port, schema, user, password, savePassword, nameTaken);
+            if (resolved != null) {
+                result[0] = resolved;
+                dialog.dispose();
+            }
+        });
+
+        shell.center(form);
+        shell.south(Buttons.dialogFooter(dialog, save));
+
+        dialog.pack();
+        dialog.setLocationRelativeTo(owner);
+        dialog.setVisible(true);
+        return result[0];
+    }
+
+    /**
+     * Valida os campos e monta o {@link ConnectionProfile} final, ou
+     * devolve {@code null} (e destaca o campo com problema + mostra o
+     * aviso) sem fechar o dialogo, para o usuario corrigir.
+     * <p>
+     * Antes desta reescrita, host nunca era validado e uma porta invalida
+     * (ex.: "abc") virava silenciosamente 3306 sem avisar o usuario — agora
+     * os dois bloqueiam o salvamento com uma mensagem clara.
+     */
+    private static ConnectionProfile validateAndBuild(JDialog dialog, JTextField name, JTextField host,
+            JTextField port, JTextField schema, JTextField user, JPasswordField password, JCheckBox savePassword,
+            Predicate<String> nameTaken) {
+        // Limpa destaques de erro de uma tentativa anterior antes de validar
+        // de novo — sem isto um campo ficava "vermelho" para sempre mesmo
+        // depois do usuario corrigir.
+        name.putClientProperty("JComponent.outline", null);
+        host.putClientProperty("JComponent.outline", null);
+        port.putClientProperty("JComponent.outline", null);
+
+        String hostValue = host.getText().trim();
+        if (hostValue.isEmpty()) {
+            host.putClientProperty("JComponent.outline", "error");
+            host.requestFocusInWindow();
+            JOptionPane.showMessageDialog(dialog, "Informe o host do servidor.",
+                    "Campo obrigatorio", JOptionPane.WARNING_MESSAGE);
+            return null;
+        }
+
+        Integer portValue = parsePortStrict(port.getText().trim());
+        if (portValue == null) {
+            port.putClientProperty("JComponent.outline", "error");
+            port.requestFocusInWindow();
+            JOptionPane.showMessageDialog(dialog,
+                    "Porta invalida — use um numero entre 1 e 65535 (ou deixe em branco para usar 3306).",
+                    "Porta invalida", JOptionPane.WARNING_MESSAGE);
+            return null;
+        }
+
+        String connName = name.getText().trim();
+        if (connName.isEmpty()) {
+            connName = hostValue + "/" + schema.getText().trim();
+        }
+
+        if (nameTaken != null && nameTaken.test(connName)) {
+            JOptionPane.showMessageDialog(dialog,
+                    "Ja existe uma conexao chamada \"" + connName + "\".\nEscolha outro nome.",
+                    "Nome duplicado", JOptionPane.WARNING_MESSAGE);
+            // Destaque de erro nativo do FlatLaf (contorno vermelho) no
+            // campo especifico que precisa ser corrigido — alem do aviso
+            // em popup, fica claro qual campo esta errado.
+            name.putClientProperty("JComponent.outline", "error");
+            name.requestFocusInWindow();
+            return null;
+        }
+
+        return new ConnectionProfile(
+                connName,
+                hostValue,
+                portValue,
+                schema.getText().trim(),
+                user.getText().trim(),
+                new String(password.getPassword()),
+                savePassword.isSelected());
     }
 
     /**
@@ -107,17 +210,17 @@ public final class ConnectionEditDialog {
      * Largura do rotulo de status TRAVADA em HTML (ver {@link #htmlStatus}) —
      * sem isto, o texto ("Testando conexao...", ou pior, uma mensagem de erro
      * de dezenas de caracteres tipo "Access denied for user...") cresce
-     * DEPOIS que o JOptionPane ja calculou o tamanho da janela (pack() so
-     * acontece uma vez, ao abrir; nao ha auto-resize quando um filho muda de
-     * tamanho depois). O GridBagLayout, ao tentar encaixar essa largura nova
-     * SEM a janela crescer junto, espreme a coluna inteira (a MESMA dos
-     * campos Nome/Host/Porta/...) ate o minimo — bug relatado pelo usuario:
-     * campos viram caixinhas vazias ao clicar em "Testar conexao". Com
-     * largura fixa, o texto QUEBRA LINHA (altera altura, nao largura) em vez
-     * de forcar a coluna a crescer.
+     * DEPOIS do primeiro {@code pack()}, e o GridBagLayout, ao tentar encaixar
+     * essa largura nova SEM a janela crescer junto, espreme a coluna inteira
+     * (a MESMA dos campos Nome/Host/Porta/...) ate o minimo. Com largura
+     * fixa, o texto QUEBRA LINHA (altera altura, nao largura) em vez de
+     * forcar a coluna a crescer — {@link #repack} so precisa ajustar a
+     * ALTURA, chamado direto no {@code dialog} de verdade (nao mais um
+     * {@code SwingUtilities.getWindowAncestor} pra "adivinhar" a janela do
+     * JOptionPane, ja que agora {@code dialog} e a propria janela).
      */
     private static JPanel buildTestRow(JTextField host, JTextField port, JTextField schema, JTextField user,
-            JPasswordField password) {
+            JPasswordField password, JDialog dialog) {
         JButton testButton = new JButton("Testar conexao");
         JLabel testStatus = new JLabel(htmlStatus(" "));
         testStatus.setFont(testStatus.getFont().deriveFont(Font.PLAIN, 11f));
@@ -131,10 +234,10 @@ public final class ConnectionEditDialog {
             testButton.setEnabled(false);
             testStatus.setForeground(GridTheme.MUTED_TEXT);
             testStatus.setText(htmlStatus("Testando conexao..."));
-            repackDialog(testRow);
+            repack(dialog);
 
             ConnectionProfile candidate = new ConnectionProfile(
-                    "test", host.getText().trim(), parsePort(port), schema.getText().trim(),
+                    "test", host.getText().trim(), parsePortLenient(port), schema.getText().trim(),
                     user.getText().trim(), new String(password.getPassword()), false);
 
             new SwingWorker<String, Void>() {
@@ -164,96 +267,22 @@ public final class ConnectionEditDialog {
                         testStatus.setText(htmlStatus("Falha: " + error));
                     }
                     testButton.setEnabled(true);
-                    repackDialog(testRow);
+                    repack(dialog);
                 }
             }.execute();
         });
         return testRow;
     }
 
-    /**
-     * Mostra {@code form} num {@link JOptionPane} e resolve o
-     * {@link ConnectionProfile} final — loop em vez de um
-     * {@code showConfirmDialog} unico: se o nome digitado ja estiver em uso,
-     * avisa e REABRE o mesmo formulario (campos mantem o que o usuario ja
-     * tinha digitado) para corrigir, em vez de fechar e deixar duas conexoes
-     * com o mesmo nome.
-     */
-    private static ConnectionProfile resolveProfile(Component owner, JPanel form, String title, JTextField name,
-            JTextField host, JTextField port, JTextField schema, JTextField user, JPasswordField password,
-            JCheckBox savePassword, Predicate<String> nameTaken) {
-        while (true) {
-            // Centraliza na JANELA do chamador, nao no componente exato
-            // passado (ex: ConnectionsPanel, um painel pequeno na lateral).
-            int result = JOptionPane.showConfirmDialog(
-                    owner, form, title, JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
-            if (result != JOptionPane.OK_OPTION) {
-                return null;
-            }
-            // Limpa o destaque de erro de uma tentativa anterior antes de
-            // validar de novo — sem isto o campo ficava "vermelho" para
-            // sempre mesmo depois do usuario corrigir o nome.
-            name.putClientProperty("JComponent.outline", null);
-
-            int portValue = parsePort(port);
-
-            String connName = name.getText().trim();
-            if (connName.isEmpty()) {
-                connName = host.getText().trim() + "/" + schema.getText().trim();
-            }
-
-            if (nameTaken != null && nameTaken.test(connName)) {
-                JOptionPane.showMessageDialog(owner,
-                        "Ja existe uma conexao chamada \"" + connName + "\".\nEscolha outro nome.",
-                        "Nome duplicado", JOptionPane.WARNING_MESSAGE);
-                // Destaque de erro nativo do FlatLaf (contorno vermelho) no
-                // campo especifico que precisa ser corrigido — alem do aviso
-                // em popup, agora fica claro qual campo esta errado quando o
-                // formulario reabre (estado "erro" pedido na revisao visual
-                // de inputs; antes so existia normal/foco/desabilitado).
-                name.putClientProperty("JComponent.outline", "error");
-                continue;
-            }
-
-            return new ConnectionProfile(
-                    connName,
-                    host.getText().trim(),
-                    portValue,
-                    schema.getText().trim(),
-                    user.getText().trim(),
-                    new String(password.getPassword()),
-                    savePassword.isSelected());
-        }
-    }
-
-    /**
-     * Reempacota a janela do dialogo apos o texto do status mudar de altura
-     * (ex.: mensagem de erro que ocupa 2-3 linhas dentro da largura fixa de
-     * {@link #htmlStatus} — ver o comentario la sobre a largura). O
-     * {@code JOptionPane} so calcula o tamanho da janela UMA VEZ, ao abrir
-     * (pack() interno) — sem chamar {@code pack()} de novo aqui, o dialogo
-     * fica com a MESMA altura de antes do teste, e o painel de mensagem
-     * (agora mais alto) empurra/corta a barra de botoes OK/Cancelar, que fica
-     * cortada embaixo (bug relatado pelo usuario). Redimensiona so a JANELA
-     * do dialogo (nunca a janela PRINCIPAL do app por engano) — {@code
-     * SwingUtilities.getWindowAncestor} a partir de um componente que esta
-     * DENTRO do formulario do JOptionPane sempre resolve para o JDialog
-     * interno que o proprio JOptionPane cria, nao para a janela do
-     * ConnectionsPanel/MainWindow que abriu o formulario.
-     */
-    private static void repackDialog(Component insideDialog) {
-        Window window = SwingUtilities.getWindowAncestor(insideDialog);
-        if (window instanceof JDialog dialog) {
-            dialog.pack();
-        }
+    /** Reempacota a janela do dialogo apos o texto do status mudar de altura — ver o comentario em {@link #buildTestRow}. */
+    private static void repack(JDialog dialog) {
+        dialog.pack();
     }
 
     /**
      * Envolve {@code text} em HTML com largura FIXA (280px) — ver o
      * comentario no botao "Testar conexao" sobre por que a largura precisa
-     * ser travada (senao o GridBagLayout espreme os campos do formulario ate
-     * o minimo quando o texto do status cresce depois que o dialogo ja foi
-     * dimensionado). Mensagens mais longas que 280px QUEBRAM LINHA (o
+     * ser travada. Mensagens mais longas que 280px QUEBRAM LINHA (o
      * dialogo cresce em altura, nunca em largura) em vez de alargar a
      * coluna. Escapa os 3 caracteres especiais de HTML — a mensagem pode vir
      * de uma SQLException do driver JDBC, texto fora do nosso controle.
@@ -266,20 +295,32 @@ public final class ConnectionEditDialog {
         return "<html><div style='width:280px'>" + escaped + "</div></html>";
     }
 
-    /** Porta digitada, com 3306 (padrao MySQL) como fallback se nao for um numero valido. */
-    private static int parsePort(JTextField port) {
-        try {
-            return Integer.parseInt(port.getText().trim());
-        } catch (NumberFormatException e) {
+    /** Porta digitada, com 3306 (padrao MySQL) como fallback se nao for um numero valido — so pro botao "Testar conexao" (nao bloqueia a experimentacao com um texto ainda incompleto). */
+    private static int parsePortLenient(JTextField port) {
+        Integer strict = parsePortStrict(port.getText().trim());
+        return (strict != null) ? strict : 3306;
+    }
+
+    /** Porta digitada: vazio vira 3306 (padrao MySQL); texto presente mas invalido (nao numerico ou fora de 1-65535) devolve {@code null} — usado no SALVAR de verdade (ver {@link #validateAndBuild}), que rejeita em vez de aceitar silenciosamente algo que o usuario nao quis dizer. */
+    private static Integer parsePortStrict(String text) {
+        if (text.isEmpty()) {
             return 3306;
+        }
+        try {
+            int value = Integer.parseInt(text);
+            return (value >= 1 && value <= 65535) ? value : null;
+        } catch (NumberFormatException e) {
+            return null;
         }
     }
 
     private static void addRow(JPanel form, GridBagConstraints c, int row, String label, Component field) {
+        JLabel l = new JLabel(label);
+        Typography.tertiary(l);
         c.gridx = 0;
         c.gridy = row;
         c.weightx = 0;
-        form.add(new JLabel(label), c);
+        form.add(l, c);
         c.gridx = 1;
         c.weightx = 1;
         form.add(field, c);
