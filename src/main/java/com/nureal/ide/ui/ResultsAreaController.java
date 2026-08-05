@@ -417,6 +417,7 @@ final class ResultsAreaController {
 				return;
 			}
 			busy[0] = true;
+			resultStatusBar.setLoadAllBusy(true);
 			loadAll(r, () -> {
 				refresh.run();
 				// loadAll so termina de verdade quando o cursor esgota (ver
@@ -425,6 +426,7 @@ final class ResultsAreaController {
 				// estiver esgotado (nao no meio do caminho).
 				if (r.cursor() == null || r.cursor().exhausted) {
 					busy[0] = false;
+					resultStatusBar.setLoadAllBusy(false);
 				}
 			});
 		});

@@ -13,6 +13,7 @@ import javax.swing.SwingConstants;
 import javax.swing.table.DefaultTableModel;
 import java.awt.Cursor;
 import java.awt.Font;
+import java.awt.FontMetrics;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.event.MouseMotionAdapter;
@@ -45,7 +46,6 @@ final class RowNumberGutter {
         };
         JList<String> list = new JList<>(listModel);
         list.setFixedCellHeight(table.getRowHeight());
-        list.setFixedCellWidth(54);
         list.setFocusable(false);
         final Font font = list.getFont().deriveFont(Font.PLAIN);
         ListCellRenderer<Object> renderer = (lst, value, index, selected, focused) -> {
@@ -59,7 +59,23 @@ final class RowNumberGutter {
             return l;
         };
         list.setCellRenderer(renderer);
+        // Largura RECALCULADA pelo numero de digitos da MAIOR linha (nao
+        // mais um valor fixo de 54px): com "Carregar tudo"/paginacao sob
+        // demanda, uma grade pode facilmente passar de 1000/10000 linhas —
+        // 54px so cabia 3 digitos confortavelmente, entao numeros maiores
+        // (ex.: "10000") ficavam cortados com "..." pelo JLabel (bug
+        // relatado pelo usuario com captura de tela). Recalculada TODA VEZ
+        // que o numero de linhas muda (ver o TableModelListener abaixo),
+        // nao so uma vez na construcao.
+        Runnable updateGutterWidth = () -> {
+            int digits = Integer.toString(Math.max(table.getRowCount(), 1)).length();
+            FontMetrics fm = list.getFontMetrics(font);
+            int textWidth = fm.stringWidth("0".repeat(digits));
+            list.setFixedCellWidth(textWidth + 6 + 8 + 6); // + padding do renderer (6,8) + folga
+        };
+        updateGutterWidth.run();
         model.addTableModelListener(e -> {
+            updateGutterWidth.run();
             list.revalidate();
             list.repaint();
         });
