@@ -32,13 +32,16 @@ import javax.swing.BorderFactory;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JComponent;
+import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
+import javax.swing.JRootPane;
 import javax.swing.JTextField;
 import javax.swing.JToggleButton;
 import javax.swing.KeyStroke;
 import javax.swing.JMenuItem;
 import javax.swing.JPopupMenu;
+import javax.swing.SwingUtilities;
 import javax.swing.text.BadLocationException;
 import javax.swing.text.DefaultHighlighter;
 import javax.swing.text.Highlighter;
@@ -56,6 +59,7 @@ import java.awt.Graphics;
 import java.awt.GraphicsEnvironment;
 import java.awt.Rectangle;
 import java.awt.Shape;
+import java.awt.Window;
 import java.awt.event.ActionEvent;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
@@ -134,6 +138,7 @@ public class SqlEditorPane extends JPanel {
 
     private final SearchContext searchContext = new SearchContext();
     private JPanel findBar;
+    private JDialog findPopup;
     private JTextField findField;
     private JTextField replaceField;
     private JToggleButton matchCaseBtn;
@@ -237,7 +242,7 @@ public class SqlEditorPane extends JPanel {
         RTextScrollPane scroll = buildScrollPane();
         add(buildBreadcrumbBar(onRun, onToggleExpand, onMoreOptions), BorderLayout.NORTH);
         add(scroll, BorderLayout.CENTER);
-        add(buildFindBar(), BorderLayout.SOUTH);
+        buildFindBar();
         installBreadcrumbSync(textArea);
     }
 
@@ -838,17 +843,24 @@ public class SqlEditorPane extends JPanel {
 
             @Override
             public void mouseClicked(MouseEvent e) {
-                // Duplo-clique: seleciona a INSTRUCAO SQL inteira sob o
-                // cursor (ate o ";" anterior/seguinte, ver SqlStatementLocator
-                // — mesma logica ja usada pelo destaque de fundo da instrucao
-                // atual), nao so a palavra sob o cursor (o padrao do Swing/
-                // RSyntaxTextArea) — pedido explicito do usuario: poder
-                // selecionar uma instrucao inteira com duplo-clique pra
-                // executar so ela (ver tambem "Executar esta instrucao" no
-                // menu de contexto, buildEditorPopupMenu). O padrao do Swing
-                // ja rodou no mousePressed ANTES deste mouseClicked (selecionou
-                // so a palavra); aqui so sobrescrevemos com a selecao maior.
-                if (e.getClickCount() == 2 && !javax.swing.SwingUtilities.isRightMouseButton(e)) {
+                // Triplo-clique (nao mais duplo): seleciona a INSTRUCAO SQL
+                // inteira sob o cursor (ate o ";" anterior/seguinte, ver
+                // SqlStatementLocator — mesma logica ja usada pelo destaque de
+                // fundo da instrucao atual) — pedido explicito do usuario de
+                // poder selecionar uma instrucao inteira com um clique extra,
+                // pra executar so ela (ver tambem "Executar esta instrucao"
+                // no menu de contexto, buildEditorPopupMenu). Duplo-clique
+                // (getClickCount()==2) foi DELIBERADAMENTE deixado de fora
+                // daqui: o padrao do Swing/RSyntaxTextArea (selecionar so a
+                // PALAVRA sob o cursor) ja roda sozinho no mousePressed antes
+                // deste mouseClicked — inicialmente esta selecao de instrucao
+                // tinha sido colocada no duplo-clique, mas isso SOBRESCREVIA
+                // a selecao de palavra que o usuario esperava (relatado com
+                // exemplo: "clico duas vezes pra selecionar uma palavra e
+                // acaba selecionando a instrucao inteira"); triplo-clique e a
+                // convencao mais comum pra "selecionar o bloco/linha inteira"
+                // em editores de texto, sem tirar o duplo-clique do lugar.
+                if (e.getClickCount() == 3 && !javax.swing.SwingUtilities.isRightMouseButton(e)) {
                     int offset = textArea.viewToModel2D(e.getPoint());
                     int[] bounds = SqlStatementLocator.boundsAt(textArea.getText(), offset);
                     if (bounds[1] > bounds[0]) {
@@ -1539,13 +1551,9 @@ public class SqlEditorPane extends JPanel {
 
         findBar = new JPanel();
         findBar.setLayout(new BoxLayout(findBar, BoxLayout.Y_AXIS));
-        findBar.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(1, 0, 0, 0,
-                        FlatLaf.isLafDark() ? new Color(0x3A, 0x3D, 0x41) : new Color(0xE5, 0xE7, 0xEB)),
-                BorderFactory.createEmptyBorder(2, 6, 2, 6)));
+        findBar.setBorder(BorderFactory.createEmptyBorder(4, 6, 4, 6));
         findBar.add(row1);
         findBar.add(row2);
-        findBar.setVisible(false);
         return findBar;
     }
 
@@ -1560,47 +1568,88 @@ public class SqlEditorPane extends JPanel {
     }
 
     /**
-     * Mostra a barra de localizar/substituir (as duas linhas ja aparecem
-     * juntas — nao ha um "modo" separado) e foca o campo correspondente ao
-     * atalho usado.
+     * Entrada publica pro icone de busca da toolbar principal (ver
+     * {@code MainWindow#buildSearchIconButton}): abre a MESMA barra de
+     * localizar/substituir de sempre (Ctrl+F), com TODAS as opcoes (buscar,
+     * substituir, proxima/anterior ocorrencia) — pedido explicito do
+     * usuario ("a barra de busca do sql poderia ser icone que abre popup
+     * ou algo assim com todas as opcoes de busca ou substituicao"). Antes
+     * disto a toolbar tinha seu PROPRIO campo de texto (so buscar, sem
+     * substituir) que so encaminhava pra ca — o icone remove esse campo
+     * fixo (~200px sempre reservados na barra) e abre o find/replace
+     * completo direto, sem duplicar nenhuma logica de busca nova.
+     */
+    void openFindReplace() {
+        showFindBar(false);
+    }
+
+    /**
+     * Mostra a barra de localizar/substituir como um popup flutuante ancorado
+     * no canto superior direito do editor (mesmo padrao visual dos outros
+     * popups da toolbar — Conexoes/Historico/SQLs/Salvas, ver
+     * {@code MainWindow.AnchoredPopup}) em vez da antiga barra fixa na parte
+     * de baixo da aba — pedido explicito do usuario ("poderia abrir um
+     * popup assim como as outras opcoes"). As duas linhas (localizar e
+     * substituir) ja aparecem juntas — nao ha um "modo" separado.
      *
      * @param focusReplace {@code true} quando veio de Ctrl+H (foca "Substituir");
      *                     {@code false} quando veio de Ctrl+F (foca "Localizar").
      */
-    /**
-     * Entrada publica pro campo "Buscar no editor..." da toolbar principal
-     * (ver {@code MainWindow#addRightIconGroup}): abre a MESMA barra de
-     * localizar/substituir de sempre (Ctrl+F) com o texto ja digitado e
-     * procura a proxima ocorrencia — sem duplicar nenhuma logica de busca,
-     * so encaminha pro {@link #findField}/{@link #findNext()} existentes.
-     */
-    void searchFromToolbar(String query) {
-        if (query == null || query.isEmpty()) {
-            return;
-        }
-        findField.setText(query);
-        findBar.setVisible(true);
-        revalidate();
-        findNext();
-    }
-
     private void showFindBar(boolean focusReplace) {
         String sel = textArea.getSelectedText();
         if (sel != null && !sel.isEmpty() && !sel.contains("\n")) {
             findField.setText(sel);
         }
-        findBar.setVisible(true);
-        revalidate();
+        JDialog popup = getOrCreateFindPopup();
+        if (!popup.isShowing()) {
+            positionFindPopup(popup);
+            popup.setVisible(true);
+        }
         JTextField target = focusReplace ? replaceField : findField;
         target.requestFocusInWindow();
         target.selectAll();
     }
 
     private void hideFindBar() {
-        findBar.setVisible(false);
+        if (findPopup != null) {
+            findPopup.setVisible(false);
+        }
         clearMarks();
-        revalidate();
         textArea.requestFocusInWindow();
+    }
+
+    private JDialog getOrCreateFindPopup() {
+        if (findPopup != null) {
+            return findPopup;
+        }
+        Window owner = SwingUtilities.getWindowAncestor(this);
+        JDialog dialog = owner instanceof java.awt.Frame ? new JDialog((java.awt.Frame) owner)
+                : owner instanceof java.awt.Dialog ? new JDialog((java.awt.Dialog) owner) : new JDialog();
+        dialog.setUndecorated(true);
+        dialog.getRootPane().setWindowDecorationStyle(JRootPane.NONE);
+        findBar.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(GridTheme.HEADER_BORDER, 1, true),
+                BorderFactory.createEmptyBorder(6, 6, 6, 6)));
+        dialog.setContentPane(findBar);
+        dialog.pack();
+        dialog.addWindowFocusListener(new java.awt.event.WindowAdapter() {
+            @Override
+            public void windowLostFocus(java.awt.event.WindowEvent e) {
+                hideFindBar();
+            }
+        });
+        findPopup = dialog;
+        return dialog;
+    }
+
+    private void positionFindPopup(JDialog popup) {
+        if (!this.isShowing()) {
+            return;
+        }
+        java.awt.Point loc = this.getLocationOnScreen();
+        int x = loc.x + Math.max(0, this.getWidth() - popup.getPreferredSize().width - 16);
+        int y = loc.y + 8;
+        popup.setLocation(x, y);
     }
 
     /** Limpa o destaque de "marcar todos" sem mexer no texto. */

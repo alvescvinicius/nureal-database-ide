@@ -32,30 +32,28 @@ import com.nureal.ide.compartilhado.designsystem.NBadge;
 import com.nureal.ide.compartilhado.designsystem.NTheme;
 
 /**
- * Indicador "Conexao Ativa" — pilula arredondada mostrando SO o nome da
- * conexao ativa (status por cor do dot, ver {@link #render}) — pedido
- * explicito do usuario apos um bug relatado com captura de tela ("coloque
- * apenas o nome da conexao mesmo... aproveite ao maximo o espaco pra evitar
- * nomes cortados... sem interferir no botao de adicionar conexao, que ta
- * bugado ficando sobreposta"): host/porta/usuario/engine SAIRAM da pilula
- * (ficavam grandes demais pra coluna estreita da sidebar, forcando o layout
- * a quebrar) — quem quiser esses detalhes abre o dropdown "Conexoes salvas"
- * que a pilula ja abre ao clicar.
+ * Indicador "Conexao Ativa" — pilula arredondada no formato {@code [ nome |
+ * usuario | trocar (se 2+) | + ] } (pedido explicito do usuario, com
+ * referencia visual: "os nomes das conexoes costumam ser grandes, mas ela e
+ * a principal informacao... nomeConexao é principal precisa sempre estar
+ * visivel mesmo que a tela seja reduzida"). O NOME mora na regiao
+ * {@code WEST} de um {@link BorderLayout} aninhado (ver {@link #clickArea}
+ * no construtor) — {@code BorderLayout.WEST} SEMPRE recebe a largura
+ * PREFERIDA do componente, nunca encolhe, entao o nome nunca trunca, nao
+ * importa o quanto a pilula precise encolher (mesma garantia estrutural ja
+ * usada pro "Executar" nunca desaparecer na barra, ver
+ * {@code MainWindow#buildToolbar}). Usuario (menos critico) fica no
+ * {@code CENTER} — a UNICA parte que pode truncar com "..." quando falta
+ * espaco. Trocar/"+" ficam no {@code EAST}, protegidos igual ao nome.
  * <p>
  * Ja foi um CARD vertical na sidebar (SPEC-0007 "Sidebar Workspace"), depois
  * um card mais rico com selos, depois uma barra esticada pela largura
- * inteira da janela, depois um pill centralizado numa linha propria por
- * cima de tudo, depois embutida dentro da barra de acoes do editor (ao lado
- * do "Salvar") — e agora de volta ao topo FIXO da coluna da sidebar (ver
- * {@code MainWindow#buildLeftSide}/{@code #buildConnectionBar}), acima da
- * busca unificada e das abas Objetos/SQL/Salvas/Historico. Decisao final do
- * usuario: "dois cabecalhos independentes" — esta pilula alinhada acima de
- * "Objetos" (coluna da sidebar) e "Executar" alinhado ao inicio das abas do
- * editor (coluna do editor), cada um o topo da PROPRIA coluna, sem precisar
- * sincronizar com a posicao do divisor arrastavel entre elas. Continua sem
- * inventar dado nenhum (ex.: uma referencia visual sugeriu em algum momento
- * um selo de charset, que o app nao consulta em lugar nenhum hoje — ficou de
- * fora, ver {@link #render}).
+ * inteira da janela, depois um pill centralizado numa linha propria, depois
+ * embutida na barra de acoes do editor, depois topo fixo da sidebar — hoje
+ * vive no CENTRO da barra de acoes (ver {@code MainWindow#buildToolbarContentBlock}).
+ * Continua sem inventar dado nenhum (ex.: uma referencia visual sugeriu em
+ * algum momento um selo de charset, que o app nao consulta em lugar nenhum
+ * hoje — ficou de fora, ver {@link #render}).
  */
 final class ConnectionStatusCard extends JPanel {
 
@@ -70,13 +68,14 @@ final class ConnectionStatusCard extends JPanel {
 	}
 
 	private final JLabel dotIcon = new JLabel();
-	private final JLabel engineIcon = new JLabel();
 	private final JLabel nameLabel = new JLabel();
-	/** Painel clicavel (icones + nome + seta) que abre "Conexoes salvas" — fundo destacado no hover, ver construtor. */
+	/** Usuario da conexao ativa (ex.: "developer") — SO isto pode truncar, nunca o nome, ver javadoc da classe. */
+	private final JLabel userLabel = new JLabel();
+	/** Painel clicavel (dot+nome a esquerda, usuario no centro) que abre "Conexoes salvas" — fundo destacado no hover, ver construtor. */
 	private final JPanel clickArea;
 
 	/**
-	 * Botao "trocar conexao ativa" (icone ⇄ + texto) + selo com a contagem de
+	 * Botao SO-DE-ICONE "trocar conexao ativa" + selo com a contagem de
 	 * conexoes conectadas AGORA (nao a lista completa de conexoes salvas) —
 	 * pedido explicito do usuario: focar outra conexao ja conectada, SEM
 	 * desconectar as demais. So aparece com 2+ conexoes conectadas
@@ -84,13 +83,12 @@ final class ConnectionStatusCard extends JPanel {
 	 */
 	private final JButton switchButton;
 	private final JPanel switchRow = new JPanel(new FlowLayout(FlowLayout.LEFT, Spacing.XS, 0));
-	/** "+ Nova conexao", sempre visivel — ver {@link #setOnNewConnection}. */
+	/** "+" Nova conexao, sempre visivel — ver {@link #setOnNewConnection}. */
 	private final JButton newConnectionButton;
-	/** Seta "▾" no fim do {@link #clickArea} — so o icone, nao um botao clicavel separado (o painel inteiro ja e clicavel, ver {@link #openConnections}). */
-	private final JLabel chevron = new JLabel();
 
 	private State state = State.DISCONNECTED;
 	private String lastName = "Sem conexao";
+	private String lastUser;
 
 	private List<ActiveConnection> activeConnections = List.of();
 	private String activeConnectionName;
@@ -130,40 +128,34 @@ final class ConnectionStatusCard extends JPanel {
 		setBorder(BorderFactory.createEmptyBorder(Spacing.XS, Spacing.SM, Spacing.XS, Spacing.SM));
 
 		nameLabel.setFont(nameLabel.getFont().deriveFont(java.awt.Font.BOLD, 12f));
+		userLabel.setFont(userLabel.getFont().deriveFont(11f));
 
-		JPanel iconsCol = new JPanel(new FlowLayout(FlowLayout.LEFT, Spacing.XS, 0));
-		iconsCol.setOpaque(false);
-		iconsCol.add(dotIcon);
-		iconsCol.add(engineIcon);
+		JPanel namePanel = new JPanel(new FlowLayout(FlowLayout.LEFT, Spacing.XS, 0));
+		namePanel.setOpaque(false);
+		namePanel.add(dotIcon);
+		namePanel.add(nameLabel);
 
-		Buttons.bindThemedIcon(chevron, IconType.CHEVRON_RIGHT, 10, () -> GridTheme.MUTED_TEXT);
-
-		// BorderLayout (nao mais FlowLayout): FlowLayout SEMPRE da a cada
-		// filho a largura preferida INTEIRA, entao um nome de conexao longo
-		// nunca encolhia — ou vazava por cima do botao "+ Nova conexao" (a
-		// area clicavel toda simplesmente ficava mais larga que a coluna da
-		// sidebar), ou empurrava a coluna inteira mais larga, desalinhando o
-		// resto da janela (os dois bugs relatados pelo usuario com captura
-		// de tela). Aqui SO {@link #nameLabel} fica no CENTER — a UNICA
-		// regiao que o BorderLayout deixa encolher abaixo do preferido — e
-		// o JLabel do Swing ja trunca com "..." sozinho quando isso acontece
+		// BorderLayout (nao FlowLayout): {@code BorderLayout.WEST} SEMPRE
+		// recebe a largura PREFERIDA do componente, nunca encolhe — entao
+		// {@link #namePanel} (dot+NOME) nunca trunca, seja qual for o
+		// espaco disponivel (garantia estrutural pedida explicitamente:
+		// "nomeConexao é principal precisa sempre estar visível mesmo que
+		// a tela seja reduzida", mesma tecnica ja usada pro "Executar"
+		// nunca desaparecer na barra, ver MainWindow#buildToolbar). SO
+		// {@link #userLabel} fica no CENTER — a UNICA regiao que o
+		// BorderLayout deixa encolher abaixo do preferido — e o JLabel do
+		// Swing ja trunca com "..." sozinho quando isso acontece
 		// (comportamento nativo de SwingUtilities#layoutCompoundLabel, sem
-		// precisar de nenhum limite de caracteres calculado na mao). Os
-		// icones (WEST) e a seta (EAST, dentro do proprio clickArea) ficam
-		// com largura FIXA, sempre visiveis por inteiro — e o
-		// {@link #switchRow} (fora do clickArea, EAST do painel inteiro)
-		// nunca e espremido, entao o botao "+" nunca mais fica sobreposto.
+		// precisar de nenhum limite de caracteres calculado na mao).
 		clickArea = new JPanel(new BorderLayout(Spacing.SM, 0));
 		clickArea.setOpaque(false);
 		clickArea.setBorder(BorderFactory.createEmptyBorder(2, Spacing.SM, 2, Spacing.SM));
-		clickArea.add(iconsCol, BorderLayout.WEST);
-		clickArea.add(nameLabel, BorderLayout.CENTER);
-		clickArea.add(chevron, BorderLayout.EAST);
+		clickArea.add(namePanel, BorderLayout.WEST);
+		clickArea.add(userLabel, BorderLayout.CENTER);
 
-		switchButton = new JButton("Trocar");
-		Buttons.bindThemedIcon(switchButton, IconType.SWAP, 13, () -> GridTheme.MUTED_TEXT);
-		switchButton.setIconTextGap(4);
-		Buttons.styleSecondary(switchButton);
+		// SO-DE-ICONE (nao mais "Trocar" com texto) — pedido explicito do
+		// usuario: {@code [ nome | usuario | trocar (se 2+) | + ] }.
+		switchButton = Buttons.iconButton(IconType.SWAP, 15, () -> GridTheme.MUTED_TEXT);
 		switchButton.setToolTipText("Trocar conexao ativa");
 		switchButton.addActionListener(e -> showSwitchMenu());
 
@@ -182,24 +174,24 @@ final class ConnectionStatusCard extends JPanel {
 		// serem removidos/reordenados na primeira chamada.
 
 		// clickArea no CENTER (nao mais WEST): CENTER e a UNICA regiao que o
-		// BorderLayout deixa encolher — e o encolhimento cascateia pro
-		// nameLabel LA DENTRO (que tambem esta no CENTER do clickArea, ver
-		// acima). switchRow continua EAST, largura fixa, protegida.
+		// BorderLayout deixa encolher — mas dentro dele o proprio nome (ver
+		// acima) continua protegido, so o usuario e afetado. switchRow
+		// continua EAST, largura fixa, protegida (mesma garantia do nome).
 		add(clickArea, BorderLayout.CENTER);
 		add(switchRow, BorderLayout.EAST);
 
-		// O clickArea INTEIRO (icones + textos + seta) abre "Conexoes
-		// salvas" — mesmo cuidado ja aplicado quando isto era um card na
-		// sidebar: o listener vai em CADA componente visivel dele (nao so
-		// no painel), porque eventos de mouse em Swing nao "borbulham"
-		// sozinhos do filho pro pai.
+		// O clickArea INTEIRO (dot+nome+usuario) abre "Conexoes salvas" —
+		// mesmo cuidado ja aplicado quando isto era um card na sidebar: o
+		// listener vai em CADA componente visivel dele (nao so no painel),
+		// porque eventos de mouse em Swing nao "borbulham" sozinhos do
+		// filho pro pai.
 		MouseAdapter openConnections = new MouseAdapter() {
 			@Override
 			public void mouseClicked(MouseEvent e) {
 				onManageConnections.run();
 			}
 		};
-		for (Component c : new Component[] { clickArea, iconsCol, dotIcon, engineIcon, nameLabel, chevron }) {
+		for (Component c : new Component[] { clickArea, namePanel, dotIcon, nameLabel, userLabel }) {
 			c.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 			c.addMouseListener(openConnections);
 			if (c instanceof JLabel jl) {
@@ -320,19 +312,22 @@ final class ConnectionStatusCard extends JPanel {
 	void showDisconnected() {
 		state = State.DISCONNECTED;
 		lastName = "Sem conexao";
+		lastUser = null;
 		render();
 	}
 
 	void showConnecting(String name) {
 		state = State.CONNECTING;
 		lastName = name;
+		lastUser = null;
 		render();
 	}
 
-	/** So o NOME da conexao (host/porta/usuario/engine ficaram de fora da pilula — ver javadoc de {@link #render}). */
-	void showConnected(String name) {
+	/** Nome (protegido, nunca trunca) + usuario (pode truncar) — ver javadoc da classe pro layout {@code [ nome | usuario | trocar | + ] }. */
+	void showConnected(String name, String user) {
 		state = State.CONNECTED;
 		lastName = name;
+		lastUser = user;
 		render();
 	}
 
@@ -356,23 +351,20 @@ final class ConnectionStatusCard extends JPanel {
 		// refreshTheme() (chamado por MainWindow#toggleTheme), entao
 		// reaplicar aqui cobre os dois casos de uma vez.
 		Typography.primary(nameLabel);
+		Typography.tertiary(userLabel);
 		Color color = switch (state) {
 		case DISCONNECTED -> GridTheme.COLOR_LOGIC_FALSE;
 		case CONNECTING -> GridTheme.HEADER_HIGHLIGHT_BORDER;
 		case CONNECTED -> GridTheme.COLOR_LOGIC_TRUE;
 		};
 		dotIcon.setIcon(Icons.get(IconType.STATUS_DOT, 8, color));
-		Buttons.bindThemedIcon(engineIcon, IconType.DATABASE, 14, () -> GridTheme.MUTED_TEXT);
 
-		// SO o nome da conexao (nao mais usuario/host/engine juntos) —
-		// pedido explicito do usuario: "coloque apenas o nome da conexao
-		// mesmo". nameLabel esta no CENTER de um BorderLayout (ver
-		// construtor) — o proprio Swing trunca com "..." sozinho quando o
-		// espaco disponivel e menor que o texto (SwingUtilities#
-		// layoutCompoundLabel), aproveitando o MAXIMO de espaco disponivel
-		// antes de abreviar, em vez de um limite fixo de caracteres. O
-		// nome COMPLETO (nunca truncado) fica no tooltip, pra quando
-		// precisar conferir sem abrir o dropdown.
+		// Nome: nameLabel esta no WEST do BorderLayout interno (ver
+		// construtor) — NUNCA trunca, e sempre desenhado no tamanho
+		// preferido inteiro, garantia estrutural pedida explicitamente
+		// pelo usuario ("nomeConexao é principal precisa sempre estar
+		// visível mesmo que a tela seja reduzida"). O nome tambem vira
+		// tooltip, pra conferir sem precisar abrir o dropdown.
 		String name = switch (state) {
 		case DISCONNECTED -> "Nenhuma conexao";
 		case CONNECTING, CONNECTED -> lastName;
@@ -380,5 +372,13 @@ final class ConnectionStatusCard extends JPanel {
 		nameLabel.setText(name);
 		nameLabel.setToolTipText((state == State.CONNECTED || state == State.CONNECTING) ? lastName
 				: "Conexoes salvas");
+
+		// Usuario: CENTER do BorderLayout interno — a UNICA parte que pode
+		// truncar com "..." quando falta espaco (ver javadoc da classe).
+		// Formato pedido: "[ nome | usuario | ... ]".
+		String user = (state == State.CONNECTED && lastUser != null && !lastUser.isBlank()) ? lastUser : null;
+		userLabel.setVisible(user != null);
+		userLabel.setText(user != null ? ("|  " + user) : "");
+		userLabel.setToolTipText(user);
 	}
 }

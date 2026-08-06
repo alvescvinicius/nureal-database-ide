@@ -590,16 +590,6 @@ public class ConnectionsPanel extends JPanel {
     }
 
     /**
-     * Encaminha o texto da busca unificada da sidebar (Ctrl+K, ver
-     * {@code MainWindow#buildLeftSide}) para {@link #search} — reusa
-     * {@link #applyFilter} (disparado pelo {@code onTextChange} ja
-     * registrado no construtor) em vez de duplicar a logica de filtro.
-     */
-    void setFilterText(String text) {
-        search.setText(text);
-    }
-
-    /**
      * Chamado pelo zoom/modo compacto (ver {@code MainWindow#refreshDynamicSizing})
      * pra manter a densidade das listas do app em sincronia — DELIBERADAMENTE
      * NAO forca mais uma altura fixa por linha aqui: o cartao de 2 linhas do

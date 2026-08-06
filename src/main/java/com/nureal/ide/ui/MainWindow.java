@@ -132,7 +132,6 @@ import com.nureal.ide.modulos.iachat.apresentacao.ChatActions;
 import com.nureal.ide.modulos.iachat.apresentacao.ChatWindow;
 import com.nureal.ide.modulos.iachat.apresentacao.IdeContextAccessor;
 import com.nureal.ide.compartilhado.designsystem.NButton;
-import com.nureal.ide.compartilhado.designsystem.NSearchField;
 import com.nureal.ide.compartilhado.designsystem.NToast;
 
 /**
@@ -239,17 +238,29 @@ public class MainWindow extends JFrame {
 	private final ObjectExplorerController objectExplorer = new ObjectExplorerController(this);
 	private final ResultsAreaController resultsController = new ResultsAreaController(this);
 	private ConnectionsPanel connectionsPanel;
-	/** Janela flutuante que hospeda {@link #connectionsPanel} quando aberta (ver {@link #showConnectionsPopup}) — {@code null} quando fechada. */
-	private JDialog connectionsPopupWindow;
-	/** Instante (ms) do ultimo fechamento por perda de foco — ver {@link #showConnectionsPopup} pro race que isto evita. */
-	private long connectionsPopupClosedAt;
-	/** Indicador de linguagem + busca no editor da toolbar (ver {@link #addLanguageAndSearch}) — largura reaplicada por {@link #refreshDynamicSizing} a cada mudanca de zoom/modo compacto, igual aos demais componentes dependentes de escala. */
-	private JLabel languageLabel;
-	private NSearchField editorSearchField;
+	/**
+	 * Modelo "navegacao em popup ancorado" (pedido do usuario com
+	 * referencia visual: barra superior dividida em zonas, sem sidebar
+	 * permanente pra cada secao, cada uma um botao que abre um painel
+	 * flutuante logo abaixo dele, sem empurrar editor/resultados). Conexoes
+	 * foi o primeiro (bug de edicao de conexao forcou a solucao — ver
+	 * {@link AnchoredPopup}), "Historico" foi o piloto do padrao pra
+	 * NAVEGACAO em si, validado e seguido por "SQLs" e "Salvas". "Objetos"
+	 * continua fixo na sidebar de proposito (consulta CONSTANTE enquanto
+	 * se escreve SQL — nome de coluna/tabela —, ao contrario das outras 3,
+	 * que sao navegacao ocasional; fechar a arvore toda vez que o foco
+	 * volta pro editor atrapalharia esse uso — decisao explicita do
+	 * usuario ao aprovar o piloto). Os 4 popups sao {@link AnchoredPopup},
+	 * um so lugar decidindo undecorated/foco/debounce/Esc pros 4 — antes
+	 * de existir esta classe, cada popup tinha sua PROPRIA copia de ~40
+	 * linhas quase identicas (so o conteudo/tamanho mudavam).
+	 */
+	private final AnchoredPopup connectionsPopup = new AnchoredPopup();
+	private final AnchoredPopup historyPopup = new AnchoredPopup();
+	private final AnchoredPopup sqlEditorsPopup = new AnchoredPopup();
+	private final AnchoredPopup savedQueriesPopup = new AnchoredPopup();
 	private SavedQueriesPanel savedQueriesPanel;
 	private HistoryPanel historyPanel;
-	/** Busca unificada da sidebar (Fase 3 do AI-CHAT-MASTER-PLAN.md, Ctrl+K) — ver {@link #buildLeftSide}/{@link #applySidebarFilter}. */
-	private NSearchField sidebarSearch;
 	/** Rotulo "SQL Editors (N)" — mantido em dia por {@link #updateWorkspaceContextBar} (mesmo hook que ja roda a cada aba aberta/fechada). */
 	private JLabel sqlEditorsCountLabel;
 	/**
@@ -261,8 +272,8 @@ public class MainWindow extends JFrame {
 	 */
 	private final DefaultListModel<Component> sqlEditorsListModel = new DefaultListModel<>();
 	private JList<Component> sqlEditorsList;
-	/** As 4 abas da sidebar (Objetos/SQL/Salvas/Historico, ver {@link #buildLeftSide}) — usada por {@link #showHistoryPanel} pra selecionar a aba de Historico. */
-	private JTabbedPane sideTabs;
+	/** Conteudo do popup "SQLs" (ver {@link #showSqlEditorsPopup}) — atalho "+ nova aba" + lista das abas de SQL abertas. */
+	private JPanel sqlEditorsPanel;
 	/** Esquema selecionado na conexao ativa — so escrever via {@link #setCurrentSchema}. */
 	private SchemaInfo currentSchema;
 	/**
@@ -765,13 +776,31 @@ public class MainWindow extends JFrame {
 				this::onInstallUpdate, this::onViewUpdateNotes, this::onSkipUpdate, this::onDismissUpdateBanner);
 
 		// buildLeftSide() PRIMEIRO (constroi connectionsPanel) — a barra de
-		// conexao (buildConnectionBar, chamada de dentro de buildToolbar())
-		// depende dele existir (botao "+ Nova conexao").
+		// conexao (buildConnectionBar, chamada de dentro de buildToolbar()
+		// mais abaixo) depende dele existir (botao "+ Nova conexao").
 		leftSide = buildLeftSide();
-		add(updateBanner, BorderLayout.NORTH);
 
 		resultsArea = resultsController.buildResultsArea();
+		// editorAreaPanel ANTES de buildToolbar(): buildToolbar() precisa
+		// de editorTabs ja existente (updateSaveButtonState no final dele
+		// consulta a aba atual) — editorTabs e construido dentro de
+		// buildEditorArea() (initWorkspaces), nao mais dentro de
+		// buildToolbar() em si.
 		editorAreaPanel = buildEditorArea();
+
+		// updateBanner + barra de acoes EMPILHADOS no NORTH da JANELA
+		// INTEIRA (nao mais so da area do editor) — pedido explicito do
+		// usuario ("o toolbar ocupar toda a linha?"): em janelas estreitas,
+		// a barra de acoes espremida so na largura da coluna do editor
+		// (sidebar de fora) ficava sem espaco pra tantos itens e varios
+		// simplesmente SUMIAM (GridBagLayout zerando colunas quando nao
+		// cabe tudo). Com a largura da JANELA INTEIRA (sidebar + editor),
+		// sobra bem mais espaco pros mesmos itens.
+		JPanel topArea = new JPanel();
+		topArea.setLayout(new BoxLayout(topArea, BoxLayout.Y_AXIS));
+		topArea.add(updateBanner);
+		topArea.add(buildToolbar());
+		add(topArea, BorderLayout.NORTH);
 
 		centerSplit = new JSplitPane(resultsVertical ? JSplitPane.HORIZONTAL_SPLIT : JSplitPane.VERTICAL_SPLIT,
 				editorAreaPanel, resultsArea);
@@ -820,50 +849,51 @@ public class MainWindow extends JFrame {
 
 	// ---------- Barras ----------
 
+	/**
+	 * Todo o conteudo da barra (Executar..Salvar, conexao, busca+navegacao+
+	 * icones) vive num UNICO bloco (ver {@link #buildToolbarContentBlock})
+	 * que fica CENTRALIZADO na barra inteira, com um espacador elastico de
+	 * cada lado — pedido explicito do usuario apos ver a barra maximizada:
+	 * "as opcoes ficam nos cantos, elas deveriam estar centralizadas...
+	 * funcionalidades da esquerda | conexoes | funcionalidades da
+	 * direita... espaco sobrando" (nos dois cantos, nao no meio). Os dois
+	 * espacadores tem peso IGUAL (weightx=1.0), entao a sobra de espaco em
+	 * janelas largas/maximizadas vai IGUALMENTE pros dois lados — o bloco
+	 * inteiro fica no meio de verdade, nao so "perto" do meio.
+	 * <p>
+	 * Isto NAO reabre o bug antigo ("Executar sumindo em janela estreita",
+	 * ja relatado antes): o bloco em si e uma UNICA coluna de peso ZERO no
+	 * GridBagLayout — o algoritmo so tenta encolhe-la depois de encolher os
+	 * DOIS espacadores ate o minimo (zero) primeiro, entao ela so perde
+	 * espaco quando a janela fica mais estreita que a largura MINIMA do
+	 * bloco inteiro (bem raro agora que Formatar/Explicar/Salvar/navegacao
+	 * viraram icones — ver #addRunFormatExplainButtons/#addSaveButton).
+	 * Nesse caso extremo, o bloco (FlowLayout por dentro) corta pela
+	 * DIREITA primeiro (icones de navegacao), nunca escondendo Executar
+	 * (o primeiro filho, mais a esquerda).
+	 */
 	private JComponent buildToolbar() {
-		// JPanel totalmente transparente (sem o fundo mais claro que você não gostou)
 		JPanel mainBar = new JPanel(new GridBagLayout());
 		mainBar.setOpaque(false);
-
-		// 8px (Spacing.SM) acima/abaixo — o MESMO valor do padding do painel
-		// CONEXOES (ver ConnectionsPanel, createEmptyBorder(8,8,8,8)), para as
-		// duas linhas (cabecalho do sidebar e esta barra) ficarem na mesma
-		// altura visual, lado a lado. 0px na esquerda para colar na linha da
-		// aba; 12px (Spacing.MD) na direita.
 		mainBar.setBorder(BorderFactory.createEmptyBorder(Spacing.SM, 0, Spacing.SM, Spacing.MD));
 
 		GridBagConstraints gbc = new GridBagConstraints();
-		// CENTER (nao mais BASELINE): a linha da barra ja mistura botoes de
-		// TEXTO (Executar/Formatar/Explicar/Salvar), um botao SO DE ICONE
-		// (a setinha de opcoes de formatacao) e um painel sem texto nenhum
-		// (o card de conexao) — BASELINE so faz sentido pra componentes com
-		// uma linha de texto de verdade, entao um botao so-de-icone e um
-		// JPanel puro (sem baseline proprio) cada um "resolvia" a propria
-		// posicao vertical de um jeito diferente, ficando um por cima/baixo
-		// dos outros (relatado pelo usuario com captura de tela: "Executar,
-		// Formatar, o icone de formatacoes estao desalinhados"). CENTER e
-		// robusto pros 3 tipos ao mesmo tempo — e como todos ja tem a MESMA
-		// altura fixada (rowHeight, ver #addRunFormatExplainButtons/
-		// #addSaveButton/#buildConnectionBar), centralizar da exatamente o
-		// mesmo resultado visual de "todos alinhados", sem depender de
-		// baseline de texto nenhum.
-		gbc.anchor = GridBagConstraints.CENTER;
-		gbc.fill = GridBagConstraints.NONE;
-		gbc.weighty = 1.0;
 		gbc.gridy = 0;
+		gbc.weighty = 1.0;
+		gbc.fill = GridBagConstraints.NONE;
+		gbc.anchor = GridBagConstraints.CENTER;
 
-		int rowHeight = addRunFormatExplainButtons(mainBar, gbc);
-		addSaveButton(mainBar, gbc, rowHeight);
-
-		// --- O ESPAÇADOR INVISÍVEL ---
-		// Ele joga tudo o que vier a partir daqui totalmente para a direita
-		gbc.gridx = 8;
+		gbc.gridx = 0;
 		gbc.weightx = 1.0;
-		gbc.insets = new Insets(0, 0, 0, 0);
 		mainBar.add(Box.createHorizontalGlue(), gbc);
 
-		addLanguageAndSearch(mainBar, gbc);
-		addRightIconGroup(mainBar, gbc);
+		gbc.gridx = 1;
+		gbc.weightx = 0.0;
+		mainBar.add(buildToolbarContentBlock(), gbc);
+
+		gbc.gridx = 2;
+		gbc.weightx = 1.0;
+		mainBar.add(Box.createHorizontalGlue(), gbc);
 
 		toolbarBar = mainBar;
 		// initWorkspaces() ja rodou (ver buildEditorArea) quando chegamos aqui,
@@ -871,6 +901,127 @@ public class MainWindow extends JFrame {
 		// botao Salvar desde o primeiro desenho, em vez de nascer sempre habilitado.
 		updateSaveButtonState();
 		return mainBar;
+	}
+
+	/**
+	 * {@code | Executar..Salvar | Conexao | Busca+navegacao+icones | } — os
+	 * 3 grupos lado a lado, com o MESMO respiro (Spacing.MD) entre eles,
+	 * ver {@link #buildToolbar} pra como o bloco inteiro e centralizado.
+	 * Gap MD aqui (entre GRUPOS distintos) vs. Gap SM dentro de cada grupo
+	 * (ver #addRunFormatExplainButtons/#buildTrailingGroup) — pedido
+	 * explicito do usuario ("uniformização de distância e alinhamento dos
+	 * icones... deixem padronizados, não permita desalinhamento"): so 2
+	 * valores de espacamento no total, cada um usado SEMPRE no mesmo nivel
+	 * (entre grupos vs. dentro de um grupo), nunca misturado.
+	 */
+	private JPanel buildToolbarContentBlock() {
+		JPanel block = new JPanel(new FlowLayout(FlowLayout.CENTER, Spacing.MD, 0));
+		block.setOpaque(false);
+		block.add(buildCoreActionsGroup());
+		block.add(buildConnectionBar());
+		block.add(buildTrailingGroup());
+		return block;
+	}
+
+	/** Executar/Formatar/Explicar/Salvar — mesmo gap uniforme (Spacing.SM) entre CADA botao, ver javadoc de {@link #buildToolbarContentBlock}. */
+	private JComponent buildCoreActionsGroup() {
+		JPanel group = new JPanel(new GridBagLayout());
+		group.setOpaque(false);
+
+		GridBagConstraints gbc = new GridBagConstraints();
+		// CENTER (nao mais BASELINE): o grupo mistura botoes de TEXTO
+		// (Executar) com botoes SO DE ICONE (Formatar/Explicar/Salvar/
+		// setinhas) — BASELINE so faz sentido pra componentes com uma
+		// linha de texto de verdade, entao os dois tipos "resolviam" a
+		// propria posicao vertical de um jeito diferente, ficando um por
+		// cima/baixo do outro (relatado pelo usuario com captura de tela).
+		// CENTER e robusto pros 2 tipos ao mesmo tempo — e como todos ja
+		// tem a MESMA altura fixada (rowHeight, ver
+		// #addRunFormatExplainButtons/#addSaveButton), centralizar da
+		// exatamente o mesmo resultado visual de "todos alinhados".
+		gbc.anchor = GridBagConstraints.CENTER;
+		gbc.fill = GridBagConstraints.NONE;
+		gbc.weighty = 1.0;
+		gbc.gridy = 0;
+
+		int rowHeight = addRunFormatExplainButtons(group, gbc);
+		addSaveButton(group, gbc, rowHeight);
+		return group;
+	}
+
+	/**
+	 * Busca do editor + navegacao (SQLs/Salvas/Historico) + icones
+	 * utilitarios — TODOS num UNICO {@code FlowLayout} com o MESMO gap
+	 * (Spacing.SM) entre cada icone, sem excecao (antes a busca tinha um
+	 * gap MAIOR — Spacing.MD — antes do resto do grupo, e o grupo em si
+	 * usava Spacing.XS por dentro: duas inconsistencias diferentes na
+	 * MESMA fileira de icones, corrigidas aqui numa fileira so — pedido
+	 * explicito do usuario: "não permita desalinhamento").
+	 */
+	private JPanel buildTrailingGroup() {
+		JPanel trailing = new JPanel(new FlowLayout(FlowLayout.LEFT, Spacing.SM, 0));
+		trailing.setOpaque(false);
+		trailing.add(buildSearchIconButton());
+
+		// Buttons.iconButton ja aplica styleIconButton E prende o icone a
+		// GridTheme.MUTED_TEXT (ver seu javadoc) — antes estes botoes eram
+		// "new JButton(Icons.get(..., GridTheme.MUTED_TEXT))" com a cor
+		// CONGELADA no tema em que a janela abriu, so corrigindo sozinha se
+		// o usuario fechasse e reabrisse a janela.
+		JButton toggleSidebar = Buttons.iconButton(IconType.PANEL_LEFT, 16, () -> GridTheme.MUTED_TEXT);
+		toggleSidebar.setToolTipText("Mostrar/ocultar painel lateral (Ctrl+B)");
+		toggleSidebar.addActionListener(e -> toggleSidebar());
+		trailing.add(toggleSidebar);
+
+		JButton toggleResults = Buttons.iconButton(IconType.PANEL_BOTTOM, 16, () -> GridTheme.MUTED_TEXT);
+		toggleResults.setToolTipText("Mostrar/ocultar resultados (Ctrl+J)");
+		toggleResults.addActionListener(e -> toggleResults());
+		trailing.add(toggleResults);
+
+		// "SQLs"/"Salvas"/"Historico" — modelo "navegacao em popup ancorado"
+		// (ver javadoc do grupo de campos {@code AnchoredPopup} no topo da
+		// classe): nao sao mais abas fixas da sidebar, cada uma abre um
+		// painel flutuante ancorado embaixo do proprio botao.
+		JButton sqlEditorsButton = Buttons.iconButton(IconType.EDIT, 16, () -> GridTheme.MUTED_TEXT);
+		sqlEditorsButton.setToolTipText("Abas de SQL abertas");
+		sqlEditorsButton.addActionListener(e -> showSqlEditorsPopup(sqlEditorsButton));
+		trailing.add(sqlEditorsButton);
+
+		JButton savedQueriesButton = Buttons.iconButton(IconType.FAVORITE, 16, () -> GridTheme.MUTED_TEXT);
+		savedQueriesButton.setToolTipText("Consultas salvas");
+		savedQueriesButton.addActionListener(e -> showSavedQueriesPopup(savedQueriesButton));
+		trailing.add(savedQueriesButton);
+
+		JButton historyButton = Buttons.iconButton(IconType.HISTORY, 16, () -> GridTheme.MUTED_TEXT);
+		historyButton.setToolTipText("Historico de execucoes");
+		historyButton.addActionListener(e -> showHistoryPopup(historyButton));
+		trailing.add(historyButton);
+
+		JButton layoutButton = Buttons.iconButton(IconType.SETTINGS, 16, () -> GridTheme.MUTED_TEXT);
+		layoutButton.setToolTipText("Layout, zoom e modo compacto");
+		layoutButton.addActionListener(e -> buildLayoutMenu().show(layoutButton, 0, layoutButton.getHeight()));
+		trailing.add(layoutButton);
+
+		// Icone inicial mostra a ACAO do botao (pra ONDE ele muda o tema), nao
+		// o tema atual — app arranca no tema escuro (ver App#main), entao o
+		// botao comeca oferecendo "mudar para claro" (icone de sol). O TIPO do
+		// icone muda conforme o tema (sol/lua), entao continua sendo
+		// resetado explicitamente em toggleTheme() — so a COR (MUTED_TEXT)
+		// precisava do fix generico, ja coberta por iconButton aqui tambem.
+		themeButton = Buttons.iconButton(IconType.THEME_LIGHT, 16, () -> GridTheme.MUTED_TEXT);
+		themeButton.setToolTipText("Alternar tema claro/escuro");
+		themeButton.addActionListener(e -> toggleTheme());
+		trailing.add(themeButton);
+
+		// Chat com IA (Ollama local) — abre o dock proprio na borda direita
+		// da janela (ver #openAiChat/#chatDock), mesma linguagem visual
+		// discreta dos outros icones do grupo.
+		JButton chatButton = Buttons.iconButton(IconType.CHAT, 16, () -> GridTheme.MUTED_TEXT);
+		chatButton.setToolTipText("Chat com IA (Ollama local)");
+		chatButton.addActionListener(e -> openAiChat());
+		trailing.add(chatButton);
+
+		return trailing;
 	}
 
 	/** Executar/Formatar/menu de opcoes de formatacao/Explicar — grupo da esquerda da barra. Devolve a altura comum das 4. */
@@ -888,32 +1039,26 @@ public class MainWindow extends JFrame {
 		// acidente. Sobrescreve a margem padrao de NButton.Kind.PRIMARY de proposito.
 		runButton.setMargin(new Insets(Spacing.XS, Spacing.LG, Spacing.XS, Spacing.MD));
 
-		// "Executar ▾" — seta separada (mesmo espacamento uniforme do resto
-		// da barra, ver #addRunFormatExplainButtons mais abaixo) que abre
-		// "Executar esta instrucao" (SqlEditorPane#runStatementUnderCaret, ja
-		// existia so no menu de contexto do editor — ver
-		// SqlEditorPane#buildEditorPopupMenu), sem precisar clicar com o
-		// botao direito no editor primeiro.
+		// "Executar ▾" — seta separada, mesmo estilo SO-DE-ICONE flat do
+		// resto da barra agora (ver comentario em #formatButton logo
+		// abaixo) — abre "Executar esta instrucao"
+		// (SqlEditorPane#runStatementUnderCaret, ja existia so no menu de
+		// contexto do editor — ver SqlEditorPane#buildEditorPopupMenu), sem
+		// precisar clicar com o botao direito no editor primeiro.
 		JButton runMenuButton = new JButton(new com.formdev.flatlaf.icons.FlatMenuArrowIcon());
 		runMenuButton.setToolTipText("Opcoes de execucao");
 		runMenuButton.addActionListener(e -> buildRunMenu().show(runMenuButton, 0, runMenuButton.getHeight()));
-		Buttons.styleSecondary(runMenuButton);
-		runMenuButton.setMargin(new Insets(Spacing.XS, Spacing.SM, Spacing.XS, Spacing.SM));
+		Buttons.styleIconButton(runMenuButton);
 
-		// Sem icone aqui de proposito: o icone de "linhas" ficava estranho colado
-		// ao texto "Formatar" nesse tamanho — so texto. Estilo OUTLINE (contorno,
-		// sem preenchimento) — igual ao "Nova" do painel CONEXOES (ver
-		// ConnectionsPanel#buildHeader) — em vez de um segundo botao solido do
-		// lado do Executar: fica claro que Executar e a acao primaria, e o
-		// conjunto Formatar+seta e mais leve/discreto (mesma leitura de "acao
-		// secundaria" nos dois lugares da UI).
-		JButton formatButton = new NButton("Formatar", NButton.Kind.SECONDARY);
-		// Icone (IconType.FORMAT) adicionado de volta — pedido explicito do
-		// usuario numa revisao visual posterior (referencia mostrando
-		// "≡ Formatar"); bindThemedIcon (nao setIcon solto) pra nao "queimar"
-		// a cor do tema em que a janela abriu.
-		Buttons.bindThemedIcon(formatButton, IconType.FORMAT, 13, () -> GridTheme.MUTED_TEXT);
-		formatButton.setIconTextGap(6);
+		// SO-DE-ICONE (nao mais texto+icone) — pedido explicito do usuario
+		// apos revisao visual ("podemos colocar as demais funcionalidades
+		// apenas como icones ao inves de botoes com labels... fica melhor e
+		// alinhar tudo"): Executar continua com texto (e a UNICA acao
+		// primaria/preenchida da barra, precisa se destacar) — Formatar/
+		// Explicar/Salvar viram icones flat, mesma linguagem visual do
+		// grupo de navegacao da direita, e MUITO mais compactos (ajuda a
+		// barra inteira caber em janelas estreitas sem precisar rolar).
+		JButton formatButton = Buttons.iconButton(IconType.FORMAT, 16, () -> GridTheme.MUTED_TEXT);
 		formatButton.setToolTipText("Formatar SQL (Ctrl+Shift+F)");
 		formatButton.addActionListener(e -> {
 			SqlEditorPane editor = currentEditor();
@@ -921,29 +1066,22 @@ public class MainWindow extends JFrame {
 				editor.formatText();
 			}
 		});
-		formatButton.setMargin(new Insets(Spacing.XS, Spacing.MD, Spacing.XS, Spacing.MD));
 
 		JButton formatMenuButton = new JButton(new com.formdev.flatlaf.icons.FlatMenuArrowIcon());
 		formatMenuButton.setToolTipText("Presets e opcoes de formatacao");
 		formatMenuButton
 				.addActionListener(e -> buildFormatMenu().show(formatMenuButton, 0, formatMenuButton.getHeight()));
-		Buttons.styleSecondary(formatMenuButton);
-		formatMenuButton.setMargin(new Insets(Spacing.XS, Spacing.SM, Spacing.XS, Spacing.SM));
+		Buttons.styleIconButton(formatMenuButton);
 
 		// "Explicar" (fase 4 do GAP_ANALYSIS_DBA_DEV.md: "EXPLAIN visual") —
-		// mesmo estilo OUTLINE de "Formatar" (acao secundaria, ao lado da
-		// primaria "Executar"), rodando EXPLAIN FORMAT=JSON na instrucao atual
-		// sem executa-la de verdade.
-		JButton explainButton = new NButton("Explicar", NButton.Kind.SECONDARY);
-		// IconType.INFO (nao ha um icone dedicado de "plano de execucao" no
-		// catalogo do NDS): EXPLAIN mostra INFORMACAO sobre como a consulta
-		// roda, encaixe semantico razoavel sem inventar um icone novo so
-		// pra isto — mesmo pedido de icone visto em "Formatar".
-		Buttons.bindThemedIcon(explainButton, IconType.INFO, 13, () -> GridTheme.MUTED_TEXT);
-		explainButton.setIconTextGap(6);
+		// roda EXPLAIN FORMAT=JSON na instrucao atual sem executa-la de
+		// verdade. IconType.INFO (nao ha um icone dedicado de "plano de
+		// execucao" no catalogo do NDS): EXPLAIN mostra INFORMACAO sobre
+		// como a consulta roda, encaixe semantico razoavel sem inventar um
+		// icone novo so pra isto.
+		JButton explainButton = Buttons.iconButton(IconType.INFO, 16, () -> GridTheme.MUTED_TEXT);
 		explainButton.setToolTipText("Ver o plano de execucao (EXPLAIN) da consulta atual");
 		explainButton.addActionListener(e -> onExplain());
-		explainButton.setMargin(new Insets(Spacing.XS, Spacing.MD, Spacing.XS, Spacing.MD));
 
 		// O icone minusculo da seta rende um "preferred height" menor que o do
 		// texto "Executar"/"Formatar" — sem isto os componentes ficam com
@@ -1018,29 +1156,25 @@ public class MainWindow extends JFrame {
 
 	/**
 	 * Salvar — segundo grupo da esquerda, mesma altura calculada pelo grupo
-	 * anterior. Ate aqui tinha tambem um botao "Historico" (revisao de UX:
-	 * era um duplicado exato do icone de mesmo nome em toda aba de SQL —
-	 * ver {@code SqlEditorPane#buildQuickActionRow} — os dois chamavam
-	 * {@link #showHistoryPanel()}); removido daqui e de la porque a aba
-	 * "Historico" da barra lateral (ver {@link #buildLeftSide}) ja e o
-	 * unico lugar dedicado, sem precisar de mais nenhum atalho.
+	 * anterior. Um botao "Historico" chegou a existir aqui tambem (revisao
+	 * de UX antiga: era um duplicado exato do icone de mesmo nome em toda
+	 * aba de SQL, ver {@code SqlEditorPane#buildQuickActionRow}) e foi
+	 * removido quando "Historico" virou aba fixa da sidebar (unico lugar
+	 * dedicado, na epoca). Hoje "Historico" voltou a ter um botao proprio
+	 * — no grupo de icones da DIREITA, nao aqui — mas abre um painel
+	 * flutuante (ver {@link #showHistoryPopup}), nao mais uma aba fixa;
+	 * ver o javadoc de {@link #buildLeftSide} pro motivo dessa mudanca.
 	 */
 	private void addSaveButton(JPanel mainBar, GridBagConstraints gbc, int rowHeight) {
 		// Salvar a aba atual como query (biblioteca gerenciada pelo app — ver
-		// SavedQueryStore): mesmo estilo outline do Formatar, acao secundaria.
-		// Desabilitado quando a aba atual esta vazia (ver updateSaveButtonState) —
-		// antes o clique era aceito mas nao fazia nada alem de um aviso na barra
-		// de status, o que parecia um bug de "salvar nao funciona".
-		saveQueryButton = new NButton("Salvar", NButton.Kind.SECONDARY);
-		// Buttons.bindThemedIcon (nao setIcon(Icons.get(...)) solto): sem
-		// isto o icone ficava congelado na paleta do tema em que a janela
-		// abriu, ilegivel apos o primeiro toggleTheme() (ver javadoc do
-		// metodo — mesmo bug sistemico corrigido nos botoes so-de-icone).
-		Buttons.bindThemedIcon(saveQueryButton, IconType.SAVE, 13, () -> GridTheme.MUTED_TEXT);
+		// SavedQueryStore): SO-DE-ICONE agora, mesmo motivo de Formatar/
+		// Explicar (ver #addRunFormatExplainButtons). Desabilitado quando a
+		// aba atual esta vazia (ver updateSaveButtonState) — antes o clique
+		// era aceito mas nao fazia nada alem de um aviso na barra de
+		// status, o que parecia um bug de "salvar nao funciona".
+		saveQueryButton = Buttons.iconButton(IconType.SAVE, 16, () -> GridTheme.MUTED_TEXT);
 		saveQueryButton.setToolTipText("Salvar como query (Ctrl+S)");
 		saveQueryButton.addActionListener(e -> onSaveQuery());
-		saveQueryButton.setIconTextGap(6);
-		saveQueryButton.setMargin(new Insets(Spacing.XS, Spacing.MD, Spacing.XS, Spacing.MD));
 		Dimension saveDim = saveQueryButton.getPreferredSize();
 		saveQueryButton.setPreferredSize(new Dimension(saveDim.width, rowHeight));
 
@@ -1052,8 +1186,7 @@ public class MainWindow extends JFrame {
 		JButton saveMenuButton = new JButton(new com.formdev.flatlaf.icons.FlatMenuArrowIcon());
 		saveMenuButton.setToolTipText("Opcoes de salvamento");
 		saveMenuButton.addActionListener(e -> buildSaveMenu().show(saveMenuButton, 0, saveMenuButton.getHeight()));
-		Buttons.styleSecondary(saveMenuButton);
-		saveMenuButton.setMargin(new Insets(Spacing.XS, Spacing.SM, Spacing.XS, Spacing.SM));
+		Buttons.styleIconButton(saveMenuButton);
 		saveMenuButton.setPreferredSize(new Dimension(saveMenuButton.getPreferredSize().width, rowHeight));
 
 		// Mesmo gap uniforme (Spacing.SM) do resto da barra — ver comentario em
@@ -1086,141 +1219,28 @@ public class MainWindow extends JFrame {
 	}
 
 	/**
-	 * Indicador de linguagem ("SQL", so apresentacao — o app so roda SQL
-	 * hoje, sem outro dialeto pra escolher) + busca no editor ativo (pedido
-	 * explicito do protótipo: "Busca do editor integrada na barra
-	 * superior"), entre o grupo de acoes da esquerda e os icones da direita.
-	 * A busca so encaminha pra {@link SqlEditorPane#searchFromToolbar} —
-	 * reaproveita a barra de localizar/substituir (Ctrl+F) ja existente em
-	 * cada aba, sem duplicar logica de busca nova.
-	 * <p>
-	 * "SQL" e um {@link JLabel} simples, nao um {@code JComboBox} — um combo
-	 * clicavel com uma UNICA opcao sugeria ao usuario que dava pra trocar de
-	 * linguagem, o que nao existe hoje (pedido explicito do usuario apos
-	 * revisao visual).
+	 * Busca/substituicao no editor ativo — ANTES um campo de texto fixo
+	 * (~200px sempre reservados na barra, so buscar, sem substituir, so
+	 * encaminhava pra {@code SqlEditorPane#searchFromToolbar}); agora um
+	 * icone que abre a barra de localizar/substituir INTEIRA (ver
+	 * {@link SqlEditorPane#openFindReplace()}) — pedido explicito do
+	 * usuario ("a barra de busca do sql poderia ser icone que abre popup
+	 * ou algo assim com todas as opcoes de busca ou substituicao"). Ganha
+	 * dois problemas de uma vez: menos largura reservada sempre-visivel
+	 * (ajuda o "Executar nunca pode sumir", ver {@link #buildToolbar}) e
+	 * acesso a MAIS opcoes (substituir, nao so buscar) que o campo antigo
+	 * nao tinha.
 	 */
-	private void addLanguageAndSearch(JPanel mainBar, GridBagConstraints gbc) {
-		// selfStyling (nao "new JLabel" + Typography.secondary direto): a
-		// toolbar so e construida UMA VEZ (nunca reconstruida no toggle de
-		// tema) — sem isto o rotulo ficava com a cor do tema em que o app
-		// abriu (sempre escuro) gravada pra sempre, invisivel apos trocar
-		// pro tema claro (mesmo bug relatado pelo usuario nos rotulos de
-		// FERRAMENTAS, ver Typography#selfStyling).
-		languageLabel = Typography.selfStyling("SQL", Typography::secondary);
-		languageLabel.setToolTipText("Linguagem da aba atual");
-		languageLabel.setBorder(BorderFactory.createEmptyBorder(0, Spacing.SM, 0, Spacing.SM));
-
-		editorSearchField = new NSearchField("Buscar no editor...");
-		editorSearchField.onTextChange(() -> {
+	private JButton buildSearchIconButton() {
+		JButton button = Buttons.iconButton(IconType.SEARCH, 16, () -> GridTheme.MUTED_TEXT);
+		button.setToolTipText("Buscar/substituir no editor (Ctrl+F)");
+		button.addActionListener(e -> {
 			SqlEditorPane editor = currentEditor();
 			if (editor != null) {
-				editor.searchFromToolbar(editorSearchField.getText());
+				editor.openFindReplace();
 			}
 		});
-		applyToolbarFieldSizes();
-
-		gbc.gridx = 9;
-		gbc.weightx = 0.0;
-		gbc.insets = new Insets(0, Spacing.LG, 0, 0);
-		mainBar.add(languageLabel, gbc);
-
-		gbc.gridx = 10;
-		gbc.insets = new Insets(0, Spacing.SM, 0, 0);
-		mainBar.add(editorSearchField, gbc);
-	}
-
-	/**
-	 * Largura de {@link #editorSearchField} escalada por {@link #scaledPx}
-	 * (zoom + modo compacto) — reaplicada por {@link #refreshDynamicSizing}
-	 * a cada mudanca, mesmo tratamento ja dado aos outros componentes
-	 * dependentes de escala (linhas da arvore, cartoes de conexao etc.).
-	 * Sem isto, a largura ficaria CONGELADA no valor calculado na construcao
-	 * da toolbar, fora de proporcao com o resto da UI depois de um zoom
-	 * in/out ou de ligar o modo compacto — pedido explicito do usuario
-	 * ("todos os componentes visuais deveriam acompanhar zoom/espacamento/
-	 * modo compacto"). {@link #languageLabel} nao precisa disto: e so texto,
-	 * o tamanho natural ja acompanha o zoom via a fonte padrao do UIManager
-	 * (ver {@link #applyZoomFont}).
-	 */
-	private void applyToolbarFieldSizes() {
-		if (editorSearchField != null) {
-			editorSearchField.setPreferredSize(null);
-			int height = editorSearchField.getPreferredSize().height;
-			editorSearchField.setPreferredSize(new Dimension(scaledPx(200), height));
-		}
-	}
-
-	/** Icones discretos da direita (sidebar/resultados/layout/tema/chat) — ultimo grupo da barra. */
-	private void addRightIconGroup(JPanel mainBar, GridBagConstraints gbc) {
-		// --- Botões da Direita (icones discretos, mesma linguagem visual) ---
-		// Sem separador visivel antes deste grupo (principio do NDS:
-		// "divisorias deixam de ser linhas, passam a ser espaco") — o
-		// respiro extra no inset do primeiro icone (ver gridx=8 abaixo) ja
-		// comunica o agrupamento, sem precisar de um traco desenhado.
-		// Buttons.iconButton ja aplica styleIconButton E prende o icone a
-		// GridTheme.MUTED_TEXT (ver seu javadoc) — antes estes 4 botoes eram
-		// "new JButton(Icons.get(..., GridTheme.MUTED_TEXT))" com a cor
-		// CONGELADA no tema em que a janela abriu, so corrigindo sozinha se o
-		// usuario fechasse e reabrisse a janela.
-		JButton toggleSidebar = Buttons.iconButton(IconType.PANEL_LEFT, 16, () -> GridTheme.MUTED_TEXT);
-		toggleSidebar.setToolTipText("Mostrar/ocultar painel lateral (Ctrl+B)");
-		toggleSidebar.addActionListener(e -> toggleSidebar());
-
-		JButton toggleResults = Buttons.iconButton(IconType.PANEL_BOTTOM, 16, () -> GridTheme.MUTED_TEXT);
-		toggleResults.setToolTipText("Mostrar/ocultar resultados (Ctrl+J)");
-		toggleResults.addActionListener(e -> toggleResults());
-
-		JButton layoutButton = Buttons.iconButton(IconType.SETTINGS, 16, () -> GridTheme.MUTED_TEXT);
-		layoutButton.setToolTipText("Layout, zoom e modo compacto");
-		layoutButton.addActionListener(e -> buildLayoutMenu().show(layoutButton, 0, layoutButton.getHeight()));
-
-		// Icone inicial mostra a ACAO do botao (pra ONDE ele muda o tema), nao
-		// o tema atual — app arranca no tema escuro (ver App#main), entao o
-		// botao comeca oferecendo "mudar para claro" (icone de sol). O TIPO do
-		// icone muda conforme o tema (sol/lua), entao continua sendo
-		// resetado explicitamente em toggleTheme() — so a COR (MUTED_TEXT)
-		// precisava do fix generico, ja coberta por iconButton aqui tambem.
-		themeButton = Buttons.iconButton(IconType.THEME_LIGHT, 16, () -> GridTheme.MUTED_TEXT);
-		themeButton.setToolTipText("Alternar tema claro/escuro");
-		themeButton.addActionListener(e -> toggleTheme());
-
-		// Chat com IA (Ollama local) — abre o dock proprio na borda direita
-		// da janela (ver #openAiChat/#chatDock), mesma linguagem visual
-		// discreta dos outros icones do grupo da direita.
-		JButton chatButton = Buttons.iconButton(IconType.CHAT, 16, () -> GridTheme.MUTED_TEXT);
-		chatButton.setToolTipText("Chat com IA (Ollama local)");
-		chatButton.addActionListener(e -> openAiChat());
-
-		// Os 5 icones da direita vao num UNICO painel FlowLayout, em vez de 5
-		// celulas separadas do GridBagLayout de mainBar — GridBagLayout pode
-		// comprimir celulas de peso zero abaixo do tamanho preferido quando a
-		// janela fica estreita demais pra caber tudo (nenhum componente aqui
-		// tem folga entre minimo/preferido pra doar, entao a compressao caia
-		// nos icones-so, deixando-os "esmagados"/desalinhados ao redimensionar
-		// a janela — bug relatado pelo usuario). FlowLayout nunca redimensiona
-		// os filhos: ou desenha todos no tamanho preferido, ou faz overflow —
-		// nunca os espreme.
-		JPanel rightIcons = new JPanel(new FlowLayout(FlowLayout.LEFT, Spacing.XS, 0));
-		rightIcons.setOpaque(false);
-		rightIcons.add(toggleSidebar);
-		rightIcons.add(toggleResults);
-		rightIcons.add(layoutButton);
-		rightIcons.add(themeButton);
-		rightIcons.add(chatButton);
-
-		gbc.gridx = 11;
-		// CRITICO: weightx de volta pra 0 aqui — ficou em 1.0 desde o glue
-		// (gridx=8) e, com fill=NONE + anchor=BASELINE (centraliza
-		// horizontalmente dentro da propria celula), metade do espaco extra
-		// da janela ia pra ESTA celula em vez de toda pro glue: os icones
-		// ficavam centralizados no meio da barra, longe da quina direita
-		// (bug relatado pelo usuario). O divisor removido antes fazia esse
-		// mesmo reset — perdido junto quando ele saiu.
-		gbc.weightx = 0.0;
-		// Respiro maior (LG) antes do grupo — sozinho, sem linha divisoria, ja
-		// marca visualmente onde ele comeca.
-		gbc.insets = new Insets(0, Spacing.LG, 0, 0);
-		mainBar.add(rightIcons, gbc);
+		return button;
 	}
 
 	/**
@@ -1612,7 +1632,7 @@ public class MainWindow extends JFrame {
 		bindGlobalAction(rp, "control 0", "zoom-ui-reset", this::resetZoom);
 		bindGlobalAction(rp, "control R", "refresh-objects", () -> objectExplorer.refreshObjectTree(true));
 		bindGlobalAction(rp, "control S", "save-query", this::onSaveQuery);
-		bindGlobalAction(rp, "control K", "focus-sidebar-search", this::focusSidebarSearch);
+		bindGlobalAction(rp, "control K", "focus-object-search", this::focusObjectSearch);
 	}
 
 	private static void bindGlobalAction(JComponent rp, String keyStroke, String name, Runnable action) {
@@ -1806,7 +1826,6 @@ public class MainWindow extends JFrame {
 		if (sqlEditorsList != null) {
 			sqlEditorsList.setFixedCellHeight(scaledPx(resultRowHeightBasePx()));
 		}
-		applyToolbarFieldSizes();
 		if (toolbarBar != null) {
 			toolbarBar.revalidate();
 			toolbarBar.repaint();
@@ -1850,7 +1869,9 @@ public class MainWindow extends JFrame {
 	}
 
 	private void setConnectedState(String label) {
-		connectionCard.showConnected(label);
+		String user = (activeWorkspace != null && activeWorkspace.profile != null) ? activeWorkspace.profile.user()
+				: null;
+		connectionCard.showConnected(label, user);
 		connectingWorkspaceName = null;
 		updateWorkspaceContextBar();
 	}
@@ -1966,18 +1987,17 @@ public class MainWindow extends JFrame {
 	/**
 	 * Indicador "Conexao Ativa" — ja foi uma barra inteira acima de Executar/
 	 * Formatar/... (span da largura toda da janela), depois embutida DENTRO
-	 * da barra de acoes do editor, ao lado do botao "Salvar" — mas ai o
-	 * usuario pediu pra ela voltar a ficar alinhada acima de "Objetos" (topo
-	 * da PROPRIA coluna da sidebar), com "Executar" alinhado ao inicio das
-	 * abas do editor (topo da coluna do EDITOR) — duas colunas, dois
-	 * cabecalhos independentes, cada um alinhado com o que esta embaixo dele
-	 * sozinho, em vez de uma unica barra tentando acompanhar ao vivo a
-	 * posicao do divisor arrastavel entre as duas colunas (decisao explicita
-	 * do usuario: "dois cabecalhos independentes" em vez de "uma barra so
-	 * pra largura da janela inteira"). Chamada de dentro de
-	 * {@link #buildLeftSide()}, DEPOIS de {@link #connectionsPanel} existir
-	 * (precisa dele pro botao "+ Nova conexao" e pra seta abrir "Conexoes
-	 * salvas" — ver {@link #showConnectionsPopup}).
+	 * da barra de acoes ao lado do "Salvar", depois topo fixo da coluna da
+	 * sidebar (acima de "Objetos", alinhada com "Executar" acima das abas
+	 * do editor — "dois cabecalhos independentes") — e agora de volta pra
+	 * DENTRO da barra de acoes, desta vez no CENTRO dela (pedido explicito
+	 * do usuario: "conexoes precisa ir para o centro da toolbar"), ver
+	 * {@link #buildToolbar} pra como o centro e calculado (dois
+	 * espacadores elasticos, um de cada lado). Chamada de dentro de
+	 * {@link #buildToolbar()}, DEPOIS de {@link #buildLeftSide()} ja ter
+	 * rodado (precisa de {@link #connectionsPanel} existente pro botao "+
+	 * Nova conexao" e pra seta abrir "Conexoes salvas" — ver
+	 * {@link #showConnectionsPopup}).
 	 */
 	private JComponent buildConnectionBar() {
 		connectionCard = new ConnectionStatusCard();
@@ -2001,39 +2021,27 @@ public class MainWindow extends JFrame {
 	// ---------- Lado esquerdo ----------
 
 	/**
-	 * Sidebar unificada (Fase 3 do {@code AI-CHAT-MASTER-PLAN.md}): substitui
-	 * o rail de icones + {@code CardLayout} (onde so uma secao ficava visivel
-	 * por vez, estilo activity bar) por uma coluna UNICA, sempre rolavel, com
-	 * os 3 grupos sempre visiveis ao mesmo tempo (CONEXOES, WORKSPACE,
-	 * OBJETOS, FERRAMENTAS) — reversao confirmada explicitamente pelo usuario
-	 * (ver a pergunta obrigatoria do plano, respondida "Sim, confirmo a
-	 * reversao"). {@link ConnectionStatusCard} passou por varias posicoes
-	 * (barra inteira no topo da janela, depois embutida na barra de acoes do
-	 * editor) e voltou a ser o topo FIXO desta coluna (ver
-	 * {@link #buildConnectionBar}, acima da busca unificada e das abas) —
-	 * pedido explicito do usuario pra ficar alinhada acima de "Objetos",
-	 * como "Executar" fica alinhado ao inicio das abas do editor (duas
-	 * colunas, dois cabecalhos independentes).
+	 * Sidebar: hoje SO a arvore de Objetos (ver javadoc da classe/dos campos
+	 * {@code AnchoredPopup} pro historico completo) — Conexoes/SQL/Salvas/
+	 * Historico sairam daqui ao longo de varias revisoes de UX e viraram
+	 * botao+popup na barra de acoes do editor (ver {@link #buildToolbar}),
+	 * "Objetos" continua fixo de proposito (consulta CONSTANTE enquanto se
+	 * escreve SQL, ao contrario dos outros, que sao navegacao ocasional).
+	 * {@link ConnectionStatusCard} em particular passou por varias posicoes
+	 * (barra inteira no topo da janela, embutida na barra de acoes, topo
+	 * fixo desta coluna) antes de virar o CENTRO da barra de acoes (ver
+	 * {@link #buildConnectionBar}), pedido explicito do usuario.
 	 * <p>
-	 * CONEXOES e OBJETOS reaproveitam {@link ConnectionsPanel} e
-	 * {@code ObjectExplorerController#buildObjectBrowser} INTEIROS (cada um
-	 * ja desenha seu proprio cabecalho/busca) — nao existia rotulo "CONEXOES"
-	 * na lista de grupos do mockup, mas removê-la perderia funcionalidade
-	 * hoje acessivel via rail, o que o criterio de aceite da Fase 3 proibe
-	 * explicitamente. WORKSPACE e FERRAMENTAS sao grupos NOVOS (sem painel
-	 * proprio existente): WORKSPACE reaproveita {@link SavedQueriesPanel}/
-	 * {@link HistoryPanel} tambem inteiros, mais 3 linhas simples (SQL
-	 * Editors/Favoritos/Chat com IA, ver {@link #sidebarRow}); FERRAMENTAS
-	 * sao 3 linhas simples que delegam pros dialogos ja existentes (hoje so
-	 * acessiveis pelo menu de contexto da raiz do esquema) — "Importar/
-	 * Exportar Dados" do mockup ficou de fora (sem entry point generico:
-	 * hoje so existe import/export por TABELA especifica, nao por esquema),
-	 * mesmo tipo de reducao de escopo documentada na Fase 4.
+	 * FERRAMENTAS (Backup/Usuarios/Monitor/Chat) continua um grupo fixo no
+	 * rodape desta coluna — 3 linhas simples que delegam pros dialogos ja
+	 * existentes (hoje so acessiveis pelo menu de contexto da raiz do
+	 * esquema).
 	 */
 	private JComponent buildLeftSide() {
-		// ConnectionsPanel PRIMEIRO (buildConnectionBar, logo abaixo, precisa
-		// dele ja existente pra achar seu dono de dialogos, ver
-		// ConnectionsPanel#setOwnerWindow, e pro botao "+ Nova conexao").
+		// ConnectionsPanel PRIMEIRO (buildConnectionBar, chamada de dentro
+		// de #buildToolbar, precisa dele ja existente pra achar seu dono de
+		// dialogos, ver ConnectionsPanel#setOwnerWindow, e pro botao "+
+		// Nova conexao").
 		connectionsPanel = new ConnectionsPanel(connectionStore, this::connectTo, this::disconnectFrom);
 		connectionsPanel.setOwnerWindow(this);
 		connectionsPanel.setRowHeight(scaledPx(resultRowHeightBasePx()));
@@ -2043,25 +2051,18 @@ public class MainWindow extends JFrame {
 		savedQueriesPanel = new SavedQueriesPanel(savedQueryStore, this::openSavedQuery);
 		historyPanel = new HistoryPanel(historyStore, this::openHistoryEntry);
 
-		// Card "Conexao Ativa" — topo FIXO desta coluna, acima da busca e das
-		// abas (ver #buildConnectionBar/javadoc de #buildLeftSide).
-		JComponent connectionBar = buildConnectionBar();
-
-		// Busca unificada (Ctrl+K) — encaminha o texto pro filtro JA
-		// EXISTENTE de cada painel embutido (ver #applySidebarFilter), sem
-		// duplicar logica de filtro nenhuma.
-		sidebarSearch = new NSearchField("Buscar (Ctrl+K)...");
-		sidebarSearch.onTextChange(this::applySidebarFilter);
-		JPanel searchRow = new JPanel(new BorderLayout());
-		searchRow.setOpaque(false);
-		searchRow.setBorder(BorderFactory.createEmptyBorder(0, 0, Spacing.SM, 0));
-		searchRow.add(sidebarSearch, BorderLayout.CENTER);
-
-		// selfStyling: mesmo motivo do languageLabel (ver
-		// #addLanguageAndSearch) — a sidebar so e construida uma vez.
+		// selfStyling: a sidebar so e construida uma vez (nunca reconstruida
+		// no toggle de tema) — sem isto o rotulo ficava com a cor do tema
+		// em que o app abriu gravada pra sempre.
 		sqlEditorsCountLabel = Typography.selfStyling("SQL Editors", Typography::secondary);
-		JComponent sqlEditorsRow = sidebarRow(IconType.EDIT, sqlEditorsCountLabel, true, null,
-				() -> { if (!addQueryTab()) { selectLastRealTab(); } });
+		JComponent sqlEditorsRow = sidebarRow(IconType.EDIT, sqlEditorsCountLabel, true, null, () -> {
+			if (!addQueryTab()) {
+				selectLastRealTab();
+			}
+			// Fecha o popup "SQLs" (ver #showSqlEditorsPopup) — mesmo padrao
+			// dos outros popups de navegacao: a acao ja foi feita.
+			sqlEditorsPopup.close();
+		});
 		// Lista de verdade das abas de SQL abertas, clicaveis pra navegar entre
 		// elas — pedido explicito do usuario: a aba "SQL" so tinha o atalho
 		// "SQL Editors (N)" pra ABRIR uma aba nova, sem nenhuma forma de ver
@@ -2104,36 +2105,32 @@ public class MainWindow extends JFrame {
 				Component tabComponent = sqlEditorsListModel.get(idx);
 				editorTabs.setSelectedComponent(tabComponent);
 				focusEditor();
+				// Fecha o popup "SQLs" — mesma acao de #sqlEditorsRow acima.
+				sqlEditorsPopup.close();
 			}
 		});
 		refreshSqlEditorsCount();
 		JScrollPane sqlEditorsListScroll = new JScrollPane(sqlEditorsList);
 		sqlEditorsListScroll.setBorder(BorderFactory.createEmptyBorder());
-		JPanel sqlEditorsTab = new JPanel(new BorderLayout(0, 4));
-		sqlEditorsTab.setOpaque(false);
-		sqlEditorsTab.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
-		sqlEditorsTab.add(sqlEditorsRow, BorderLayout.NORTH);
-		sqlEditorsTab.add(sqlEditorsListScroll, BorderLayout.CENTER);
+		sqlEditorsPanel = new JPanel(new BorderLayout(0, 4));
+		sqlEditorsPanel.setOpaque(false);
+		sqlEditorsPanel.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+		sqlEditorsPanel.add(sqlEditorsRow, BorderLayout.NORTH);
+		sqlEditorsPanel.add(sqlEditorsListScroll, BorderLayout.CENTER);
 
-		// 4 abas clicaveis (Objetos/SQL/Salvas/Historico, pedido explicito do
-		// usuario na revisao de UX: "eram para ser abas") em vez de tudo
-		// empilhado numa coluna so — cada uma ocupa a altura INTEIRA restante
-		// da sidebar quando selecionada, ao inves de dividir espaco fixo com
-		// as outras 3 o tempo todo. So Conexoes fica sempre visivel fora das
-		// abas (usado junto com qualquer uma das 4, ver escolha do usuario).
-		sideTabs = new JTabbedPane(JTabbedPane.TOP);
-		// Uma UNICA linha, com rolagem, em vez do padrao do Swing de
-		// empilhar em varias linhas quando a coluna fica estreita — mesmo
-		// motivo/receita do editorTabs (ver #buildEditorArea) e do
-		// resultTabs (ver ResultsAreaController#buildResultsArea): pedido
-		// explicito do usuario, as abas nao devem ficar "umas em cima das
-		// outras", sempre lateralmente.
-		sideTabs.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
-		sideTabs.putClientProperty("JTabbedPane.tabType", "card");
-		sideTabs.addTab("Objetos", objectExplorer.buildObjectBrowser());
-		sideTabs.addTab("SQL", sqlEditorsTab);
-		sideTabs.addTab("Salvas", savedQueriesPanel);
-		sideTabs.addTab("Histórico", historyPanel);
+		// So "Objetos" fica na sidebar agora — "SQL" e "Salvas" tambem
+		// migraram pro modelo "navegacao em popup ancorado" (mesmo padrao
+		// validado com "Historico", ver {@link #showSqlEditorsPopup}/
+		// {@link #showSavedQueriesPopup}, botoes no grupo de icones da
+		// direita da toolbar). "Objetos" continua fixo de proposito: e
+		// consultado CONSTANTEMENTE enquanto se escreve SQL (nome de
+		// coluna/tabela), diferente das outras 3 (SQL/Salvas/Historico),
+		// que sao navegacao ocasional — fechar a arvore de objetos toda
+		// vez que o foco volta pro editor atrapalharia esse uso (decisao
+		// explicita do usuario ao aprovar o piloto). Sem JTabbedPane
+		// nenhum agora (nao ha mais nada pra alternar) — o proprio
+		// navegador de objetos ocupa a coluna inteira.
+		JComponent objectsBrowser = objectExplorer.buildObjectBrowser();
 
 		// FERRAMENTAS: um unico grupo no rodape com as 3 ferramentas
 		// administrativas MAIS "Chat com IA" logo depois (pedido explicito
@@ -2154,33 +2151,29 @@ public class MainWindow extends JFrame {
 		footer.setLayout(new BoxLayout(footer, BoxLayout.Y_AXIS));
 		footer.add(toolsGroup);
 
-		// Conexoes fica sempre visivel ACIMA das abas (pedido explicito do
-		// usuario): topo fixo (busca unificada + lista de conexoes), CENTRO
-		// elastico (as 4 abas, cada uma ocupando a altura toda quando
-		// selecionada), rodape fixo (atalhos + ferramentas) — nao e mais uma
-		// unica coluna rolando (BoxLayout dentro de um JScrollPane so): cada
-		// aba ja cuida da propria rolagem interna (JTree/JList com
-		// JScrollPane, ver ObjectExplorerController/SavedQueriesPanel/
-		// HistoryPanel), entao a sidebar toda usa BorderLayout normal.
-		JPanel fixedTop = new JPanel();
-		fixedTop.setOpaque(false);
-		fixedTop.setLayout(new BoxLayout(fixedTop, BoxLayout.Y_AXIS));
-		fixedTop.add(connectionBar);
-		fixedTop.add(Box.createVerticalStrut(Spacing.SM));
-		fixedTop.add(searchRow);
-
+		// Nao e mais uma unica coluna rolando (BoxLayout dentro de um
+		// JScrollPane so): a arvore ja cuida da propria rolagem interna
+		// (ver ObjectExplorerController), entao a sidebar toda usa
+		// BorderLayout normal. Conexao Ativa NAO mora mais aqui — voltou
+		// pro CENTRO da barra de acoes do editor (ver #buildToolbar).
+		// A busca unificada "Buscar (Ctrl+K)" que ficava ACIMA da arvore
+		// tambem saiu — pedido explicito do usuario: era pura duplicacao,
+		// so encaminhava texto pro campo de busca PROPRIO de cada painel
+		// (Objetos/Conexoes/Salvas/Historico ja tem o seu — ver
+		// ObjectExplorerController#objectSearch e equivalentes), que agora
+		// sao sempre visiveis assim que o painel/popup em questao abre, sem
+		// precisar de um atalho unificado por cima.
 		JPanel contentColumn = new JPanel(new BorderLayout(0, Spacing.SM));
 		contentColumn.setBorder(BorderFactory.createEmptyBorder(Spacing.SM, Spacing.SM, Spacing.SM, Spacing.SM));
-		contentColumn.add(fixedTop, BorderLayout.NORTH);
-		contentColumn.add(sideTabs, BorderLayout.CENTER);
+		contentColumn.add(objectsBrowser, BorderLayout.CENTER);
 		contentColumn.add(footer, BorderLayout.SOUTH);
 
 		JPanel container = new JPanel(new BorderLayout());
 		container.add(contentColumn, BorderLayout.CENTER);
 		container.setPreferredSize(new Dimension(280, 100));
 		// Minimo EXPLICITO e bem menor que o preferido: sem isto, JSplitPane
-		// usa o minimo CALCULADO pelos filhos (JTabbedPane com 4 abas,
-		// campos de busca, etc.) pra travar o quanto a divisoria pode andar
+		// usa o minimo CALCULADO pelos filhos (arvore de Objetos, campos de
+		// busca etc.) pra travar o quanto a divisoria pode andar
 		// — na pratica um teto bem maior do que o usuario queria (pedido
 		// explicito: "esse limite deveria ser bem menor"). Componentes
 		// internos continuam com seu proprio scroll/clipping quando a
@@ -2190,46 +2183,140 @@ public class MainWindow extends JFrame {
 	}
 
 	/**
+	 * Painel flutuante ancorado logo abaixo de um botao (Conexoes/Historico/
+	 * SQLs/Salvas — ver os 4 campos {@code AnchoredPopup} no topo da
+	 * classe): {@link JDialog} sem borda (undecorated), NAO-MODAL, que se
+	 * fecha sozinho ao perder foco — mesmo efeito visual de "dropdown
+	 * acoplado ao botao", mas suportando dialogos/menus filhos de verdade
+	 * (eles sao JANELAS PROPRIAS, donas=o popup, e {@link #isChildWindowShowing}
+	 * impede o fechamento automatico enquanto uma delas estiver aberta).
+	 * <p>
+	 * Ponto UNICO pros 4 popups (antes cada um tinha sua PROPRIA copia de
+	 * ~40 linhas quase identicas): originado do popup de Conexoes, que
+	 * precisou virar JDialog (nao mais {@link JPopupMenu}, ate a v1.1.3)
+	 * porque {@link ConnectionsPanel} abre os PROPRIOS dialogos
+	 * ({@code JOptionPane} de Nova/Editar conexao) e o PROPRIO menu de
+	 * contexto — um {@code JPopupMenu} do Swing nao foi feito pra hospedar
+	 * outro popup/dialogo dentro dele (o {@code MenuSelectionManager} so
+	 * acompanha UMA cadeia de popup ativa por vez, entao o popup externo se
+	 * fechava sozinho assim que o dialogo interno tentava abrir). Bug
+	 * relatado pelo usuario na epoca: "no momento nao consigo editar uma
+	 * conexao e criar uma nova".
+	 */
+	private final class AnchoredPopup {
+		private JDialog window;
+		private long closedAt;
+
+		boolean isOpen() {
+			return window != null && window.isShowing();
+		}
+
+		/**
+		 * Alterna: fecha se ja aberto (mesmo comportamento de "toggle" que
+		 * um {@link JPopupMenu} ja dava de graca), senao mostra
+		 * {@code content} ancorado logo abaixo de {@code anchor}.
+		 * {@code content} deve vir com {@code setPreferredSize}/
+		 * {@code setBorder} JA aplicados pelo chamador (o tamanho e
+		 * especifico de cada painel).
+		 */
+		void toggle(JComponent anchor, JComponent content) {
+			if (isOpen()) {
+				window.dispose();
+				return;
+			}
+			// Race relatada pelo usuario ("clico de novo deveria fechar, mas
+			// abre uma nova"): clicar no PROPRIO anchor pra fechar move o
+			// foco da janela ANTES do clique ser entregue ao MouseListener
+			// do anchor — o windowLostFocus abaixo ja dispensou o popup (e
+			// ja zerou "window", ver windowClosed) quando #toggle e chamado
+			// de novo pelo MESMO clique, entao o "if" acima nunca ve o
+			// popup como aberto e abriria um novo por cima. Um cooldown bem
+			// curto trata "acabou de fechar por perda de foco" como o MESMO
+			// gesto de fechar, em vez de reabrir.
+			if (System.currentTimeMillis() - closedAt < 250) {
+				return;
+			}
+			JDialog popup = new JDialog(MainWindow.this, false);
+			popup.setUndecorated(true);
+			// CRITICO: App#main chama JDialog.setDefaultLookAndFeelDecorated(true)
+			// (pra janelas DE VERDADE ganharem a titlebar unificada do FlatLaf) —
+			// isso faz TODO JDialog, ja na construcao, herdar um windowDecorationStyle
+			// que pinta uma titlebar PROPRIA do FlatLaf (icone "N" + botao fechar
+			// "X") dentro do rootPane, por CIMA do conteudo. setUndecorated(true)
+			// so tira a moldura NATIVA do sistema operacional — nao desliga essa
+			// titlebar pintada pelo Swing/FlatLaf, que continuava aparecendo
+			// mesmo num popup "undecorated" (bug relatado pelo usuario: "essa
+			// lista que abre nao precisa de logo nem dessa barra superior").
+			// PLAIN_DIALOG some com ela, deixando so o conteudo de verdade —
+			// like uma lista que expande, nao uma janela.
+			popup.getRootPane().setWindowDecorationStyle(JRootPane.NONE);
+			popup.setLayout(new BorderLayout());
+			popup.add(content, BorderLayout.CENTER);
+			popup.pack();
+
+			Point anchorLoc = anchor.getLocationOnScreen();
+			popup.setLocation(anchorLoc.x, anchorLoc.y + anchor.getHeight());
+
+			popup.getRootPane().registerKeyboardAction(e -> popup.dispose(),
+					KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), JComponent.WHEN_IN_FOCUSED_WINDOW);
+			popup.addWindowFocusListener(new WindowAdapter() {
+				@Override
+				public void windowLostFocus(WindowEvent e) {
+					// So fecha se NENHUMA janela filha (ex.: o dialogo de
+					// Nova/Editar conexao, ou o menu de contexto quando
+					// "pesado" o bastante pra virar janela propria) estiver
+					// aberta — checar isso em vez de e.getOppositeWindow()
+					// (que costuma vir null em varios ambientes/gerenciadores
+					// de janela, fechando o popup na hora errada mesmo com um
+					// dialogo filho ativo).
+					if (!isChildWindowShowing(popup)) {
+						closedAt = System.currentTimeMillis();
+						popup.dispose();
+					}
+				}
+			});
+			popup.addWindowListener(new WindowAdapter() {
+				@Override
+				public void windowClosed(WindowEvent e) {
+					if (window == popup) {
+						window = null;
+					}
+					// O painel volta a nao ter pai nenhum ate a proxima
+					// abertura — remove-lo explicitamente evita mante-lo
+					// preso a uma janela ja descartada.
+					popup.getContentPane().removeAll();
+				}
+			});
+
+			window = popup;
+			popup.setVisible(true);
+		}
+
+		void close() {
+			if (window != null) {
+				window.dispose();
+			}
+		}
+	}
+
+	/** {@code true} se {@code window} tiver alguma janela PROPRIA (filha) atualmente visivel — ver {@link AnchoredPopup}. */
+	private static boolean isChildWindowShowing(Window window) {
+		for (Window owned : window.getOwnedWindows()) {
+			if (owned.isShowing()) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
 	 * Janela flutuante com a lista completa de conexoes salvas
 	 * ({@link #connectionsPanel}, conectar/desconectar/criar/editar) —
 	 * aberta a partir da seta "Conexoes salvas" do {@link ConnectionStatusCard}
-	 * (ver #buildLeftSide). Deixou de ficar sempre visivel na sidebar
-	 * (pedido explicito do protótipo), mas continua acessivel de um clique.
-	 * <p>
-	 * NAO e mais um {@link JPopupMenu} (era ate a v1.1.3): {@link ConnectionsPanel}
-	 * abre os PROPRIOS dialogos ({@code JOptionPane} de Nova/Editar conexao)
-	 * e o PROPRIO menu de contexto (clique direito), e um {@code JPopupMenu}
-	 * do Swing nao foi feito pra hospedar outro popup/dialogo dentro dele —
-	 * o {@code MenuSelectionManager} so acompanha UMA cadeia de popup ativa
-	 * por vez, entao o popup externo se fechava sozinho assim que o dialogo
-	 * interno tentava abrir, ou o menu de contexto nem chegava a aparecer.
-	 * Bug relatado pelo usuario: "no momento nao consigo editar uma conexao
-	 * e criar uma nova". {@link JDialog} sem borda (undecorated), NAO-MODAL,
-	 * que se fecha sozinho ao perder foco — mesmo efeito visual de "dropdown
-	 * acoplado ao card", mas suportando dialogos/menus filhos de verdade
-	 * (eles sao JANELAS PROPRIAS, donas={@code popup}, e {@link #isChildWindowShowing}
-	 * impede o fechamento automatico enquanto uma delas estiver aberta).
+	 * (ver {@link #buildLeftSide}). Ver {@link AnchoredPopup} pro mecanismo
+	 * (compartilhado com Historico/SQLs/Salvas).
 	 */
 	private void showConnectionsPopup(JComponent anchor) {
-		// Clicar de novo com o popup ja aberto FECHA em vez de abrir outro
-		// por cima (mesmo comportamento de "toggle" que o JPopupMenu ja
-		// dava de graca).
-		if (connectionsPopupWindow != null && connectionsPopupWindow.isShowing()) {
-			connectionsPopupWindow.dispose();
-			return;
-		}
-		// Race relatada pelo usuario ("clico de novo deveria fechar, mas
-		// abre uma nova"): clicar no PROPRIO anchor pra fechar move o foco
-		// da janela ANTES do clique ser entregue ao MouseListener do
-		// anchor — o windowLostFocus abaixo ja dispensou o popup (e ja
-		// zerou connectionsPopupWindow, ver windowClosed) quando este metodo
-		// e chamado de novo pelo MESMO clique, entao o "if" acima acima
-		// nunca ve o popup como aberto e abre um novo por cima. Um cooldown
-		// bem curto trata "acabou de fechar por perda de foco" como o MESMO
-		// gesto de fechar, em vez de reabrir.
-		if (System.currentTimeMillis() - connectionsPopupClosedAt < 250) {
-			return;
-		}
 		// Mesma LARGURA do card de conexao (nao mais um valor fixo de
 		// 300px): pedido explicito do usuario ("poderia ter um visual
 		// melhor... acoplado") — com a mesma largura do card logo acima e
@@ -2241,71 +2328,7 @@ public class MainWindow extends JFrame {
 		// de cara na mesma altura.
 		connectionsPanel.setPreferredSize(new Dimension(Math.max(anchor.getWidth(), scaledPx(260)), scaledPx(420)));
 		connectionsPanel.setBorder(BorderFactory.createLineBorder(GridTheme.HEADER_BORDER, 1, true));
-
-		JDialog popup = new JDialog(this, false);
-		popup.setUndecorated(true);
-		// CRITICO: App#main chama JDialog.setDefaultLookAndFeelDecorated(true)
-		// (pra janelas DE VERDADE ganharem a titlebar unificada do FlatLaf) —
-		// isso faz TODO JDialog, ja na construcao, herdar um windowDecorationStyle
-		// que pinta uma titlebar PROPRIA do FlatLaf (icone "N" + botao fechar
-		// "X") dentro do rootPane, por CIMA do conteudo. setUndecorated(true)
-		// so tira a moldura NATIVA do sistema operacional — nao desliga essa
-		// titlebar pintada pelo Swing/FlatLaf, que continuava aparecendo
-		// mesmo num popup "undecorated" (bug relatado pelo usuario: "essa
-		// lista que abre nao precisa de logo nem dessa barra superior").
-		// PLAIN_DIALOG some com ela, deixando so o conteudo de verdade
-		// (ConnectionsPanel) — like uma lista que expande, nao uma janela.
-		popup.getRootPane().setWindowDecorationStyle(JRootPane.NONE);
-		popup.setLayout(new BorderLayout());
-		popup.add(connectionsPanel, BorderLayout.CENTER);
-		popup.pack();
-
-		Point anchorLoc = anchor.getLocationOnScreen();
-		popup.setLocation(anchorLoc.x, anchorLoc.y + anchor.getHeight());
-
-		popup.getRootPane().registerKeyboardAction(e -> popup.dispose(),
-				KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), JComponent.WHEN_IN_FOCUSED_WINDOW);
-		popup.addWindowFocusListener(new WindowAdapter() {
-			@Override
-			public void windowLostFocus(WindowEvent e) {
-				// So fecha se NENHUMA janela filha (ex.: o dialogo de Nova/
-				// Editar conexao, ou o menu de contexto quando "pesado" o
-				// bastante pra virar janela propria) estiver aberta —
-				// checar isso em vez de e.getOppositeWindow() (que costuma
-				// vir null em varios ambientes/gerenciadores de janela,
-				// fechando o popup na hora errada mesmo com um dialogo
-				// filho ativo).
-				if (!isChildWindowShowing(popup)) {
-					connectionsPopupClosedAt = System.currentTimeMillis();
-					popup.dispose();
-				}
-			}
-		});
-		popup.addWindowListener(new WindowAdapter() {
-			@Override
-			public void windowClosed(WindowEvent e) {
-				if (connectionsPopupWindow == popup) {
-					connectionsPopupWindow = null;
-				}
-				// O painel volta a nao ter pai nenhum ate a proxima
-				// abertura — remove-lo explicitamente evita mante-lo preso
-				// a uma janela ja descartada.
-				popup.getContentPane().removeAll();
-			}
-		});
-
-		connectionsPopupWindow = popup;
-		popup.setVisible(true);
-	}
-
-	/** {@code true} se {@code window} tiver alguma janela PROPRIA (filha) atualmente visivel — ver {@link #showConnectionsPopup}. */
-	private static boolean isChildWindowShowing(Window window) {
-		for (Window owned : window.getOwnedWindows()) {
-			if (owned.isShowing()) {
-				return true;
-			}
-		}
-		return false;
+		connectionsPopup.toggle(anchor, connectionsPanel);
 	}
 
 	/**
@@ -2455,34 +2478,22 @@ public class MainWindow extends JFrame {
 	}
 
 	/**
-	 * Encaminha o texto da busca unificada (Ctrl+K) pro filtro JA EXISTENTE
-	 * de cada painel embutido — nenhuma logica de filtro nova, so
-	 * sincronizacao (ver {@code setFilterText} em cada painel/no
-	 * {@code ObjectExplorerController}).
+	 * Foca a busca "Buscar objeto..." da arvore de Objetos (Ctrl+K) —
+	 * reabre a lateral primeiro se estiver escondida (Ctrl+B). Ctrl+K
+	 * apontava pra uma busca UNIFICADA propria da sidebar antes (encaminhava
+	 * o texto pro campo de busca de cada painel embutido) — removida
+	 * (pedido explicito do usuario: "esse pode remover"), era pura
+	 * duplicacao ja que Objetos/Conexoes/Salvas/Historico sempre tiveram
+	 * cada um o SEU PROPRIO campo de busca, sempre visivel assim que o
+	 * painel/popup em questao abre. Ctrl+K agora vai direto pro campo que
+	 * sobrou fixo na tela (Objetos); os outros 3 tem busca visivel assim
+	 * que abertos, sem precisar de atalho.
 	 */
-	private void applySidebarFilter() {
-		String text = sidebarSearch.getText();
-		if (connectionsPanel != null) {
-			connectionsPanel.setFilterText(text);
-		}
-		if (savedQueriesPanel != null) {
-			savedQueriesPanel.setFilterText(text);
-		}
-		if (historyPanel != null) {
-			historyPanel.setFilterText(text);
-		}
-		objectExplorer.setFilterText(text);
-	}
-
-	/** Foca a busca unificada da sidebar (Ctrl+K) — reabre a lateral primeiro se estiver escondida (Ctrl+B). */
-	private void focusSidebarSearch() {
+	private void focusObjectSearch() {
 		if (leftSide != null && !leftSide.isVisible()) {
 			toggleSidebar();
 		}
-		if (sidebarSearch != null) {
-			sidebarSearch.requestFocusInWindow();
-			sidebarSearch.selectAll();
-		}
+		objectExplorer.focusSearch();
 	}
 
 	// ---------- Editor (abas) ----------
@@ -2554,12 +2565,16 @@ public class MainWindow extends JFrame {
 		// de conexao, alem de ao criar/restaurar abas).
 		updateWorkspaceContextBar();
 
+		// A barra de acoes (Executar/Formatar/.../conexao/SQL/icones) deixou
+		// de ficar aqui (NORTH deste painel, so acima da area do EDITOR) —
+		// pedido explicito do usuario: em janelas estreitas, varios
+		// componentes dela sumiam (GridBagLayout ficando sem espaco pra
+		// tantos itens espremidos so na largura da coluna do editor,
+		// sidebar de fora). Virou o NORTH da JANELA INTEIRA (ver
+		// #buildUi), ganhando a largura da sidebar tambem — ver
+		// #buildToolbar.
 		JPanel panel = new JPanel(new BorderLayout());
-		// CORREÇÃO: Removemos o 8 da esquerda e da direita para alinhar perfeitamente
-		// com a quina das conexões
 		panel.setBorder(BorderFactory.createEmptyBorder(0, 0, 4, 0));
-
-		panel.add(buildToolbar(), BorderLayout.NORTH);
 		panel.add(editorTabs, BorderLayout.CENTER);
 		return panel;
 	}
@@ -3144,7 +3159,7 @@ public class MainWindow extends JFrame {
 		connectionsPanel.setActiveName(activeName);
 		connectionCard.setActiveConnections(activeConnections, activeName);
 		if (activeWorkspace != null && activeWorkspace.profile != null && activeWorkspace.mgr.isConnected()) {
-			setConnectedState(activeWorkspace.profile.label());
+			setConnectedState(activeWorkspace.profile.name());
 		} else {
 			setDisconnectedState();
 		}
@@ -3518,17 +3533,25 @@ public class MainWindow extends JFrame {
 		// com a cor GridTheme do tema anterior ate a proxima mudanca de
 		// estado de conexao.
 		connectionCard.refreshTheme();
-		// ConnectionsPanel (lista de conexoes salvas, ver #showConnectionsPopup)
-		// so fica dentro de uma janela de verdade ENQUANTO o popup esta
-		// aberto — o resto do tempo, seu ULTIMO parent e um JPopupMenu ja
+		// ConnectionsPanel/HistoryPanel/SavedQueriesPanel/sqlEditorsPanel (os
+		// 4 conteudos dos popups de navegacao, ver AnchoredPopup) so ficam
+		// dentro de uma janela de verdade ENQUANTO o proprio popup esta
+		// aberto — o resto do tempo, seu ULTIMO parent e um JDialog ja
 		// descartado, fora de Window.getWindows(). FlatLaf.updateUI() so
-		// varre janelas ATIVAS, entao nunca alcancava este painel: a
-		// proxima vez que o usuario abria o popup, continuava 100% no tema
-		// ANTERIOR (fundo, selecao, lista inteira) — bug relatado pelo
-		// usuario com captura de tela ("conexoes nao mudou junto"). Reaplica
-		// manualmente aqui, igual FlatLaf faria se o painel estivesse numa
-		// janela visivel.
+		// varre janelas ATIVAS, entao nunca alcancava esses paineis: a
+		// proxima vez que o usuario abria QUALQUER um dos 4 popups,
+		// continuava 100% no tema ANTERIOR (fundo, selecao, lista inteira)
+		// — bug relatado pelo usuario com captura de tela ("conexoes nao
+		// mudou junto"), que so tinha sido corrigido pra Conexoes ate agora
+		// — Historico/SQLs/Salvas MIGRARAM pro mesmo modelo de popup
+		// DEPOIS desse fix (ver o piloto "navegacao em popup ancorado"),
+		// entao caiam no MESMO buraco sem ninguem ter notado ainda. Reaplica
+		// manualmente aqui, igual FlatLaf faria se os paineis estivessem
+		// numa janela visivel.
 		javax.swing.SwingUtilities.updateComponentTreeUI(connectionsPanel);
+		javax.swing.SwingUtilities.updateComponentTreeUI(historyPanel);
+		javax.swing.SwingUtilities.updateComponentTreeUI(savedQueriesPanel);
+		javax.swing.SwingUtilities.updateComponentTreeUI(sqlEditorsPanel);
 		styleRunButton();
 		// Mesmo motivo: UpdateBanner tem setBackground/setBorder proprios
 		// (ver seu javadoc), fora do alcance do FlatLaf.updateUI().
@@ -4238,6 +4261,9 @@ public class MainWindow extends JFrame {
 			editor.setSavedQueryId(query.id());
 		}
 		statusBar.setText(" Query aberta: " + query.title());
+		// Fecha o popup "Salvas" (ver #showSavedQueriesPopup) — mesmo padrao
+		// dos outros popups de navegacao: a acao ja foi feita.
+		savedQueriesPopup.close();
 	}
 
 	/** Nome da conexao ativa, ou {@code null} no workspace "sem conexao" (SCRATCH). */
@@ -4248,20 +4274,28 @@ public class MainWindow extends JFrame {
 	// ---------- Historico de execucoes (log automatico — ver ExecutionHistoryStore) ----------
 
 	/**
-	 * Abre a secao "Historico" do painel lateral (botao "Historico" da barra
-	 * de ferramentas) — garante que o painel lateral esteja visivel (reabre
-	 * se o usuario tinha escondido com Ctrl+B) e rola a coluna unica ate a
-	 * secao (Fase 3 do AI-CHAT-MASTER-PLAN.md: todas as secoes ja ficam
-	 * visiveis ao mesmo tempo, entao aqui so falta trazer o Historico pra
-	 * dentro da area visivel, sem trocar de "card" como antes).
+	 * Abre {@link #historyPanel} num painel flutuante ancorado logo abaixo
+	 * do botao "Historico" — ver {@link AnchoredPopup} pro mecanismo
+	 * (compartilhado com Conexoes/SQLs/Salvas).
 	 */
-	private void showHistoryPanel() {
-		if (leftSide != null && !leftSide.isVisible()) {
-			toggleSidebar();
-		}
-		if (sideTabs != null && historyPanel != null) {
-			sideTabs.setSelectedComponent(historyPanel);
-		}
+	private void showHistoryPopup(JComponent anchor) {
+		historyPanel.setPreferredSize(new Dimension(scaledPx(340), scaledPx(420)));
+		historyPanel.setBorder(BorderFactory.createLineBorder(GridTheme.HEADER_BORDER, 1, true));
+		historyPopup.toggle(anchor, historyPanel);
+	}
+
+	/** Abre {@link #sqlEditorsPanel} (atalho "+ nova aba" + lista das abas de SQL abertas) num painel flutuante ancorado abaixo do botao "SQLs" — ver {@link AnchoredPopup}. */
+	private void showSqlEditorsPopup(JComponent anchor) {
+		sqlEditorsPanel.setPreferredSize(new Dimension(scaledPx(280), scaledPx(360)));
+		sqlEditorsPanel.setBorder(BorderFactory.createLineBorder(GridTheme.HEADER_BORDER, 1, true));
+		sqlEditorsPopup.toggle(anchor, sqlEditorsPanel);
+	}
+
+	/** Abre {@link #savedQueriesPanel} num painel flutuante ancorado abaixo do botao "Salvas" — ver {@link AnchoredPopup}. */
+	private void showSavedQueriesPopup(JComponent anchor) {
+		savedQueriesPanel.setPreferredSize(new Dimension(scaledPx(340), scaledPx(420)));
+		savedQueriesPanel.setBorder(BorderFactory.createLineBorder(GridTheme.HEADER_BORDER, 1, true));
+		savedQueriesPopup.toggle(anchor, savedQueriesPanel);
 	}
 
 	/**
@@ -4280,6 +4314,10 @@ public class MainWindow extends JFrame {
 			scheduleSave();
 		}
 		statusBar.setText(" Execucao reaberta do historico.");
+		// Escolher um item fecha o painel flutuante (ver #showHistoryPopup)
+		// — mesmo padrao de menu/dropdown: a acao ja foi feita, nao ha
+		// motivo pra continuar ocupando a tela.
+		historyPopup.close();
 	}
 
 	/**

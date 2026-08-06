@@ -3,6 +3,7 @@ import com.nureal.ide.compartilhado.designsystem.IconType;
 import com.nureal.ide.compartilhado.designsystem.Buttons;
 import com.nureal.ide.compartilhado.designsystem.Typography;
 import com.nureal.ide.compartilhado.designsystem.GridTheme;
+import com.nureal.ide.compartilhado.designsystem.Spacing;
 
 import java.awt.BorderLayout;
 import java.awt.Component;
@@ -31,6 +32,7 @@ import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JDialog;
+import javax.swing.JLabel;
 import javax.swing.JMenu;
 import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
@@ -175,22 +177,40 @@ final class ObjectExplorerController {
 		createSchemaButton.setToolTipText("Criar esquema...");
 		createSchemaButton.addActionListener(e -> createSchema());
 
-		// Sem titulo "OBJETOS" aqui: este painel agora vive dentro de uma aba
-		// da sidebar (ver MainWindow#buildLeftSide) cujo ROTULO da propria
-		// aba ja diz "Objetos" — repetir o nome dentro do conteudo seria a
-		// MESMA duplicacao de marca ja corrigida no logo do topo da coluna
-		// (revisao de UX: "Objetos"/"Objetos" duas vezes, uma no rotulo da
-		// aba e outra dentro dela).
-		JPanel headerRow = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
-		headerRow.setOpaque(false);
-		headerRow.add(switchSchemaButton);
-		headerRow.add(refreshObjectsButton);
-		headerRow.add(createSchemaButton);
+		// Titulo "OBJETOS" DE VOLTA aqui — a justificativa antiga (o rotulo
+		// da propria aba da sidebar ja dizia "Objetos", repetir seria
+		// duplicacao) nao vale mais: "Objetos" deixou de ser uma aba entre
+		// outras (SQL/Salvas/Historico migraram pro modelo de popup ancorado,
+		// ver MainWindow#buildLeftSide) — a arvore agora ocupa a coluna
+		// INTEIRA sem NENHUM rotulo indicando o que ela e (bug relatado
+		// pelo usuario com captura de tela: "aqui precisa de algum label ou
+		// titulo indicando que é objetos"). Mesma receita de "FERRAMENTAS"
+		// (ver MainWindow#groupHeader), pra ficar visualmente consistente
+		// com o resto da sidebar.
+		JLabel title = Typography.sectionHeader("OBJETOS");
+		title.setBorder(BorderFactory.createEmptyBorder(0, Spacing.SM, Spacing.XS, Spacing.SM));
 
-		JPanel top = new JPanel(new BorderLayout(0, 6));
+		JPanel headerIcons = new JPanel(new FlowLayout(FlowLayout.LEFT, Spacing.XS, 0));
+		headerIcons.setOpaque(false);
+		headerIcons.add(switchSchemaButton);
+		headerIcons.add(refreshObjectsButton);
+		headerIcons.add(createSchemaButton);
+
+		// Busca + icones NA MESMA LINHA (nao mais busca embaixo dos icones)
+		// — pedido explicito do usuario: "barra de busca poderia ser menos
+		// e acomodar os botões de funcionalidades na mesma linha". BorderLayout
+		// (nao FlowLayout): objectSearch no CENTER encolhe pra abrir espaco
+		// pros icones (EAST, protegidos, largura fixa) em vez de empurrar
+		// a linha inteira mais larga que a coluna.
+		JPanel searchRow = new JPanel(new BorderLayout(Spacing.SM, 0));
+		searchRow.setOpaque(false);
+		searchRow.add(objectSearch, BorderLayout.CENTER);
+		searchRow.add(headerIcons, BorderLayout.EAST);
+
+		JPanel top = new JPanel(new BorderLayout(0, Spacing.XS));
 		top.setOpaque(false);
-		top.add(headerRow, BorderLayout.NORTH);
-		top.add(objectSearch, BorderLayout.SOUTH);
+		top.add(title, BorderLayout.NORTH);
+		top.add(searchRow, BorderLayout.CENTER);
 
 		JPanel panel = new JPanel(new BorderLayout(0, 8));
 		panel.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
@@ -234,18 +254,10 @@ final class ObjectExplorerController {
 		}
 	}
 
-	/**
-	 * Encaminha o texto da busca unificada da sidebar (Ctrl+K, ver
-	 * {@code MainWindow#buildLeftSide}) para o campo de busca proprio da
-	 * arvore de Objetos — reusa {@link #applyObjectFilter} (disparado pelo
-	 * {@code onTextChange} de {@link #objectSearch}) em vez de duplicar a
-	 * logica de filtro. Sem efeito se nenhum esquema estiver aberto ainda
-	 * (campo desabilitado, ver {@link #populateTree}).
-	 */
-	void setFilterText(String text) {
-		if (objectSearch.isEnabled()) {
-			objectSearch.setText(text);
-		}
+	/** Foca o campo "Buscar objeto..." (ver {@code MainWindow#focusObjectSearch}, atalho Ctrl+K). */
+	void focusSearch() {
+		objectSearch.requestFocusInWindow();
+		objectSearch.selectAll();
 	}
 
 	/**
@@ -1030,7 +1042,7 @@ final class ObjectExplorerController {
 	 */
 	private void generateSelect(ObjNode obj) {
 		String sql = "SELECT *\nFROM " + obj.name() + ";\n";
-		openGeneratedSqlTab("SELECT " + obj.name(), sql, " SELECT gerado numa nova aba do editor.");
+		openGeneratedSqlTab("SELECT " + obj.name(), sql, " SELECT gerado na aba atual do editor.");
 	}
 
 	/**
@@ -1059,7 +1071,7 @@ final class ObjectExplorerController {
 			sql.append("    ?").append(i < cols.size() - 1 ? ",\n" : "\n");
 		}
 		sql.append(");\n");
-		openGeneratedSqlTab("INSERT " + obj.name(), sql.toString(), " INSERT gerado numa nova aba do editor.");
+		openGeneratedSqlTab("INSERT " + obj.name(), sql.toString(), " INSERT gerado na aba atual do editor.");
 	}
 
 	private void generateUpdate(ObjNode obj) {
@@ -1079,7 +1091,7 @@ final class ObjectExplorerController {
 			sql.append("    ").append(setCols.get(i).name()).append(" = ?").append(i < setCols.size() - 1 ? ",\n" : "\n");
 		}
 		appendWhereByPrimaryKey(sql, pk, cols);
-		openGeneratedSqlTab("UPDATE " + obj.name(), sql.toString(), " UPDATE gerado numa nova aba do editor.");
+		openGeneratedSqlTab("UPDATE " + obj.name(), sql.toString(), " UPDATE gerado na aba atual do editor.");
 	}
 
 	private void generateDelete(ObjNode obj) {
@@ -1092,7 +1104,7 @@ final class ObjectExplorerController {
 		List<ColumnDetail> pk = primaryKeyColumns(cols);
 		StringBuilder sql = new StringBuilder("DELETE FROM ").append(obj.name()).append('\n');
 		appendWhereByPrimaryKey(sql, pk, cols);
-		openGeneratedSqlTab("DELETE " + obj.name(), sql.toString(), " DELETE gerado numa nova aba do editor.");
+		openGeneratedSqlTab("DELETE " + obj.name(), sql.toString(), " DELETE gerado na aba atual do editor.");
 	}
 
 	private static List<ColumnDetail> primaryKeyColumns(List<ColumnDetail> cols) {
@@ -1123,7 +1135,23 @@ final class ObjectExplorerController {
 		return owner.tableMetadataCache().get(owner.connectionManager(), schemaName, obj.name(), () -> { });
 	}
 
+	/**
+	 * Insere o SQL gerado na aba ATUAL do editor (mesmo padrao ja usado por
+	 * {@link #insertJoinStatement}), em vez de abrir uma aba nova por
+	 * instrucao gerada — pedido explicito do usuario ("eu queria que fosse
+	 * gerada na mesma aba que estou utilizando mesmo que eu gere instrucoes
+	 * de varias tabelas"). Se nao houver nenhuma aba de editor aberta, cai
+	 * para o comportamento antigo (abre uma aba nova), unico jeito de ter
+	 * algum lugar pra colocar o SQL gerado.
+	 */
 	private void openGeneratedSqlTab(String baseTitle, String sql, String statusOnSuccess) {
+		SqlEditorPane editor = owner.currentEditor();
+		if (editor != null) {
+			insertOnNewLineBelowCursor(editor.textArea(), sql.stripTrailing());
+			editor.textArea().requestFocusInWindow();
+			owner.statusBar().setText(statusOnSuccess);
+			return;
+		}
 		String title = baseTitle;
 		int n = 1;
 		while (owner.titleExists(title)) {
