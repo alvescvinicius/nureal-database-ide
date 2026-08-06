@@ -10,7 +10,6 @@ import com.nureal.ide.modulos.iachat.dominio.entidades.AgentContext;
 import java.util.ArrayList;
 import java.util.List;
 
-import com.nureal.ide.modulos.historico.infraestrutura.ExecutionHistoryStore;
 import com.nureal.ide.modulos.metadados.dominio.entidades.SchemaInfo;
 import com.nureal.ide.modulos.metadados.dominio.entidades.TableInfo;
 

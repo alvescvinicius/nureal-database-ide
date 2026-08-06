@@ -4,6 +4,7 @@ import com.nureal.ide.compartilhado.designsystem.GridTheme;
 
 import com.nureal.ide.modulos.conexoes.dominio.contratos.ConexaoAtivaPort;
 import com.nureal.ide.compartilhado.designsystem.NSearchField;
+import com.nureal.ide.core.log.AppLogger;
 
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
@@ -643,7 +644,15 @@ final class ResultGrid extends JPanel {
                 + "Entende data e numero mesmo em colunas de texto.</html>");
 
         Runnable apply = this::applyFilters;
-        filterField.onTextChange(apply);
+        // Debounce: reaplicar o filtro a CADA tecla digitada re-varre o
+        // modelo inteiro (TableRowSorter#sort), o que fica perceptivel em
+        // grades com muitas linhas quando o usuario digita rapido — coalesce
+        // varias teclas seguidas numa unica aplicacao, 150ms depois da
+        // ultima — pedido explicito do usuario pra otimizar o filtro em
+        // tabelas grandes.
+        javax.swing.Timer filterDebounce = new javax.swing.Timer(150, e -> apply.run());
+        filterDebounce.setRepeats(false);
+        filterField.onTextChange(filterDebounce::restart);
         // O combo de colunas ja funciona como "busca de coluna" (JComboBox
         // pesquisa por digitacao nativamente): alem de restringir o filtro a
         // ela, leva a visao ate a coluna escolhida e marca seu cabecalho —
@@ -737,15 +746,53 @@ final class ResultGrid extends JPanel {
                 : (combined.size() == 1 ? combined.get(0) : RowFilter.andFilter(combined)));
     }
 
+    /** Acima disto, {@link #onFilterIconClicked} calcula os valores distintos em segundo plano (ver {@link #distinctValuesFor}). */
+    private static final int BACKGROUND_DISTINCT_THRESHOLD = 2000;
+
     /**
      * Icone de funil clicado no cabecalho (ver {@link ResultTableHeader.FilterIconHandler}):
      * monta a lista "em cascata" de valores distintos desta coluna (ver
      * {@link #distinctValuesFor}) e abre o {@link ColumnFilterPopup} ancorado
      * logo abaixo do cabecalho.
+     *
+     * Em grades grandes, {@link #distinctValuesFor} varre TODAS as linhas do
+     * modelo — feito direto na thread de eventos (Swing), isso travava a UI
+     * por varios segundos ao abrir o autofiltro de uma coluna com muitos
+     * valores distintos (ex.: "nome" numa tabela com 100 mil linhas) —
+     * pedido explicito do usuario pra otimizar o filtro em tabelas grandes.
+     * Agora o calculo roda em {@link SwingWorker} quando a tabela passa de
+     * {@link #BACKGROUND_DISTINCT_THRESHOLD} linhas; o cursor de espera fica
+     * visivel enquanto isso e o popup so abre quando o resultado estiver
+     * pronto (o outro lado da otimizacao, a lista virtualizada em si, e
+     * responsabilidade do {@link ColumnFilterPopup}).
      */
     private void onFilterIconClicked(int viewColumn, java.awt.Point anchor) {
         int modelColumn = table.convertColumnIndexToModel(viewColumn);
-        Map<String, String> valueLabels = distinctValuesFor(modelColumn);
+        if (model.getRowCount() <= BACKGROUND_DISTINCT_THRESHOLD) {
+            showFilterPopup(modelColumn, anchor, distinctValuesFor(modelColumn));
+            return;
+        }
+        java.awt.Cursor previousCursor = table.getCursor();
+        table.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.WAIT_CURSOR));
+        new javax.swing.SwingWorker<Map<String, String>, Void>() {
+            @Override
+            protected Map<String, String> doInBackground() {
+                return distinctValuesFor(modelColumn);
+            }
+
+            @Override
+            protected void done() {
+                table.setCursor(previousCursor);
+                try {
+                    showFilterPopup(modelColumn, anchor, get());
+                } catch (java.util.concurrent.ExecutionException | InterruptedException ex) {
+                    AppLogger.warning("Falha ao calcular valores distintos para autofiltro", ex);
+                }
+            }
+        }.execute();
+    }
+
+    private void showFilterPopup(int modelColumn, java.awt.Point anchor, Map<String, String> valueLabels) {
         Set<String> allPossible = valueLabels.keySet();
         Set<String> checked = columnValueFilter.isActive(modelColumn)
                 ? columnValueFilter.allowedValues(modelColumn)
@@ -771,7 +818,9 @@ final class ResultGrid extends JPanel {
      * {@link ColumnValueFilter#rowMatchesExcluding}) e com o filtro de texto
      * "inteligente" da barra de filtro — mesma logica de
      * {@link SmartCellFilter}, aplicada direto no MODELO (nao na view), pra
-     * nao depender do RowFilter combinado ja estar montado.
+     * nao depender do RowFilter combinado ja estar montado. Pode rodar fora
+     * da EDT (ver {@link #onFilterIconClicked}); so LE o modelo, nunca
+     * escreve.
      */
     private Map<String, String> distinctValuesFor(int targetModelColumn) {
         String filterText = filterField.getText();
@@ -779,7 +828,10 @@ final class ResultGrid extends JPanel {
         java.util.function.Predicate<String> smartPredicate =
                 (filterText == null || filterText.isBlank()) ? null : SmartCellFilter.buildPredicate(filterText);
 
-        Set<String> sortedKeys = ColumnValueFilter.newSortedSet();
+        // HashSet (nao TreeSet): deduplicar e O(1) por insercao aqui, sem
+        // nenhuma comparacao/parse — a ordenacao acontece UMA VEZ no final,
+        // ja sobre o conjunto deduplicado (ver ColumnValueFilter#sortValues).
+        Set<String> distinct = new java.util.HashSet<>();
         int rowCount = model.getRowCount();
         for (int row = 0; row < rowCount; row++) {
             if (!columnValueFilter.rowMatchesExcluding(model, row, targetModelColumn)) {
@@ -788,11 +840,11 @@ final class ResultGrid extends JPanel {
             if (smartPredicate != null && !rowMatchesSmartFilter(smartPredicate, filterColumn, row)) {
                 continue;
             }
-            sortedKeys.add(ColumnValueFilter.stringValue(model.getValueAt(row, targetModelColumn)));
+            distinct.add(ColumnValueFilter.stringValue(model.getValueAt(row, targetModelColumn)));
         }
 
         Map<String, String> labels = new LinkedHashMap<>();
-        for (String key : sortedKeys) {
+        for (String key : ColumnValueFilter.sortValues(distinct)) {
             labels.put(key, key.isEmpty() ? "(vazios)" : key);
         }
         return labels;

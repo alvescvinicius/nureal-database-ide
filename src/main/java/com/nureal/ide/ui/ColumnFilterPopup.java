@@ -7,19 +7,25 @@ import com.nureal.ide.compartilhado.designsystem.Typography;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
+import javax.swing.DefaultListModel;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
+import javax.swing.JList;
 import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
+import javax.swing.ListCellRenderer;
 import javax.swing.SwingUtilities;
 import java.awt.BorderLayout;
+import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Point;
-import java.util.LinkedHashMap;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
@@ -36,6 +42,16 @@ import java.util.function.Consumer;
  * Os VALORES (chave do mapa passado ao construtor) sao os mesmos usados pelo
  * filtro de verdade ({@link ColumnValueFilter#stringValue}) — o TEXTO exibido
  * ao lado de cada checkbox pode ser diferente (ex.: "(vazios)" para "").
+ *
+ * A lista e um {@link JList} VIRTUALIZADO (um unico {@link JCheckBox}
+ * reutilizado como "carimbo" de renderizacao, ver {@link CheckboxRenderer}) —
+ * nao mais um {@code JCheckBox} REAL por valor. Uma coluna de alta
+ * cardinalidade (ex.: "nome" numa grade com 100 mil linhas, cada uma com um
+ * valor distinto) chegava a criar 100 mil componentes Swing pesados de uma
+ * vez dentro de um {@code BoxLayout}, travando a UI por varios segundos so
+ * pra abrir o popup — pedido explicito do usuario pra otimizar o filtro em
+ * tabelas grandes. Com {@code JList}, so as linhas VISIVEIS na area de
+ * rolagem ganham um renderer.
  */
 final class ColumnFilterPopup {
 
@@ -55,47 +71,81 @@ final class ColumnFilterPopup {
 
         NSearchField search = new NSearchField("Buscar valor...");
 
-        Map<String, JCheckBox> checkboxes = new LinkedHashMap<>();
-        JPanel listPanel = new JPanel();
-        listPanel.setLayout(new BoxLayout(listPanel, BoxLayout.Y_AXIS));
-        listPanel.setOpaque(false);
-        for (Map.Entry<String, String> e : valueLabels.entrySet()) {
-            JCheckBox cb = new JCheckBox(e.getValue(), initiallyChecked.contains(e.getKey()));
-            cb.setOpaque(false);
-            checkboxes.put(e.getKey(), cb);
-            listPanel.add(cb);
+        List<String> allKeys = List.copyOf(valueLabels.keySet());
+        Set<String> checkedKeys = new LinkedHashSet<>(initiallyChecked);
+
+        DefaultListModel<String> listModel = new DefaultListModel<>();
+        for (String key : allKeys) {
+            listModel.addElement(key);
         }
+
+        JList<String> list = new JList<>(listModel);
+        list.setFixedCellHeight(22); // fixo: evita o JList medir a altura de CADA item (essencial pra virtualizar bem com muitos valores)
+        list.setVisibleRowCount(-1);
+        list.setCellRenderer(new CheckboxRenderer(valueLabels, checkedKeys));
+
+        // Sem selecao "de foco" do JList em si — o clique so alterna o
+        // checkbox do item (ver abaixo); a selecao nativa do JList nao tem
+        // papel aqui.
+        list.setSelectionModel(new javax.swing.DefaultListSelectionModel() {
+            @Override
+            public void setSelectionInterval(int index0, int index1) {
+                // no-op: evita o realce de selecao padrao do JList
+            }
+        });
+
+        list.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                int index = list.locationToIndex(e.getPoint());
+                if (index < 0) {
+                    return;
+                }
+                String key = listModel.getElementAt(index);
+                if (checkedKeys.contains(key)) {
+                    checkedKeys.remove(key);
+                } else {
+                    checkedKeys.add(key);
+                }
+                list.repaint();
+            }
+        });
 
         JCheckBox selectAll = new JCheckBox("(Selecionar tudo)");
         selectAll.setOpaque(false);
-        selectAll.setSelected(checkboxes.size() == initiallyChecked.size());
+        selectAll.setSelected(allKeys.size() == checkedKeys.size());
         selectAll.addActionListener(e -> {
             boolean checked = selectAll.isSelected();
-            for (JCheckBox cb : checkboxes.values()) {
-                if (cb.isVisible()) {
-                    cb.setSelected(checked);
+            for (int i = 0; i < listModel.size(); i++) {
+                String key = listModel.getElementAt(i);
+                if (checked) {
+                    checkedKeys.add(key);
+                } else {
+                    checkedKeys.remove(key);
+                }
+            }
+            list.repaint();
+        });
+
+        // Digitar no campo de busca so ESCONDE os itens que nao batem (nao
+        // desmarca nada) — igual ao Excel: a marcacao de um valor sobrevive
+        // mesmo que ele fique temporariamente fora de vista pela busca.
+        // Refiltra o MODELO da lista (nao a visibilidade de componentes
+        // individuais, que nao existem mais um-a-um).
+        search.onTextChange(() -> {
+            String needle = search.getText().trim().toLowerCase(Locale.ROOT);
+            listModel.clear();
+            for (String key : allKeys) {
+                if (needle.isEmpty() || valueLabels.get(key).toLowerCase(Locale.ROOT).contains(needle)) {
+                    listModel.addElement(key);
                 }
             }
         });
 
-        // Digitar no campo de busca so ESCONDE as linhas que nao batem (nao
-        // desmarca nada) — igual ao Excel: a marcacao de um valor sobrevive
-        // mesmo que ele fique temporariamente fora de vista pela busca.
-        search.onTextChange(() -> {
-            String needle = search.getText().trim().toLowerCase(Locale.ROOT);
-            for (Map.Entry<String, JCheckBox> e : checkboxes.entrySet()) {
-                boolean visible = needle.isEmpty()
-                        || valueLabels.get(e.getKey()).toLowerCase(Locale.ROOT).contains(needle);
-                e.getValue().setVisible(visible);
-            }
-            listPanel.revalidate();
-            listPanel.repaint();
-        });
-
-        JScrollPane scroll = new JScrollPane(listPanel);
+        JScrollPane scroll = new JScrollPane(list);
         scroll.setBorder(BorderFactory.createEmptyBorder());
         scroll.getVerticalScrollBar().setUnitIncrement(16);
-        scroll.setPreferredSize(new Dimension(220, Math.min(260, Math.max(60, checkboxes.size() * 22 + 30))));
+        scroll.setPreferredSize(new Dimension(220, Math.min(260, Math.max(60, allKeys.size() * 22 + 30))));
 
         JButton okButton = new JButton("OK");
         JButton cancelButton = new JButton("Cancelar");
@@ -106,13 +156,7 @@ final class ColumnFilterPopup {
 
         okButton.addActionListener(e -> {
             popup.setVisible(false);
-            Set<String> selected = new LinkedHashSet<>();
-            for (Map.Entry<String, JCheckBox> entry : checkboxes.entrySet()) {
-                if (entry.getValue().isSelected()) {
-                    selected.add(entry.getKey());
-                }
-            }
-            onApply.accept(selected);
+            onApply.accept(new LinkedHashSet<>(checkedKeys));
         });
         cancelButton.addActionListener(e -> popup.setVisible(false));
         clearButton.addActionListener(e -> {
@@ -141,7 +185,7 @@ final class ColumnFilterPopup {
         bottom.add(Box.createHorizontalStrut(6));
         bottom.add(okButton);
 
-        if (checkboxes.isEmpty()) {
+        if (allKeys.isEmpty()) {
             JLabel empty = new JLabel("Sem valores para filtrar");
             Typography.tertiary(empty);
             empty.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
@@ -154,5 +198,36 @@ final class ColumnFilterPopup {
 
         popup.show(invoker, anchor.x, anchor.y);
         SwingUtilities.invokeLater(search::requestFocusInWindow);
+    }
+
+    /**
+     * Reutiliza um UNICO {@link JCheckBox} como "carimbo" de pintura pra
+     * cada linha visivel do {@link JList} — o mesmo padrao de
+     * {@code DefaultTableCellRenderer}/{@code DefaultListCellRenderer}, so
+     * que devolvendo um checkbox real (com o L&F/tema aplicado
+     * normalmente) em vez de um {@code JLabel}. O componente devolvido NUNCA
+     * e adicionado a arvore de UI de verdade — so pintado na celula pelo
+     * proprio {@code JList} — entao um so basta pra lista inteira, nao
+     * importa quantos valores existam.
+     */
+    private static final class CheckboxRenderer extends JCheckBox implements ListCellRenderer<String> {
+        private final Map<String, String> valueLabels;
+        private final Set<String> checkedKeys;
+
+        CheckboxRenderer(Map<String, String> valueLabels, Set<String> checkedKeys) {
+            this.valueLabels = valueLabels;
+            this.checkedKeys = checkedKeys;
+            setOpaque(true);
+        }
+
+        @Override
+        public Component getListCellRendererComponent(JList<? extends String> list, String key, int index,
+                boolean isSelected, boolean cellHasFocus) {
+            setText(valueLabels.get(key));
+            setSelected(checkedKeys.contains(key));
+            setBackground(list.getBackground());
+            setForeground(list.getForeground());
+            return this;
+        }
     }
 }

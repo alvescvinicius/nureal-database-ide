@@ -4,7 +4,6 @@ import com.nureal.ide.compartilhado.designsystem.Typography;
 
 import com.nureal.ide.modulos.dialeto.dominio.contratos.DatabaseDialect;
 
-import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JDialog;

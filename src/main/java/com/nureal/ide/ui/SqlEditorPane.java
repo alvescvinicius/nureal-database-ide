@@ -31,17 +31,22 @@ import javax.swing.AbstractAction;
 import javax.swing.BorderFactory;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
+import javax.swing.JCheckBox;
 import javax.swing.JComponent;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JRootPane;
+import javax.swing.JScrollPane;
+import javax.swing.JTextArea;
 import javax.swing.JTextField;
-import javax.swing.JToggleButton;
 import javax.swing.KeyStroke;
 import javax.swing.JMenuItem;
 import javax.swing.JPopupMenu;
 import javax.swing.SwingUtilities;
+import javax.swing.Timer;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import javax.swing.text.BadLocationException;
 import javax.swing.text.DefaultHighlighter;
 import javax.swing.text.Highlighter;
@@ -71,12 +76,16 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
 
 /**
  * Uma aba de edicao SQL: editor com syntax highlighting e autocomplete.
@@ -141,8 +150,25 @@ public class SqlEditorPane extends JPanel {
     private JDialog findPopup;
     private JTextField findField;
     private JTextField replaceField;
-    private JToggleButton matchCaseBtn;
-    private JToggleButton wholeWordBtn;
+    private JCheckBox matchCaseBtn;
+    private JCheckBox wholeWordBtn;
+    private JCheckBox regexBtn;
+    /**
+     * Historico de "Localizar"/"Substituir" — pedido explicito do usuario
+     * ("Algo que sinto falta em praticamente todos os editores"). Estatico
+     * (compartilhado por TODAS as abas, nao por instancia): o usuario
+     * espera o mesmo historico ao trocar de aba, igual buscadores de
+     * editores de texto reais — nao persistido em disco (some ao fechar a
+     * IDE), so em memoria durante a sessao.
+     */
+    private static final LinkedList<String> FIND_HISTORY = new LinkedList<>();
+    private static final LinkedList<String> REPLACE_HISTORY = new LinkedList<>();
+    private static final int MAX_HISTORY = 15;
+    /** Quantas ocorrencias o painel de pre-visualizacao mostra no maximo — ver {@link #updatePreview}. */
+    private static final int MAX_PREVIEW_ENTRIES = 10;
+    private JTextArea previewArea;
+    private JScrollPane previewScroll;
+    private Timer previewDebounce;
     private JLabel findStatus;
 
     /**
@@ -715,6 +741,18 @@ public class SqlEditorPane extends JPanel {
         }
         if (breadcrumbLabel != null) {
             breadcrumbLabel.setForeground(breadcrumbForeground());
+        }
+        // findBar (barra de localizar/substituir) so fica dentro de uma
+        // Window de verdade ENQUANTO o popup de busca esta aberto (ver
+        // #getOrCreateFindPopup) — o resto do tempo seu ultimo parent e um
+        // JDialog ja fechado, fora de Window.getWindows(), e portanto fora
+        // do alcance do FlatLaf.updateUI() disparado por
+        // MainWindow#toggleTheme. Mesma classe de bug ja corrigida para os
+        // paineis de Conexoes/Historico/SQLs/Salvas (ver AnchoredPopup) —
+        // sem isto, o popup de busca ficava preso no tema de quando a aba
+        // foi criada ate a proxima vez que fosse reaberto.
+        if (findBar != null) {
+            javax.swing.SwingUtilities.updateComponentTreeUI(findBar);
         }
         repaint();
     }
@@ -1487,10 +1525,18 @@ public class SqlEditorPane extends JPanel {
         findStatus = new JLabel();
         Typography.tertiary(findStatus);
 
-        matchCaseBtn = new JToggleButton("Aa");
-        matchCaseBtn.setToolTipText("Diferenciar maiusculas/minusculas");
-        wholeWordBtn = new JToggleButton("W");
-        wholeWordBtn.setToolTipText("Palavra inteira");
+        // Checkboxes com rotulo por extenso (nao mais "Aa"/"W") — pedido
+        // explicito do usuario: os botoes crípticos exigiam que o usuario
+        // decorasse o que cada abreviacao significava, aumentando a carga
+        // cognitiva. "Expressao regular" e novo: o SearchContext ja aceitava
+        // regex (SearchEngine da RSyntaxTextArea), so nao havia opcao na UI
+        // pra ligar — ver #configureSearch.
+        matchCaseBtn = new JCheckBox("Diferenciar maiusculas/minusculas");
+        wholeWordBtn = new JCheckBox("Palavra inteira");
+        regexBtn = new JCheckBox("Expressao regular");
+        for (JCheckBox cb : new JCheckBox[] { matchCaseBtn, wholeWordBtn, regexBtn }) {
+            cb.setOpaque(false);
+        }
 
         // Barra de localizar e construida UMA VEZ e so escondida/mostrada
         // (nao recriada) — os 3 icones abaixo precisam de Buttons.bindThemedIcon
@@ -1505,10 +1551,18 @@ public class SqlEditorPane extends JPanel {
         Buttons.bindThemedIcon(next, IconType.CHEVRON_RIGHT, 12, () -> GridTheme.MUTED_TEXT);
         next.setToolTipText("Proximo (Enter)");
         next.addActionListener(e -> findNext());
+        JButton findHistoryBtn = new JButton();
+        Buttons.bindThemedIcon(findHistoryBtn, IconType.HISTORY, 12, () -> GridTheme.MUTED_TEXT);
+        findHistoryBtn.setToolTipText("Historico de busca");
+        findHistoryBtn.addActionListener(e -> showHistoryMenu(findHistoryBtn, findField, FIND_HISTORY, this::findNext));
         JButton replaceOne = new JButton("Substituir");
         replaceOne.addActionListener(e -> replaceOne());
         JButton replaceAll = new JButton("Substituir tudo");
         replaceAll.addActionListener(e -> replaceAll());
+        JButton replaceHistoryBtn = new JButton();
+        Buttons.bindThemedIcon(replaceHistoryBtn, IconType.HISTORY, 12, () -> GridTheme.MUTED_TEXT);
+        replaceHistoryBtn.setToolTipText("Historico de substituicao");
+        replaceHistoryBtn.addActionListener(e -> showHistoryMenu(replaceHistoryBtn, replaceField, REPLACE_HISTORY, null));
         JButton close = new JButton();
         Buttons.bindThemedIcon(close, IconType.CLOSE, 12, () -> GridTheme.MUTED_TEXT);
         close.setToolTipText("Fechar (Esc)");
@@ -1526,7 +1580,7 @@ public class SqlEditorPane extends JPanel {
         // botao-so-de-icone (mesma linguagem da barra de ferramentas); os
         // dois com texto (Substituir/Substituir tudo) ficam "roundRect" (acao
         // secundaria, igual qualquer outro botao de texto do app).
-        for (JButton btn : new JButton[] { prev, next, close }) {
+        for (JButton btn : new JButton[] { prev, next, close, findHistoryBtn, replaceHistoryBtn }) {
             Buttons.styleIconButton(btn);
         }
         for (JButton btn : new JButton[] { replaceOne, replaceAll }) {
@@ -1536,25 +1590,218 @@ public class SqlEditorPane extends JPanel {
         JPanel row1 = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 2));
         row1.add(new JLabel("Localizar:"));
         row1.add(findField);
+        row1.add(findHistoryBtn);
         row1.add(prev);
         row1.add(next);
-        row1.add(matchCaseBtn);
-        row1.add(wholeWordBtn);
         row1.add(findStatus);
 
         JPanel row2 = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 2));
         row2.add(new JLabel("Substituir:"));
         row2.add(replaceField);
+        row2.add(replaceHistoryBtn);
         row2.add(replaceOne);
         row2.add(replaceAll);
         row2.add(close);
+
+        // Linha propria pras opcoes (nao mais espremidas ao lado do campo de
+        // busca) — cada uma com rotulo por extenso, ver comentario acima.
+        JPanel row3 = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 2));
+        row3.add(matchCaseBtn);
+        row3.add(wholeWordBtn);
+        row3.add(regexBtn);
+
+        JComponent previewRow = buildPreviewPanel();
+
+        // Pre-visualizacao ATUALIZADA a cada tecla/opcao alterada (nao so ao
+        // clicar em "Substituir") — pedido explicito do usuario ("o maior
+        // diferencial"): ver exatamente o que vai mudar (util em qualquer
+        // modo, mas critico com regex e grupos de captura "$1", onde um
+        // engano no padrao pode destruir SQL sem o usuario perceber antes
+        // de rodar). Debounce de 150ms: reprocessar o documento inteiro a
+        // CADA tecla digitada seria desperdicio numa aba grande.
+        previewDebounce = new Timer(150, e -> updatePreview());
+        previewDebounce.setRepeats(false);
+        DocumentListener liveUpdate = new DocumentListener() {
+            @Override
+            public void insertUpdate(DocumentEvent e) {
+                previewDebounce.restart();
+            }
+
+            @Override
+            public void removeUpdate(DocumentEvent e) {
+                previewDebounce.restart();
+            }
+
+            @Override
+            public void changedUpdate(DocumentEvent e) {
+                previewDebounce.restart();
+            }
+        };
+        findField.getDocument().addDocumentListener(liveUpdate);
+        replaceField.getDocument().addDocumentListener(liveUpdate);
+        for (JCheckBox cb : new JCheckBox[] { matchCaseBtn, wholeWordBtn, regexBtn }) {
+            cb.addActionListener(e -> updatePreview());
+        }
 
         findBar = new JPanel();
         findBar.setLayout(new BoxLayout(findBar, BoxLayout.Y_AXIS));
         findBar.setBorder(BorderFactory.createEmptyBorder(4, 6, 4, 6));
         findBar.add(row1);
         findBar.add(row2);
+        findBar.add(row3);
+        findBar.add(previewRow);
         return findBar;
+    }
+
+    /** Painel "antes/depois" — ver {@link #updatePreview}. Comeca vazio/escondido (nada digitado ainda). */
+    private JComponent buildPreviewPanel() {
+        previewArea = new JTextArea(6, 40);
+        previewArea.setEditable(false);
+        previewArea.setLineWrap(false);
+        previewArea.setFont(textArea.getFont());
+        previewArea.setTabSize(2);
+        previewScroll = new JScrollPane(previewArea);
+        previewScroll.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(1, 0, 0, 0, GridTheme.HEADER_BORDER),
+                BorderFactory.createEmptyBorder(4, 0, 0, 0)));
+        previewScroll.setVisible(false);
+        return previewScroll;
+    }
+
+    /**
+     * Recalcula a pre-visualizacao "antes → depois" das primeiras
+     * {@link #MAX_PREVIEW_ENTRIES} ocorrencias, SEM tocar no documento real
+     * (ver {@link #computeReplacementPreview}) — so aparece quando ha
+     * "Localizar" preenchido; unico jeito de saber o que seria alterado
+     * antes de clicar em "Substituir"/"Substituir tudo" de verdade.
+     */
+    private void updatePreview() {
+        String findText = findField.getText();
+        if (findText == null || findText.isEmpty()) {
+            previewScroll.setVisible(false);
+            findBar.revalidate();
+            packFindPopup();
+            return;
+        }
+        PreviewResult preview = computeReplacementPreview(findText, replaceField.getText());
+        if (preview == null) {
+            previewArea.setText("Expressao regular invalida.");
+        } else if (preview.entries.isEmpty()) {
+            previewArea.setText("Nenhuma ocorrencia encontrada.");
+        } else {
+            StringBuilder sb = new StringBuilder();
+            for (PreviewEntry entry : preview.entries) {
+                sb.append(entry.line).append(": ").append(entry.before).append('\n');
+                sb.append("      -> ").append(entry.after).append('\n');
+            }
+            if (preview.totalCount > preview.entries.size()) {
+                sb.append("\n... e mais ").append(preview.totalCount - preview.entries.size()).append(" ocorrencia(s)");
+            }
+            previewArea.setText(sb.toString());
+            previewArea.setCaretPosition(0);
+        }
+        previewScroll.setVisible(true);
+        findBar.revalidate();
+        packFindPopup();
+    }
+
+    /** Dialogo redimensiona pra caber a pre-visualizacao (que so aparece/some, nunca cresce sem limite — ver {@link #buildPreviewPanel}). */
+    private void packFindPopup() {
+        if (findPopup != null && findPopup.isShowing()) {
+            findPopup.pack();
+        }
+    }
+
+    private record PreviewEntry(int line, String before, String after) {
+    }
+
+    private record PreviewResult(List<PreviewEntry> entries, int totalCount) {
+    }
+
+    /**
+     * Reimplementa o casamento (sem usar {@link SearchEngine}, que so opera
+     * MUTANDO o documento de verdade — inaceitavel pra uma pre-visualizacao
+     * que roda a cada tecla) direto sobre o texto atual, respeitando as
+     * MESMAS opcoes da barra (maiusculas/minusculas, palavra inteira,
+     * regex — ver {@link #configureSearch}). {@code null} = regex invalida
+     * (usuario ainda digitando o padrao).
+     */
+    private PreviewResult computeReplacementPreview(String findText, String replaceText) {
+        Pattern pattern;
+        try {
+            pattern = buildPreviewPattern(findText);
+        } catch (PatternSyntaxException ex) {
+            return null;
+        }
+        String fullText = textArea.getText();
+        Matcher matcher = pattern.matcher(fullText);
+        List<PreviewEntry> entries = new ArrayList<>();
+        int total = 0;
+        int searchFrom = 0;
+        while (searchFrom <= fullText.length() && matcher.find(searchFrom)) {
+            total++;
+            if (entries.size() < MAX_PREVIEW_ENTRIES) {
+                entries.add(buildPreviewEntry(fullText, matcher, replaceText));
+            }
+            searchFrom = (matcher.end() == matcher.start()) ? matcher.end() + 1 : matcher.end();
+        }
+        return new PreviewResult(entries, total);
+    }
+
+    private Pattern buildPreviewPattern(String findText) {
+        int flags = matchCaseBtn.isSelected() ? 0 : Pattern.CASE_INSENSITIVE;
+        if (regexBtn.isSelected()) {
+            return Pattern.compile(findText, flags);
+        }
+        String quoted = Pattern.quote(findText);
+        String body = wholeWordBtn.isSelected() ? ("\\b" + quoted + "\\b") : quoted;
+        return Pattern.compile(body, flags);
+    }
+
+    private PreviewEntry buildPreviewEntry(String fullText, Matcher matcher, String replaceText) {
+        int lineStart = fullText.lastIndexOf('\n', matcher.start() - 1) + 1;
+        int lineEnd = fullText.indexOf('\n', matcher.end());
+        if (lineEnd < 0) {
+            lineEnd = fullText.length();
+        }
+        String lineText = fullText.substring(lineStart, lineEnd);
+        int lineNumber = 1;
+        for (int i = 0; i < lineStart; i++) {
+            if (fullText.charAt(i) == '\n') {
+                lineNumber++;
+            }
+        }
+        int matchStartInLine = matcher.start() - lineStart;
+        int matchEndInLine = matcher.end() - lineStart;
+        String replacement = regexBtn.isSelected() ? applyBackreferences(matcher, replaceText) : replaceText;
+        String afterLine = lineText.substring(0, matchStartInLine) + replacement + lineText.substring(matchEndInLine);
+        return new PreviewEntry(lineNumber, lineText.strip(), afterLine.strip());
+    }
+
+    /** Substitui {@code $1}, {@code $2}... por {@code matcher.group(n)} — mesma sintaxe de grupo do modo regex. */
+    private static String applyBackreferences(Matcher matcher, String replacement) {
+        if (replacement == null || replacement.isEmpty()) {
+            return "";
+        }
+        StringBuilder out = new StringBuilder();
+        for (int i = 0; i < replacement.length(); i++) {
+            char c = replacement.charAt(i);
+            if (c == '\\' && i + 1 < replacement.length()) {
+                out.append(replacement.charAt(++i));
+            } else if (c == '$' && i + 1 < replacement.length() && Character.isDigit(replacement.charAt(i + 1))) {
+                int j = i + 1;
+                while (j < replacement.length() && Character.isDigit(replacement.charAt(j))) {
+                    j++;
+                }
+                int group = Integer.parseInt(replacement.substring(i + 1, j));
+                String value = (group <= matcher.groupCount()) ? matcher.group(group) : null;
+                out.append(value != null ? value : "");
+                i = j - 1;
+            } else {
+                out.append(c);
+            }
+        }
+        return out.toString();
     }
 
     private static void bindKey(JComponent c, String keyStroke, Runnable action) {
@@ -1608,6 +1855,10 @@ public class SqlEditorPane extends JPanel {
         JTextField target = focusReplace ? replaceField : findField;
         target.requestFocusInWindow();
         target.selectAll();
+        // Recalcula na hora (nao so via debounce do DocumentListener): o
+        // documento pode ter mudado enquanto o popup estava fechado, e se
+        // "sel" acima estava vazio o campo nem dispara o listener.
+        updatePreview();
     }
 
     private void hideFindBar() {
@@ -1662,9 +1913,45 @@ public class SqlEditorPane extends JPanel {
         searchContext.setReplaceWith(replaceField.getText());
         searchContext.setMatchCase(matchCaseBtn.isSelected());
         searchContext.setWholeWord(wholeWordBtn.isSelected());
-        searchContext.setRegularExpression(false);
+        searchContext.setRegularExpression(regexBtn.isSelected());
         searchContext.setSearchForward(forward);
         searchContext.setMarkAll(true);
+        rememberHistory(FIND_HISTORY, findField.getText());
+        rememberHistory(REPLACE_HISTORY, replaceField.getText());
+    }
+
+    private static void rememberHistory(LinkedList<String> history, String value) {
+        if (value == null || value.isBlank()) {
+            return;
+        }
+        history.remove(value);
+        history.addFirst(value);
+        while (history.size() > MAX_HISTORY) {
+            history.removeLast();
+        }
+    }
+
+    /** Menu de historico ancorado no botao de relogio ao lado do campo (ver {@link #buildFindBar}). */
+    private void showHistoryMenu(JComponent anchor, JTextField field, List<String> history, Runnable onPick) {
+        JPopupMenu menu = new JPopupMenu();
+        if (history.isEmpty()) {
+            JMenuItem empty = new JMenuItem("Sem historico nesta sessao");
+            empty.setEnabled(false);
+            menu.add(empty);
+        } else {
+            for (String entry : history) {
+                JMenuItem item = new JMenuItem(entry);
+                item.addActionListener(e -> {
+                    field.setText(entry);
+                    field.requestFocusInWindow();
+                    if (onPick != null) {
+                        onPick.run();
+                    }
+                });
+                menu.add(item);
+            }
+        }
+        menu.show(anchor, 0, anchor.getHeight());
     }
 
     private void findNext() {
@@ -1724,13 +2011,39 @@ public class SqlEditorPane extends JPanel {
         findStatus.setText(resultHolder[0].getCount() + " substituicao(oes)");
     }
 
+    /**
+     * "3 / 18 ocorrencias" em vez de so "18 ocorrencia(s)" — pedido explicito
+     * do usuario ("Enquanto navega" mostrar a posicao atual, nao so o
+     * total). O indice ATUAL vem das marcacoes de "marcar todos" que o
+     * proprio {@link SearchEngine#find}/{@code #replace} ja deixa no
+     * highlighter (ver {@link RTextAreaHighlighter#getMarkAllHighlightRanges}) —
+     * localiza qual marcacao comeca onde a selecao atual comecou.
+     */
     private void updateStatus(SearchResult result) {
         int marked = result.getMarkedCount();
         if (!result.wasFound() && marked == 0) {
             findStatus.setText("Nenhum resultado");
-        } else {
-            findStatus.setText(marked + " ocorrencia(s)");
+            return;
         }
+        int current = currentOccurrenceIndex();
+        String plural = marked == 1 ? "ocorrencia" : "ocorrencias";
+        findStatus.setText(current > 0 ? (current + " / " + marked + " " + plural) : (marked + " " + plural));
+    }
+
+    private int currentOccurrenceIndex() {
+        if (!(textArea.getHighlighter() instanceof org.fife.ui.rtextarea.RTextAreaHighlighter highlighter)) {
+            return 0;
+        }
+        List<org.fife.ui.rsyntaxtextarea.DocumentRange> ranges =
+                new ArrayList<>(highlighter.getMarkAllHighlightRanges());
+        java.util.Collections.sort(ranges);
+        int selStart = textArea.getSelectionStart();
+        for (int i = 0; i < ranges.size(); i++) {
+            if (ranges.get(i).getStartOffset() == selStart) {
+                return i + 1;
+            }
+        }
+        return 0;
     }
 
     // ---------- Fonte e caixa ----------

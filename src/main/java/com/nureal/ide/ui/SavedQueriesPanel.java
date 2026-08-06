@@ -1,7 +1,5 @@
 package com.nureal.ide.ui;
-import com.nureal.ide.compartilhado.designsystem.Buttons;
 import com.nureal.ide.compartilhado.designsystem.IconType;
-import com.nureal.ide.compartilhado.designsystem.Typography;
 import com.nureal.ide.compartilhado.designsystem.GridTheme;
 import com.nureal.ide.compartilhado.designsystem.NEmptyState;
 
@@ -11,8 +9,6 @@ import com.nureal.ide.modulos.historico.infraestrutura.SavedQueryStore.Query;
 import com.nureal.ide.compartilhado.designsystem.NSearchField;
 
 import javax.swing.BorderFactory;
-import javax.swing.Box;
-import javax.swing.BoxLayout;
 import javax.swing.DefaultListCellRenderer;
 import javax.swing.DefaultListModel;
 import javax.swing.JComponent;

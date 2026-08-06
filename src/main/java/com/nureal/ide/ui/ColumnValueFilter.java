@@ -3,12 +3,12 @@ package com.nureal.ide.ui;
 import javax.swing.RowFilter;
 import javax.swing.table.TableModel;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.TreeSet;
 
 /**
  * Filtro "por valor" estilo Excel (autofiltro): cada coluna (indice de
@@ -110,18 +110,37 @@ final class ColumnValueFilter {
      * (ordem alfabetica) mesmo sendo reconhecido como numero na barra de
      * filtro, uma divergencia encontrada numa auditoria pedida pelo
      * usuario.
+     *
+     * Recebe os valores JA deduplicados (ver {@link ResultGrid#distinctValuesFor},
+     * que agora usa um {@code HashSet} pra deduplicar em O(1)) e faz o parse
+     * numerico UMA UNICA VEZ por valor antes de ordenar — nao mais dentro do
+     * comparador. Um {@code TreeSet} com comparador que reparseia os dois
+     * lados a cada comparacao chega a fazer O(n log n) parses (cada um
+     * lancando excecao quando o texto nao e numero) para colunas com muitos
+     * valores distintos (ex.: "nome" numa grade com 100 mil linhas), o que
+     * travava a UI ao abrir o autofiltro — pedido explicito do usuario pra
+     * otimizar o filtro em tabelas grandes.
      */
-    static Set<String> newSortedSet() {
-        return new TreeSet<>((a, b) -> {
-            if (a.isEmpty() != b.isEmpty()) {
-                return a.isEmpty() ? -1 : 1;
+    static List<String> sortValues(Collection<String> values) {
+        record Parsed(String text, Double number) {
+        }
+        List<Parsed> parsed = new ArrayList<>(values.size());
+        for (String v : values) {
+            parsed.add(new Parsed(v, v.isEmpty() ? null : SmartCellFilter.parseNumber(v)));
+        }
+        parsed.sort((a, b) -> {
+            if (a.text().isEmpty() != b.text().isEmpty()) {
+                return a.text().isEmpty() ? -1 : 1;
             }
-            Double na = SmartCellFilter.parseNumber(a);
-            Double nb = SmartCellFilter.parseNumber(b);
-            if (na != null && nb != null) {
-                return Double.compare(na, nb);
+            if (a.number() != null && b.number() != null) {
+                return Double.compare(a.number(), b.number());
             }
-            return a.compareToIgnoreCase(b);
+            return a.text().compareToIgnoreCase(b.text());
         });
+        List<String> result = new ArrayList<>(parsed.size());
+        for (Parsed p : parsed) {
+            result.add(p.text());
+        }
+        return result;
     }
 }

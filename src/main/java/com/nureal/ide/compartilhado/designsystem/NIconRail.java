@@ -11,6 +11,7 @@ import java.util.function.Consumer;
 
 import javax.swing.BorderFactory;
 import javax.swing.BoxLayout;
+import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.SwingConstants;
@@ -78,15 +79,50 @@ public final class NIconRail extends JPanel {
         return new Color(c.getRed(), c.getGreen(), c.getBlue(), 110);
     }
 
+    /**
+     * Componente Swing do item {@code id} — pra ancorar um popup flutuante
+     * ao lado dele (ver {@code MainWindow#showObjectsPopup} e equivalentes).
+     * Devolve o proprio rail se o id nao existir (fallback razoavel: ancora
+     * na tira toda em vez de lancar excecao).
+     */
+    public JComponent anchorFor(String id) {
+        for (RailItem item : items) {
+            if (item.id != null && item.id.equals(id)) {
+                return item;
+            }
+        }
+        return this;
+    }
+
     public void select(String id) {
         if (id.equals(selectedId)) {
             return;
         }
+        applySelection(id);
+    }
+
+    /**
+     * Clique de verdade (ver {@link RailItem}): SEMPRE notifica o listener,
+     * mesmo re-clicando no item JA selecionado — ao contrario de
+     * {@link #select}, que e a entrada PROGRAMATICA (idempotente de
+     * proposito). Necessario pro caso de uso "cada icone abre/fecha seu
+     * proprio popup flutuante" (ver {@code MainWindow#onRailItemSelected}):
+     * o primeiro item fica selecionado por padrao desde {@link #addItem}
+     * sem nenhum popup aberto ainda, entao o PRIMEIRO clique nele precisa
+     * dispara o callback (idem clicar de novo no item atual pra fechar o
+     * popup e reabrir depois) — {@link #select} sozinho nunca dispararia
+     * nesse caso, pois o id ja bateria com {@code selectedId}.
+     */
+    private void onItemClicked(String id) {
+        applySelection(id);
+        onSelect.accept(id);
+    }
+
+    private void applySelection(String id) {
         selectedId = id;
         for (RailItem item : items) {
             item.setSelected(item.id.equals(id));
         }
-        onSelect.accept(id);
     }
 
     private final class RailItem extends JPanel {
@@ -152,7 +188,7 @@ public final class NIconRail extends JPanel {
                 @Override
                 public void mouseClicked(MouseEvent e) {
                     if (enabled) {
-                        select(id);
+                        onItemClicked(id);
                     }
                 }
             });

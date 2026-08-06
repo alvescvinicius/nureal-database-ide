@@ -20,7 +20,6 @@ import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
 import java.awt.Point;
-import java.awt.Rectangle;
 import java.awt.Window;
 import java.awt.event.ActionEvent;
 import java.awt.event.KeyEvent;
@@ -132,6 +131,7 @@ import com.nureal.ide.modulos.iachat.apresentacao.ChatActions;
 import com.nureal.ide.modulos.iachat.apresentacao.ChatWindow;
 import com.nureal.ide.modulos.iachat.apresentacao.IdeContextAccessor;
 import com.nureal.ide.compartilhado.designsystem.NButton;
+import com.nureal.ide.compartilhado.designsystem.NIconRail;
 import com.nureal.ide.compartilhado.designsystem.NToast;
 
 /**
@@ -200,10 +200,23 @@ public class MainWindow extends JFrame {
 	/** Ultima {@link SqlEditorPane} com foco de verdade (ver o ChangeListener de {@link #editorTabs} em {@link #buildEditorArea}) — usada pelos presets do Chat quando nenhuma aba de SQL esta com foco no momento (ex.: o Chat acabou de ser aberto). */
 	private SqlEditorPane lastActiveEditor;
 	private boolean addingTab;
-	private JSplitPane mainSplit;
+	/**
+	 * Rail (esquerda/direita, ver {@link #sidebarOnRight}) + editor/resultados
+	 * — {@link BorderLayout} simples, NAO MAIS um {@link JSplitPane}: o rail
+	 * (ver {@link #buildLeftSide}) e so 64px de icones, largura FIXA — pedido
+	 * explicito do usuario ("deveria ter um tamanho apenas para comportar os
+	 * icones e nao esse espaco todo podendo redimensionar"). Regiao
+	 * WEST/EAST do BorderLayout usa SEMPRE a largura preferida do filho
+	 * (nunca encolhe/estica, nem oferece divisoria pra arrastar) — mesma
+	 * garantia estrutural ja usada nesta classe pro botao "Executar" nunca
+	 * sumir (ver {@code buildToolbar}), agora resolvendo de quebra o bug do
+	 * vao cinza vazio que a versao anterior (JSplitPane com
+	 * setDividerLocation manual, sujeito a timing do Swing) tinha.
+	 */
+	private JPanel mainLayout;
 	private JSplitPane centerSplit;
 	/**
-	 * Split MAIS externo da janela: {@link #mainSplit} (sidebar+editor+
+	 * Split MAIS externo da janela: {@link #mainLayout} (sidebar+editor+
 	 * resultados) a esquerda, {@link #chatDock} a direita — pedido explicito
 	 * do usuario na revisao de UX ("chat abrindo em aba do editor ao inves
 	 * de abrir uma janela na direita"). Antes o Chat era uma aba a mais
@@ -215,13 +228,12 @@ public class MainWindow extends JFrame {
 	private JSplitPane chatSplit;
 	/** Painel fixo do lado direito que hospeda {@link #chatWindow} quando aberto — vazio e colapsado (largura 0) quando nao ha chat aberto. */
 	private JComponent chatDock;
-	/** Ultima largura (pixels, a partir da borda esquerda) do dock do chat — restaurada ao reabrir, mesmo principio de {@link #sidebarLoc}/{@link #resultsLoc}. */
+	/** Ultima largura (pixels, a partir da borda esquerda) do dock do chat — restaurada ao reabrir, mesmo principio de {@link #resultsLoc}. */
 	private int chatDockLoc = -1;
 	private JComponent leftSide;
 	private JComponent resultsArea;
 	private JComponent editorAreaPanel;
 	private JComponent toolbarBar;
-	private int sidebarLoc = 248;
 	private int resultsLoc = -1;
 
 	// ---------- Modo foco (botoes "Expandir" do editor/resultados) ----------
@@ -259,6 +271,11 @@ public class MainWindow extends JFrame {
 	private final AnchoredPopup historyPopup = new AnchoredPopup();
 	private final AnchoredPopup sqlEditorsPopup = new AnchoredPopup();
 	private final AnchoredPopup savedQueriesPopup = new AnchoredPopup();
+	private final AnchoredPopup objectsPopup = new AnchoredPopup();
+	/** Arvore de Objetos — construida UMA VEZ (ver {@link #buildLeftSide}), reaberta como popup a cada clique no rail (ver {@link #showObjectsPopup}). */
+	private JComponent objectsBrowserPanel;
+	/** Rail vertical de icones (Objetos/SQLs/Favoritos/Historico/IA/Backup/Usuarios/Mais) — ver {@link #buildLeftSide}. */
+	private NIconRail iconRail;
 	private SavedQueriesPanel savedQueriesPanel;
 	private HistoryPanel historyPanel;
 	/** Rotulo "SQL Editors (N)" — mantido em dia por {@link #updateWorkspaceContextBar} (mesmo hook que ja roda a cada aba aberta/fechada). */
@@ -817,10 +834,10 @@ public class MainWindow extends JFrame {
 		centerSplit.setDividerLocation(0.62);
 		centerSplit.setBorder(BorderFactory.createEmptyBorder());
 
-		mainSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, sidebarOnRight ? centerSplit : leftSide,
-				sidebarOnRight ? leftSide : centerSplit);
-		mainSplit.setResizeWeight(sidebarOnRight ? 0.78 : 0.22);
-		mainSplit.setBorder(BorderFactory.createEmptyBorder());
+		mainLayout = new JPanel(new BorderLayout());
+		mainLayout.setBorder(BorderFactory.createEmptyBorder());
+		mainLayout.add(centerSplit, BorderLayout.CENTER);
+		mainLayout.add(leftSide, sidebarOnRight ? BorderLayout.EAST : BorderLayout.WEST);
 
 		// Dock do Chat de IA: painel proprio na borda direita da janela,
 		// SEMPRE no mesmo lugar (ver javadoc de #chatSplit) — comeca vazio e
@@ -830,7 +847,7 @@ public class MainWindow extends JFrame {
 		chatDock.setOpaque(false);
 		chatDock.setVisible(false);
 
-		chatSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, mainSplit, chatDock);
+		chatSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, mainLayout, chatDock);
 		chatSplit.setResizeWeight(1.0);
 		chatSplit.setBorder(BorderFactory.createEmptyBorder());
 		chatSplit.setDividerSize(0);
@@ -968,34 +985,19 @@ public class MainWindow extends JFrame {
 		// "new JButton(Icons.get(..., GridTheme.MUTED_TEXT))" com a cor
 		// CONGELADA no tema em que a janela abriu, so corrigindo sozinha se
 		// o usuario fechasse e reabrisse a janela.
-		JButton toggleSidebar = Buttons.iconButton(IconType.PANEL_LEFT, 16, () -> GridTheme.MUTED_TEXT);
-		toggleSidebar.setToolTipText("Mostrar/ocultar painel lateral (Ctrl+B)");
-		toggleSidebar.addActionListener(e -> toggleSidebar());
-		trailing.add(toggleSidebar);
-
+		//
+		// "Mostrar/ocultar painel lateral", "SQLs", "Salvas"/"Favoritos",
+		// "Historico" e "Chat com IA" SAIRAM daqui — pedido explicito do
+		// usuario ("quero que objetos, e os itens de ferramentas virem
+		// icones de uma barra lateral... isso elimina o icone de esconder e
+		// abrir objetos que esta na toolbar superior direita"): agora sao
+		// itens do rail vertical (ver {@link #buildLeftSide}/{@link
+		// #onRailItemSelected}), que fica sempre visivel — nao precisa mais
+		// de um botao separado pra mostrar/esconder nada.
 		JButton toggleResults = Buttons.iconButton(IconType.PANEL_BOTTOM, 16, () -> GridTheme.MUTED_TEXT);
 		toggleResults.setToolTipText("Mostrar/ocultar resultados (Ctrl+J)");
 		toggleResults.addActionListener(e -> toggleResults());
 		trailing.add(toggleResults);
-
-		// "SQLs"/"Salvas"/"Historico" — modelo "navegacao em popup ancorado"
-		// (ver javadoc do grupo de campos {@code AnchoredPopup} no topo da
-		// classe): nao sao mais abas fixas da sidebar, cada uma abre um
-		// painel flutuante ancorado embaixo do proprio botao.
-		JButton sqlEditorsButton = Buttons.iconButton(IconType.EDIT, 16, () -> GridTheme.MUTED_TEXT);
-		sqlEditorsButton.setToolTipText("Abas de SQL abertas");
-		sqlEditorsButton.addActionListener(e -> showSqlEditorsPopup(sqlEditorsButton));
-		trailing.add(sqlEditorsButton);
-
-		JButton savedQueriesButton = Buttons.iconButton(IconType.FAVORITE, 16, () -> GridTheme.MUTED_TEXT);
-		savedQueriesButton.setToolTipText("Consultas salvas");
-		savedQueriesButton.addActionListener(e -> showSavedQueriesPopup(savedQueriesButton));
-		trailing.add(savedQueriesButton);
-
-		JButton historyButton = Buttons.iconButton(IconType.HISTORY, 16, () -> GridTheme.MUTED_TEXT);
-		historyButton.setToolTipText("Historico de execucoes");
-		historyButton.addActionListener(e -> showHistoryPopup(historyButton));
-		trailing.add(historyButton);
 
 		JButton layoutButton = Buttons.iconButton(IconType.SETTINGS, 16, () -> GridTheme.MUTED_TEXT);
 		layoutButton.setToolTipText("Layout, zoom e modo compacto");
@@ -1012,14 +1014,6 @@ public class MainWindow extends JFrame {
 		themeButton.setToolTipText("Alternar tema claro/escuro");
 		themeButton.addActionListener(e -> toggleTheme());
 		trailing.add(themeButton);
-
-		// Chat com IA (Ollama local) — abre o dock proprio na borda direita
-		// da janela (ver #openAiChat/#chatDock), mesma linguagem visual
-		// discreta dos outros icones do grupo.
-		JButton chatButton = Buttons.iconButton(IconType.CHAT, 16, () -> GridTheme.MUTED_TEXT);
-		chatButton.setToolTipText("Chat com IA (Ollama local)");
-		chatButton.addActionListener(e -> openAiChat());
-		trailing.add(chatButton);
 
 		return trailing;
 	}
@@ -1472,23 +1466,14 @@ public class MainWindow extends JFrame {
 	 * Recolhe/expande o painel lateral, focando o editor (ciente do lado atual).
 	 */
 	private void toggleSidebar() {
-		if (leftSide.isVisible()) {
-			sidebarLoc = mainSplit.getDividerLocation();
-			leftSide.setVisible(false);
-			mainSplit.setDividerSize(0);
-			mainSplit.setDividerLocation(sidebarOnRight ? mainSplit.getWidth() : 0);
-		} else {
-			leftSide.setVisible(true);
-			mainSplit.setDividerSize(4);
-			if (sidebarOnRight) {
-				int total = mainSplit.getWidth();
-				int loc = (sidebarLoc > 0 && sidebarLoc < total) ? sidebarLoc : (int) (Math.max(total, 800) * 0.78);
-				mainSplit.setDividerLocation(loc);
-			} else {
-				mainSplit.setDividerLocation(sidebarLoc > 0 ? sidebarLoc : 248);
-			}
-		}
-		mainSplit.revalidate();
+		// Sem divisoria pra mexer (mainLayout e BorderLayout, nao mais
+		// JSplitPane, ver o javadoc do campo): esconder/mostrar o rail e so
+		// alternar visibilidade — a regiao WEST/EAST do BorderLayout
+		// automaticamente colapsa pra zero quando o filho fica invisivel, e
+		// volta pra largura preferida (64px) quando fica visivel de novo.
+		leftSide.setVisible(!leftSide.isVisible());
+		mainLayout.revalidate();
+		mainLayout.repaint();
 		focusEditor();
 	}
 
@@ -1648,19 +1633,16 @@ public class MainWindow extends JFrame {
 	// ---------- Inversao do painel lateral ----------
 
 	/**
-	 * Move o bloco "Conexoes/Objetos" para o outro lado, reconstruindo o split
-	 * principal.
+	 * Move o rail de icones (ver {@link #buildLeftSide}) pro outro lado —
+	 * so troca a regiao do {@link #mainLayout} (WEST/EAST); sem divisoria
+	 * pra recalcular, ao contrario da versao antiga com {@code JSplitPane}.
 	 */
 	private void toggleSidebarSide() {
 		sidebarOnRight = !sidebarOnRight;
-		mainSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, sidebarOnRight ? centerSplit : leftSide,
-				sidebarOnRight ? leftSide : centerSplit);
-		mainSplit.setResizeWeight(sidebarOnRight ? 0.78 : 0.22);
-		mainSplit.setBorder(BorderFactory.createEmptyBorder());
-		chatSplit.setLeftComponent(mainSplit);
-		sidebarLoc = -1;
-		revalidate();
-		repaint();
+		mainLayout.remove(leftSide);
+		mainLayout.add(leftSide, sidebarOnRight ? BorderLayout.EAST : BorderLayout.WEST);
+		mainLayout.revalidate();
+		mainLayout.repaint();
 		focusEditor();
 		saveUiState();
 		if (statusBar != null) {
@@ -1830,15 +1812,16 @@ public class MainWindow extends JFrame {
 			toolbarBar.revalidate();
 			toolbarBar.repaint();
 		}
-		if (leftSide != null) {
-			leftSide.setMinimumSize(new Dimension(scaledPx(160), 0));
-		}
+		// leftSide (rail de icones, ver #buildLeftSide) nao precisa mais de
+		// minimumSize nenhum aqui: sua largura vem do proprio NIconRail
+		// (fixa, ITEM_WIDTH) e o BorderLayout de #mainLayout ja respeita
+		// isso sempre — nao ha mais divisoria de JSplitPane pra travar.
 		// Reconstroi as abas de resultado (tabela, gutter e cabecalho usam
 		// tamanhos fixos definidos na hora da criacao do JTable).
 		resultsController.reshowIfVisible();
-		if (mainSplit != null) {
-			mainSplit.revalidate();
-			mainSplit.repaint();
+		if (mainLayout != null) {
+			mainLayout.revalidate();
+			mainLayout.repaint();
 		}
 	}
 
@@ -2118,68 +2101,66 @@ public class MainWindow extends JFrame {
 		sqlEditorsPanel.add(sqlEditorsRow, BorderLayout.NORTH);
 		sqlEditorsPanel.add(sqlEditorsListScroll, BorderLayout.CENTER);
 
-		// So "Objetos" fica na sidebar agora — "SQL" e "Salvas" tambem
-		// migraram pro modelo "navegacao em popup ancorado" (mesmo padrao
-		// validado com "Historico", ver {@link #showSqlEditorsPopup}/
-		// {@link #showSavedQueriesPopup}, botoes no grupo de icones da
-		// direita da toolbar). "Objetos" continua fixo de proposito: e
-		// consultado CONSTANTEMENTE enquanto se escreve SQL (nome de
-		// coluna/tabela), diferente das outras 3 (SQL/Salvas/Historico),
-		// que sao navegacao ocasional — fechar a arvore de objetos toda
-		// vez que o foco volta pro editor atrapalharia esse uso (decisao
-		// explicita do usuario ao aprovar o piloto). Sem JTabbedPane
-		// nenhum agora (nao ha mais nada pra alternar) — o proprio
-		// navegador de objetos ocupa a coluna inteira.
-		JComponent objectsBrowser = objectExplorer.buildObjectBrowser();
+		// "Objetos" guardado como CAMPO (nao mais embutido direto na coluna):
+		// agora e conteudo de popup, igual SQL/Salvas/Historico ja eram (ver
+		// #showObjectsPopup) — construido uma unica vez aqui, reaberto a
+		// cada clique no rail.
+		objectsBrowserPanel = objectExplorer.buildObjectBrowser();
 
-		// FERRAMENTAS: um unico grupo no rodape com as 3 ferramentas
-		// administrativas MAIS "Chat com IA" logo depois (pedido explicito
-		// do protótipo, mesma ordem do mockup) — antes "Chat com IA" ficava
-		// num grupo separado, sem cabecalho, acima destas 3.
-		JComponent toolsGroup = new JPanel();
-		toolsGroup.setOpaque(false);
-		toolsGroup.setLayout(new BoxLayout(toolsGroup, BoxLayout.Y_AXIS));
-		toolsGroup.add(groupHeader("FERRAMENTAS"));
-		toolsGroup.add(indent(sidebarRow(IconType.BACKUP, "Backup e Restauracao", true, null, objectExplorer::openBackupRestore)));
-		toolsGroup.add(indent(sidebarRow(IconType.USERS, "Usuarios e Privilegios", true, null, objectExplorer::openUserManagement)));
-		toolsGroup.add(indent(sidebarRow(IconType.MONITOR, "Monitor de Conexao", true, null, objectExplorer::openProcessList)));
-		toolsGroup.add(indent(sidebarRow(IconType.CHAT, "Chat com IA", true, null, this::openAiChat)));
+		// Rail vertical de icones substitui a coluna inteira (arvore de
+		// Objetos + rodape FERRAMENTAS) que ficava sempre visivel e larga —
+		// pedido explicito do usuario: "quero que objetos, e os itens de
+		// ferramentas virem icones de uma barra lateral, assim consigo
+		// mesmo minimizando ter acesso facil pra abrir novamente". Cada
+		// item abre seu painel como popup ancorado a DIREITA do proprio
+		// icone (ver AnchoredPopup#toggle com Placement.RIGHT) em vez de
+		// ocupar espaco fixo na tela — e como o rail em si NUNCA precisa
+		// ser escondido (e so 64px, sempre visivel), o botao de
+		// mostrar/ocultar painel lateral que ficava na barra de acoes
+		// (topo direito) deixou de fazer sentido e foi removido (ver
+		// #buildTrailingGroup) — isso elimina a necessidade de "abrir a
+		// sidebar de novo" que existia antes.
+		iconRail = new NIconRail();
+		iconRail.addItem("objetos", IconType.DATABASE, "Objetos")
+				.addItem("sqls", IconType.EDIT, "SQLs")
+				.addItem("favoritos", IconType.FAVORITE, "Favoritos")
+				.addItem("historico", IconType.HISTORY, "Historico")
+				.addItem("ia", IconType.CHAT, "IA")
+				.addItem("backup", IconType.BACKUP, "Backup")
+				.addItem("usuarios", IconType.USERS, "Usuarios")
+				.addItem("mais", IconType.MORE, "Mais");
+		iconRail.onSelect(this::onRailItemSelected);
+		return iconRail;
+	}
 
-		// Rodape fixo (fora das abas, sempre visivel): unico grupo FERRAMENTAS.
-		JPanel footer = new JPanel();
-		footer.setOpaque(false);
-		footer.setLayout(new BoxLayout(footer, BoxLayout.Y_AXIS));
-		footer.add(toolsGroup);
-
-		// Nao e mais uma unica coluna rolando (BoxLayout dentro de um
-		// JScrollPane so): a arvore ja cuida da propria rolagem interna
-		// (ver ObjectExplorerController), entao a sidebar toda usa
-		// BorderLayout normal. Conexao Ativa NAO mora mais aqui — voltou
-		// pro CENTRO da barra de acoes do editor (ver #buildToolbar).
-		// A busca unificada "Buscar (Ctrl+K)" que ficava ACIMA da arvore
-		// tambem saiu — pedido explicito do usuario: era pura duplicacao,
-		// so encaminhava texto pro campo de busca PROPRIO de cada painel
-		// (Objetos/Conexoes/Salvas/Historico ja tem o seu — ver
-		// ObjectExplorerController#objectSearch e equivalentes), que agora
-		// sao sempre visiveis assim que o painel/popup em questao abre, sem
-		// precisar de um atalho unificado por cima.
-		JPanel contentColumn = new JPanel(new BorderLayout(0, Spacing.SM));
-		contentColumn.setBorder(BorderFactory.createEmptyBorder(Spacing.SM, Spacing.SM, Spacing.SM, Spacing.SM));
-		contentColumn.add(objectsBrowser, BorderLayout.CENTER);
-		contentColumn.add(footer, BorderLayout.SOUTH);
-
-		JPanel container = new JPanel(new BorderLayout());
-		container.add(contentColumn, BorderLayout.CENTER);
-		container.setPreferredSize(new Dimension(280, 100));
-		// Minimo EXPLICITO e bem menor que o preferido: sem isto, JSplitPane
-		// usa o minimo CALCULADO pelos filhos (arvore de Objetos, campos de
-		// busca etc.) pra travar o quanto a divisoria pode andar
-		// — na pratica um teto bem maior do que o usuario queria (pedido
-		// explicito: "esse limite deveria ser bem menor"). Componentes
-		// internos continuam com seu proprio scroll/clipping quando a
-		// coluna fica mais estreita que o conteudo deles.
-		container.setMinimumSize(new Dimension(scaledPx(160), 0));
-		return container;
+	/**
+	 * Roteia o clique num item do {@link #iconRail} pro painel/dialogo
+	 * correspondente — a maioria abre um {@link AnchoredPopup} ancorado ao
+	 * proprio icone (ver {@link #showObjectsPopup} e equivalentes);
+	 * "IA"/"Backup"/"Usuarios" abrem o que ja abriam antes (dock proprio ou
+	 * dialogo modal, ver {@link #openAiChat}/{@code ObjectExplorerController});
+	 * "Mais" e um menu simples pros itens que sobraram (hoje so "Monitor de
+	 * Conexao" — sobrariam mais aqui se o rail crescer).
+	 */
+	private void onRailItemSelected(String id) {
+		JComponent anchor = iconRail.anchorFor(id);
+		switch (id) {
+			case "objetos" -> showObjectsPopup(anchor);
+			case "sqls" -> showSqlEditorsPopup(anchor);
+			case "favoritos" -> showSavedQueriesPopup(anchor);
+			case "historico" -> showHistoryPopup(anchor);
+			case "ia" -> openAiChat();
+			case "backup" -> objectExplorer.openBackupRestore();
+			case "usuarios" -> objectExplorer.openUserManagement();
+			case "mais" -> {
+				JPopupMenu menu = new JPopupMenu();
+				JMenuItem monitor = new JMenuItem("Monitor de Conexao");
+				monitor.addActionListener(e -> objectExplorer.openProcessList());
+				menu.add(monitor);
+				menu.show(anchor, anchor.getWidth(), 0);
+			}
+			default -> { }
+		}
 	}
 
 	/**
@@ -2203,6 +2184,11 @@ public class MainWindow extends JFrame {
 	 * relatado pelo usuario na epoca: "no momento nao consigo editar uma
 	 * conexao e criar uma nova".
 	 */
+	/** Lado do {@code anchor} onde o {@link AnchoredPopup} abre — ver {@link AnchoredPopup#toggle(JComponent, JComponent, Placement)}. */
+	private enum Placement {
+		BELOW, RIGHT
+	}
+
 	private final class AnchoredPopup {
 		private JDialog window;
 		private long closedAt;
@@ -2214,12 +2200,23 @@ public class MainWindow extends JFrame {
 		/**
 		 * Alterna: fecha se ja aberto (mesmo comportamento de "toggle" que
 		 * um {@link JPopupMenu} ja dava de graca), senao mostra
-		 * {@code content} ancorado logo abaixo de {@code anchor}.
-		 * {@code content} deve vir com {@code setPreferredSize}/
-		 * {@code setBorder} JA aplicados pelo chamador (o tamanho e
-		 * especifico de cada painel).
+		 * {@code content} ancorado logo ABAIXO de {@code anchor} — variante
+		 * usada pelos botoes da barra de acoes (topo). {@code content} deve
+		 * vir com {@code setPreferredSize}/{@code setBorder} JA aplicados
+		 * pelo chamador (o tamanho e especifico de cada painel).
 		 */
 		void toggle(JComponent anchor, JComponent content) {
+			toggle(anchor, content, Placement.BELOW);
+		}
+
+		/**
+		 * Mesmo mecanismo, com o popup ancorado a DIREITA de {@code anchor}
+		 * em vez de abaixo — usado pelo rail vertical de icones (ver
+		 * {@link #buildLeftSide}), onde os itens ficam empilhados numa
+		 * coluna estreita e o popup precisa abrir pro lado, nao por cima do
+		 * proximo icone.
+		 */
+		void toggle(JComponent anchor, JComponent content, Placement placement) {
 			if (isOpen()) {
 				window.dispose();
 				return;
@@ -2255,7 +2252,11 @@ public class MainWindow extends JFrame {
 			popup.pack();
 
 			Point anchorLoc = anchor.getLocationOnScreen();
-			popup.setLocation(anchorLoc.x, anchorLoc.y + anchor.getHeight());
+			if (placement == Placement.RIGHT) {
+				popup.setLocation(anchorLoc.x + anchor.getWidth(), anchorLoc.y);
+			} else {
+				popup.setLocation(anchorLoc.x, anchorLoc.y + anchor.getHeight());
+			}
 
 			popup.getRootPane().registerKeyboardAction(e -> popup.dispose(),
 					KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), JComponent.WHEN_IN_FOCUSED_WINDOW);
@@ -2332,30 +2333,6 @@ public class MainWindow extends JFrame {
 	}
 
 	/**
-	 * Recuo a esquerda pros sub-itens de um grupo (WORKSPACE/FERRAMENTAS,
-	 * ver {@link #buildLeftSide}) — sem isto, "Consultas Salvas"/"Historico"
-	 * (que desenham seu PROPRIO cabecalho em negrito, mesma receita de
-	 * {@code Typography#sectionHeader} usada por CONEXOES/OBJETOS) pareciam
-	 * grupos de nivel raiz, nao sub-itens de WORKSPACE (achado na revisao
-	 * visual). Preserva a largura de cada componente (BoxLayout ainda
-	 * estica pro resto da coluna); so desloca o conteudo pra dentro.
-	 */
-	private static JComponent indent(JComponent content) {
-		JPanel wrap = new JPanel(new BorderLayout());
-		wrap.setOpaque(false);
-		wrap.setBorder(BorderFactory.createEmptyBorder(0, Spacing.MD, 0, 0));
-		wrap.setAlignmentX(Component.LEFT_ALIGNMENT);
-		wrap.add(content, BorderLayout.CENTER);
-		return wrap;
-	}
-
-	/** Cabecalho de grupo da arvore unica (ver {@link #buildLeftSide}) — mesma receita de {@link Typography#sectionHeader}, so com respiro proprio. */
-	private JComponent groupHeader(String title) {
-		JLabel label = sectionHeader(title);
-		label.setBorder(BorderFactory.createEmptyBorder(Spacing.MD, Spacing.SM, Spacing.XS, Spacing.SM));
-		return label;
-	}
-
 	/**
 	 * Linha clicavel simples da sidebar unificada (icone + texto) — usada
 	 * pelos itens de WORKSPACE/FERRAMENTAS que nao tem um painel proprio pra
@@ -2492,6 +2469,12 @@ public class MainWindow extends JFrame {
 	private void focusObjectSearch() {
 		if (leftSide != null && !leftSide.isVisible()) {
 			toggleSidebar();
+		}
+		// "Objetos" agora e conteudo de popup (ver #showObjectsPopup), nao
+		// mais um painel sempre visivel — abre (ou mantem aberto, #toggle
+		// so fecha se ja estava aberto) antes de focar a busca.
+		if (!objectsPopup.isOpen()) {
+			showObjectsPopup(iconRail.anchorFor("objetos"));
 		}
 		objectExplorer.focusSearch();
 	}
@@ -3266,7 +3249,7 @@ public class MainWindow extends JFrame {
 	/**
 	 * Mostra/esconde o dock do Chat (ver {@link #chatSplit}), lembrando a
 	 * ultima largura escolhida pelo usuario (mesmo principio de
-	 * {@link #sidebarLoc}/{@link #resultsLoc}) — largura padrao na 1a
+	 * {@link #resultsLoc}) — largura padrao na 1a
 	 * abertura: {@link #CHAT_DOCK_DEFAULT_WIDTH}px a partir da borda direita.
 	 */
 	private void setChatDockVisible(boolean visible) {
@@ -3552,6 +3535,13 @@ public class MainWindow extends JFrame {
 		javax.swing.SwingUtilities.updateComponentTreeUI(historyPanel);
 		javax.swing.SwingUtilities.updateComponentTreeUI(savedQueriesPanel);
 		javax.swing.SwingUtilities.updateComponentTreeUI(sqlEditorsPanel);
+		// "Objetos" migrou pro mesmo modelo de popup ancorado dos outros 4
+		// (ver #showObjectsPopup) — mesma classe de bug ja corrigida acima:
+		// sem isto, o autofiltro/arvore ficava preso no tema de quando o
+		// popup foi aberto pela ultima vez.
+		if (objectsBrowserPanel != null) {
+			javax.swing.SwingUtilities.updateComponentTreeUI(objectsBrowserPanel);
+		}
 		styleRunButton();
 		// Mesmo motivo: UpdateBanner tem setBackground/setBorder proprios
 		// (ver seu javadoc), fora do alcance do FlatLaf.updateUI().
@@ -4274,28 +4264,35 @@ public class MainWindow extends JFrame {
 	// ---------- Historico de execucoes (log automatico — ver ExecutionHistoryStore) ----------
 
 	/**
-	 * Abre {@link #historyPanel} num painel flutuante ancorado logo abaixo
-	 * do botao "Historico" — ver {@link AnchoredPopup} pro mecanismo
-	 * (compartilhado com Conexoes/SQLs/Salvas).
+	 * Abre {@link #historyPanel} num painel flutuante ancorado a DIREITA do
+	 * item "Historico" do rail lateral — ver {@link AnchoredPopup} pro
+	 * mecanismo (compartilhado com Conexoes/SQLs/Salvas/Objetos).
 	 */
 	private void showHistoryPopup(JComponent anchor) {
 		historyPanel.setPreferredSize(new Dimension(scaledPx(340), scaledPx(420)));
 		historyPanel.setBorder(BorderFactory.createLineBorder(GridTheme.HEADER_BORDER, 1, true));
-		historyPopup.toggle(anchor, historyPanel);
+		historyPopup.toggle(anchor, historyPanel, Placement.RIGHT);
 	}
 
-	/** Abre {@link #sqlEditorsPanel} (atalho "+ nova aba" + lista das abas de SQL abertas) num painel flutuante ancorado abaixo do botao "SQLs" — ver {@link AnchoredPopup}. */
+	/** Abre {@link #sqlEditorsPanel} (atalho "+ nova aba" + lista das abas de SQL abertas) num painel flutuante ancorado a direita do item "SQLs" do rail — ver {@link AnchoredPopup}. */
 	private void showSqlEditorsPopup(JComponent anchor) {
 		sqlEditorsPanel.setPreferredSize(new Dimension(scaledPx(280), scaledPx(360)));
 		sqlEditorsPanel.setBorder(BorderFactory.createLineBorder(GridTheme.HEADER_BORDER, 1, true));
-		sqlEditorsPopup.toggle(anchor, sqlEditorsPanel);
+		sqlEditorsPopup.toggle(anchor, sqlEditorsPanel, Placement.RIGHT);
 	}
 
-	/** Abre {@link #savedQueriesPanel} num painel flutuante ancorado abaixo do botao "Salvas" — ver {@link AnchoredPopup}. */
+	/** Abre {@link #savedQueriesPanel} num painel flutuante ancorado a direita do item "Favoritos" do rail — ver {@link AnchoredPopup}. */
 	private void showSavedQueriesPopup(JComponent anchor) {
 		savedQueriesPanel.setPreferredSize(new Dimension(scaledPx(340), scaledPx(420)));
 		savedQueriesPanel.setBorder(BorderFactory.createLineBorder(GridTheme.HEADER_BORDER, 1, true));
-		savedQueriesPopup.toggle(anchor, savedQueriesPanel);
+		savedQueriesPopup.toggle(anchor, savedQueriesPanel, Placement.RIGHT);
+	}
+
+	/** Abre {@link #objectsBrowserPanel} (arvore de Objetos) num painel flutuante ancorado a direita do item "Objetos" do rail — ver {@link AnchoredPopup}. */
+	private void showObjectsPopup(JComponent anchor) {
+		objectsBrowserPanel.setPreferredSize(new Dimension(scaledPx(320), scaledPx(480)));
+		objectsBrowserPanel.setBorder(BorderFactory.createLineBorder(GridTheme.HEADER_BORDER, 1, true));
+		objectsPopup.toggle(anchor, objectsBrowserPanel, Placement.RIGHT);
 	}
 
 	/**

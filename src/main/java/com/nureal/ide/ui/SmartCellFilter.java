@@ -6,6 +6,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Locale;
 import java.util.function.Predicate;
+import java.util.regex.Pattern;
 
 /**
  * Filtro de texto "inteligente" usado pela barra de filtro da grade de
@@ -119,15 +120,25 @@ final class SmartCellFilter {
             DateTimeFormatter.ofPattern("dd/MM/yyyy")
     };
 
+    private static final Pattern TRAILING_FRACTION = Pattern.compile("\\.\\d+$");
+
     /** Interpreta data/hora ou data; retorna null se nao for data. */
     private static LocalDateTime parseDate(String raw) {
         if (raw == null) {
             return null;
         }
-        String s = raw.trim().replaceAll("\\.\\d+$", ""); // remove fracao de segundos
-        if (s.isEmpty()) {
+        String trimmed = raw.trim();
+        // Todo formato aceito comeca com digito (ano ou dia) — descarta texto
+        // comum (nomes, etc) ANTES de tentar qualquer parse, pra nao pagar o
+        // custo de LocalDate/LocalDateTime#parse (lanca excecao pra cada
+        // formato que nao bate) em toda celula de uma coluna de texto. Isto
+        // era o principal gargalo do filtro em grades com muitas linhas (ver
+        // ResultGrid#onFilterIconClicked) — pedido explicito do usuario pra
+        // otimizar o filtro em tabelas grandes.
+        if (trimmed.isEmpty() || !Character.isDigit(trimmed.charAt(0))) {
             return null;
         }
+        String s = TRAILING_FRACTION.matcher(trimmed).replaceAll(""); // remove fracao de segundos
         for (DateTimeFormatter f : DATETIME_FMTS) {
             try {
                 return LocalDateTime.parse(s, f);
@@ -148,8 +159,8 @@ final class SmartCellFilter {
     /**
      * Interpreta numero (aceita 1234.56 e 1.234,56); null se nao for numero.
      * Visibilidade de pacote (nao {@code private}): tambem usado por
-     * {@link ColumnValueFilter#newSortedSet} pra ordenar a lista do popup de
-     * autofiltro — o javadoc de {@code newSortedSet} ja dizia "mesma logica
+     * {@link ColumnValueFilter#sortValues} pra ordenar a lista do popup de
+     * autofiltro — o javadoc de {@code sortValues} ja dizia "mesma logica
      * de comparacao do SmartCellFilter", mas antes desta correcao ele
      * reimplementava um {@code Double.parseDouble} cru em vez de chamar
      * este metodo, entao um valor em formato BR ("1.234,56") ordenava como
@@ -161,7 +172,12 @@ final class SmartCellFilter {
             return null;
         }
         String s = raw.trim();
-        if (s.isEmpty()) {
+        // Mesmo raciocinio de #parseDate: descarta texto que obviamente nao e
+        // numero ANTES de tentar Double#valueOf, que lanca excecao (cara,
+        // preenche stack trace) pra cada celula de texto — critico aqui pois
+        // este metodo e chamado em cascata para ORDENAR a lista de valores
+        // distintos do autofiltro (ate um por linha da grade).
+        if (s.isEmpty() || !looksNumeric(s)) {
             return null;
         }
         try {
@@ -174,5 +190,17 @@ final class SmartCellFilter {
         } catch (NumberFormatException ignore) {
             return null;
         }
+    }
+
+    /** Todo numero aceito (decimal simples ou formato BR) so usa estes caracteres. */
+    private static boolean looksNumeric(String s) {
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            boolean ok = Character.isDigit(c) || c == '.' || c == ',' || c == '-' || c == '+';
+            if (!ok) {
+                return false;
+            }
+        }
+        return Character.isDigit(s.charAt(0)) || s.charAt(0) == '-' || s.charAt(0) == '+';
     }
 }
