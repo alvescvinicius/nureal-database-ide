@@ -50,6 +50,15 @@
             <version>9.1.0</version>
         </dependency>
 
+        <!-- Pool de conexoes JDBC: permite varias conexoes fisicas por conexao
+             logica (aba de conexao), necessario para terminais da mesma
+             conexao executarem em paralelo sem se bloquear uns aos outros. -->
+        <dependency>
+            <groupId>com.zaxxer</groupId>
+            <artifactId>HikariCP</artifactId>
+            <version>6.2.1</version>
+        </dependency>
+
         <!-- Editor de codigo: syntax highlighting SQL -->
         <dependency>
             <groupId>com.fifesoft</groupId>

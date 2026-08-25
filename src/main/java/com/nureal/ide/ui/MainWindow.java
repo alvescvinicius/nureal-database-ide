@@ -312,6 +312,19 @@ public class MainWindow extends JFrame {
 	SwingWorker<List<QueryResult>, Void> runWorker;
 	volatile Statement runningStatement;
 
+	/**
+	 * Conexao JDBC DEDICADA de cada terminal (emprestada do pool da conexao
+	 * ativa, ver {@link ConnectionManager#borrowConnection()}), reaproveitada
+	 * entre execucoes do MESMO terminal enquanto ele existir. E o que permite
+	 * dois terminais executarem SQL ao mesmo tempo sem um esperar o outro —
+	 * antes, todo mundo compartilhava a UNICA conexao de
+	 * {@code connectionManager().getConnection()}, que so aguenta uma
+	 * instrucao por vez. Entrada removida (e a conexao fechada, devolvida ao
+	 * pool) quando o terminal fecha ou e descartado (ver
+	 * {@link #closeTerminalConnection}).
+	 */
+	private final Map<SqlEditorPane, Connection> terminalConnections = new HashMap<>();
+
 	// Tema ESCURO agora e o padrao de arranque do app (ver App#main) — este
 	// campo so espelha o L&F ja ativo quando a janela e construida.
 	private boolean dark = true;
@@ -2802,6 +2815,7 @@ public class MainWindow extends JFrame {
 				// Mesma limpeza de closeQueryTab: os resultados de uma aba
 				// fechada nao fazem mais sentido sem ela (ver resultsByTab).
 				resultsController.forgetTab(sep);
+				closeTerminalConnection(sep);
 			}
 			editorTabs.removeTabAt(i);
 		}
@@ -2849,6 +2863,7 @@ public class MainWindow extends JFrame {
 		// sem a aba de SQL que os gerou (ver resultsByTab).
 		if (target instanceof SqlEditorPane sep) {
 			resultsController.forgetTab(sep);
+			closeTerminalConnection(sep);
 		}
 		scheduleSave();
 	}
@@ -2915,6 +2930,7 @@ public class MainWindow extends JFrame {
 			Component c = editorTabs.getComponentAt(i);
 			if (c instanceof SqlEditorPane sep) {
 				resultsController.forgetTab(sep);
+				closeTerminalConnection(sep);
 			}
 		}
 		editorTabs.removeAll();
@@ -3969,7 +3985,12 @@ public class MainWindow extends JFrame {
 			new SwingWorker<Void, Void>() {
 				@Override
 				protected Void doInBackground() throws Exception {
-					connectionManager().getConnection().setCatalog(schemaName);
+					// Troca o catalogo na conexao DESTE terminal (nao mais na
+					// "principal"): desde que a execucao passou a rodar numa
+					// conexao dedicada por terminal (ver #terminalConnection),
+					// trocar so a principal deixaria esta aba rodando no
+					// esquema errado.
+					terminalConnection(editor).setCatalog(schemaName);
 					return null;
 				}
 
@@ -3989,7 +4010,7 @@ public class MainWindow extends JFrame {
 		new SwingWorker<SchemaInfo, Void>() {
 			@Override
 			protected SchemaInfo doInBackground() throws Exception {
-				Connection conn = connectionManager().getConnection();
+				Connection conn = terminalConnection(editor); // conexao DESTE terminal, nao a principal
 				conn.setCatalog(schemaName); // define o banco padrao (USE schema)
 				return metadataService.loadSchema(conn, schemaName);
 			}
@@ -4022,6 +4043,40 @@ public class MainWindow extends JFrame {
 	}
 
 	/** Roda de fato as instrucoes SQL da aba {@code editor} — ver {@link #onRun}. */
+	/**
+	 * Conexao JDBC deste terminal (emprestada uma vez do pool e reutilizada
+	 * nas proximas execucoes DO MESMO terminal — ver {@link #terminalConnections}).
+	 * Emprestar de novo se a conexao guardada ja tiver sido fechada (ex.:
+	 * pool derrubado por uma desconexao manual entre duas execucoes).
+	 */
+	private Connection terminalConnection(SqlEditorPane editor) throws SQLException {
+		Connection existing = terminalConnections.get(editor);
+		if (existing != null) {
+			try {
+				if (!existing.isClosed()) {
+					return existing;
+				}
+			} catch (SQLException ignore) {
+				// cai para emprestar uma nova abaixo
+			}
+		}
+		Connection fresh = connectionManager().borrowConnection();
+		terminalConnections.put(editor, fresh);
+		return fresh;
+	}
+
+	/** Devolve ao pool a conexao dedicada de um terminal, se houver — ver {@link #terminalConnections}. */
+	private void closeTerminalConnection(SqlEditorPane editor) {
+		Connection conn = terminalConnections.remove(editor);
+		if (conn != null) {
+			try {
+				conn.close();
+			} catch (SQLException ignore) {
+				// nada a fazer ao fechar
+			}
+		}
+	}
+
 	private void runStatements(SqlEditorPane editor) {
 		final List<String> statements = statementsToRun(editor);
 		if (statements == null) {
@@ -4031,8 +4086,8 @@ public class MainWindow extends JFrame {
 
 		SwingWorker<List<QueryResult>, Void> worker = new SwingWorker<>() {
 			@Override
-			protected List<QueryResult> doInBackground() {
-				return SqlExecutionEngine.executeStatements(connectionManager().getConnection(), statements,
+			protected List<QueryResult> doInBackground() throws SQLException {
+				return SqlExecutionEngine.executeStatements(terminalConnection(editor), statements,
 						this::isCancelled, st -> runningStatement = st);
 			}
 

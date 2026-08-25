@@ -35,6 +35,18 @@ public interface ConexaoAtivaPort extends AutoCloseable {
     /** Conexao JDBC atualmente aberta, ou {@code null} se nao conectado. */
     Connection getConnection();
 
+    /**
+     * Conexao JDBC DEDICADA (fisicamente distinta da de {@link #getConnection()}),
+     * para quem executa uma instrucao e fecha a conexao ao terminar — permite
+     * varias execucoes concorrentes na mesma conexao logica sem se
+     * bloquearem. Implementacao padrao devolve a mesma de
+     * {@link #getConnection()} (sem pool de verdade); {@code ConnectionManager}
+     * sobrescreve com uma conexao de fato emprestada de um pool HikariCP.
+     */
+    default Connection borrowConnection() throws SQLException {
+        return getConnection();
+    }
+
     boolean isConnected();
 
     DatabaseDialect dialect();
