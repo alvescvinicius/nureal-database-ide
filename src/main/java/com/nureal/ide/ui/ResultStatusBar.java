@@ -221,18 +221,16 @@ final class ResultStatusBar {
     }
 
     /**
-     * Desabilita "Carregar todas as linhas restantes" e troca o texto
-     * enquanto a leitura roda em segundo plano — mesmo padrao ja usado por
-     * {@link #setExactTotalBusy}. Sem isto, clicar no link nao dava NENHUM
-     * retorno visual ate a leitura inteira terminar (que pode levar
-     * segundos/minutos numa tabela grande) — o app parecia "travado", bug
-     * relatado pelo usuario, quando na verdade a leitura ja rodava em
-     * segundo plano (ver {@code ResultsAreaController#loadAll}), so sem
-     * nenhum sinal de que estava acontecendo.
+     * Troca o texto de "Carregar todas as linhas restantes" enquanto a
+     * leitura roda em segundo plano — mesmo padrao ja usado por
+     * {@link #setExactTotalBusy}, MAS continua CLICAVEL enquanto ocupado
+     * (nao mais desabilitado): o MESMO botao vira "Cancelar carregamento",
+     * clicavel pra interromper a leitura em andamento (ver
+     * {@code ResultsAreaController#loadAll}) — pedido explicito do usuario
+     * ("preciso de um botao cancelar quando estiver carregando tudo").
      */
     void setLoadAllBusy(boolean busy) {
-        loadAllButton.setEnabled(!busy);
-        loadAllButton.setText(busy ? "Carregando..." : "Carregar todas as linhas restantes");
+        loadAllButton.setText(busy ? "Cancelar carregamento" : "Carregar todas as linhas restantes");
     }
 
     /** "Ver total exato" clicado — ver javadoc de {@link #exactTotalButton}. */

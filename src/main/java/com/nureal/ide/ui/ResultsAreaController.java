@@ -181,6 +181,22 @@ final class ResultsAreaController {
 	}
 
 	/** Empilha o conteudo dos resultados e um overlay de "carregando" por cima. */
+	/** Margem (px) do card flutuante "Executando..." ate o canto da area de resultados — ver {@link #overlayStack}. */
+	private static final int EXECUTING_CARD_MARGIN_PX = 16;
+
+	/**
+	 * Empilha o conteudo dos resultados com o indicador "Executando..." POR
+	 * CIMA, mas so do TAMANHO PROPRIO dele (canto inferior direito), nao mais
+	 * cobrindo a area de resultados inteira — antes disto, rodar uma
+	 * instrucao bloqueava clique em QUALQUER coisa na area de resultados
+	 * (outras abas de resultado ja prontas, botoes do rodape da grade, etc.),
+	 * nao so na consulta que estava rodando de fato (bug relatado pelo
+	 * usuario: "cobre a area toda, nao so a consulta atual"). Como o card
+	 * agora so ocupa o proprio tamanho preferido (nao mais a tela inteira),
+	 * cliques fora dele chegam direto no conteudo por tras — sem precisar de
+	 * nenhum "bloqueio" de mouse explicito (ver {@link #buildResultsOverlay},
+	 * que tinha um {@code MouseAdapter} vazio so pra isso, removido).
+	 */
 	private JComponent overlayStack(JComponent content) {
 		resultsOverlay = buildResultsOverlay();
 		JPanel stack = new JPanel(null) {
@@ -188,9 +204,11 @@ final class ResultsAreaController {
 
 			@Override
 			public void doLayout() {
-				for (Component c : getComponents()) {
-					c.setBounds(0, 0, getWidth(), getHeight());
-				}
+				content.setBounds(0, 0, getWidth(), getHeight());
+				Dimension pref = resultsOverlay.getPreferredSize();
+				int x = Math.max(EXECUTING_CARD_MARGIN_PX, getWidth() - pref.width - EXECUTING_CARD_MARGIN_PX);
+				int y = Math.max(EXECUTING_CARD_MARGIN_PX, getHeight() - pref.height - EXECUTING_CARD_MARGIN_PX);
+				resultsOverlay.setBounds(x, y, pref.width, pref.height);
 			}
 		};
 		stack.add(resultsOverlay);
@@ -199,7 +217,7 @@ final class ResultsAreaController {
 		return stack;
 	}
 
-	/** Camada translucida com spinner e botao Cancelar, escondida por padrao. */
+	/** Card flutuante com spinner e botao Cancelar, escondido por padrao — ver {@link #overlayStack}. */
 	private JComponent buildResultsOverlay() {
 		JLabel label = new JLabel("Executando consulta...");
 		label.setAlignmentX(Component.CENTER_ALIGNMENT);
@@ -240,9 +258,6 @@ final class ResultsAreaController {
 		};
 		overlay.setOpaque(false);
 		overlay.add(card);
-		// bloqueia interacao com os resultados por tras
-		overlay.addMouseListener(new MouseAdapter() {
-		});
 		overlay.setVisible(false);
 		styleExecutingOverlay();
 		return overlay;
@@ -402,8 +417,20 @@ final class ResultsAreaController {
 		// SqlExecutionEngine.ResultCursor#st), entao nunca podem rodar ao
 		// mesmo tempo uma da outra.
 		boolean[] busy = { false };
+		// Worker do "Carregar tudo" EM ANDAMENTO, se houver — guardado pra
+		// poder cancelar (ver abaixo: o MESMO botao vira "Cancelar" enquanto
+		// ocupado, pedido explicito do usuario, "preciso de um botao
+		// cancelar quando estiver carregando tudo"). null quando nao ha
+		// nenhum carregamento rodando agora para ESTE resultado.
+		SwingWorker<?, ?>[] loadAllWorker = { null };
 		resultStatusBar.onLoadAll(() -> {
 			if (busy[0]) {
+				// Ja esta carregando: este clique e o botao "Cancelar" (ver
+				// ResultStatusBar#setLoadAllBusy, que troca o texto/mantem o
+				// botao clicavel enquanto ocupado).
+				if (loadAllWorker[0] != null) {
+					loadAllWorker[0].cancel(true);
+				}
 				return;
 			}
 			// So avisa quando ja da pra saber, por evidencia (nao suposicao),
@@ -420,15 +447,17 @@ final class ResultsAreaController {
 			}
 			busy[0] = true;
 			resultStatusBar.setLoadAllBusy(true);
-			loadAll(r, () -> {
+			loadAllWorker[0] = loadAll(r, () -> {
 				refresh.run();
-				// loadAll so termina de verdade quando o cursor esgota (ver
-				// #loadAll); ate la cada "chunk" publicado chama refresh
-				// tambem, entao so libera o "ocupado" quando o cursor JA
-				// estiver esgotado (nao no meio do caminho).
+				// loadAll so termina de verdade quando o cursor esgota OU o
+				// carregamento e cancelado (ver #loadAll); ate la cada
+				// "chunk" publicado chama refresh tambem, entao so libera o
+				// "ocupado" quando o cursor JA estiver esgotado/fechado (nao
+				// no meio do caminho).
 				if (r.cursor() == null || r.cursor().exhausted) {
 					busy[0] = false;
 					resultStatusBar.setLoadAllBusy(false);
+					loadAllWorker[0] = null;
 				}
 			});
 		});
@@ -804,19 +833,28 @@ final class ResultsAreaController {
 		return ok == JOptionPane.YES_OPTION;
 	}
 
-	/** Le todas as linhas restantes do cursor em segundo plano, em blocos de {@link #LOAD_ALL_BULK_SIZE}. */
-	private void loadAll(QueryResult r, Runnable refresh) {
+	/**
+	 * Le todas as linhas restantes do cursor em segundo plano, em blocos de
+	 * {@link #LOAD_ALL_BULK_SIZE} — cancelavel (ver {@code isCancelled()} no
+	 * loop abaixo, checado a cada linha: a leitura de um {@code ResultSet}
+	 * JDBC nao reage sozinha a {@code SwingWorker#cancel}, precisa ser
+	 * checada explicitamente). Devolve o {@link SwingWorker} pra quem chamou
+	 * poder cancela-lo depois (ver o botao "Cancelar" ligado a ele em
+	 * {@link #buildGridPanel}) — pedido explicito do usuario ("preciso de um
+	 * botao cancelar quando estiver carregando tudo").
+	 */
+	private SwingWorker<Void, List<Vector<Object>>> loadAll(QueryResult r, Runnable refresh) {
 		SqlExecutionEngine.ResultCursor c = r.cursor();
 		if (c == null || c.exhausted) {
-			return;
+			return null;
 		}
 		owner.statusBar().setText(" Carregando todas as linhas...");
-		new SwingWorker<Void, List<Vector<Object>>>() {
+		SwingWorker<Void, List<Vector<Object>>> worker = new SwingWorker<>() {
 			@Override
 			protected Void doInBackground() throws Exception {
 				int cols = r.model().getColumnCount();
 				List<Vector<Object>> batch = new ArrayList<>(LOAD_ALL_BULK_SIZE);
-				while (c.rs.next()) {
+				while (!isCancelled() && c.rs.next()) {
 					Vector<Object> row = new Vector<>(cols);
 					for (int i = 1; i <= cols; i++) {
 						row.add(c.rs.getObject(i));
@@ -827,6 +865,10 @@ final class ResultsAreaController {
 						batch = new ArrayList<>(LOAD_ALL_BULK_SIZE);
 					}
 				}
+				// Mesmo cancelado, publica o que ja tinha lido no bloco atual
+				// — o usuario ve as linhas que ja tinham sido buscadas do
+				// banco antes do cancelamento, nao as perde por estarem
+				// "no meio" de um bloco incompleto.
 				if (!batch.isEmpty()) {
 					publish(batch);
 				}
@@ -853,22 +895,33 @@ final class ResultsAreaController {
 			@Override
 			protected void done() {
 				boolean stillOpen = openCursors.contains(c);
+				boolean cancelled = isCancelled();
+				// Cancelado ou nao, a leitura para AQUI: nao ha como retomar
+				// de forma segura um ResultSet/Statement que ja fechamos no
+				// meio da leitura — trata como esgotado nos dois casos.
 				c.exhausted = true;
 				c.close();
 				openCursors.remove(c);
 				if (!stillOpen) {
 					return;
 				}
-				try {
-					get();
-					owner.statusBar().setText(" Todas as linhas carregadas (" + r.model().getRowCount() + ").");
-				} catch (Exception ex) {
-					com.nureal.ide.core.log.AppLogger.warning("Falha ao carregar linhas", ex);
-					owner.statusBar().setText(" Erro ao carregar linhas: " + ex.getMessage());
+				if (cancelled) {
+					owner.statusBar()
+							.setText(" Carregamento cancelado (" + r.model().getRowCount() + " linhas carregadas).");
+				} else {
+					try {
+						get();
+						owner.statusBar().setText(" Todas as linhas carregadas (" + r.model().getRowCount() + ").");
+					} catch (Exception ex) {
+						com.nureal.ide.core.log.AppLogger.warning("Falha ao carregar linhas", ex);
+						owner.statusBar().setText(" Erro ao carregar linhas: " + ex.getMessage());
+					}
 				}
 				refresh.run();
 			}
-		}.execute();
+		};
+		worker.execute();
+		return worker;
 	}
 
 	void closeOpenCursors() {
