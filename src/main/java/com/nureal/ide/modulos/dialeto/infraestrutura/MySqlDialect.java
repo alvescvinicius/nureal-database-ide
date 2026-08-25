@@ -103,6 +103,14 @@ public class MySqlDialect implements DatabaseDialect {
     }
 
     @Override
+    public String eventNamesQuery() {
+        return "SELECT EVENT_NAME "
+                + "FROM information_schema.EVENTS "
+                + "WHERE EVENT_SCHEMA = ? "
+                + "ORDER BY EVENT_NAME";
+    }
+
+    @Override
     public String definitionQuery(String objectKind, String objectName) {
         return "SHOW CREATE " + objectKind + " " + quoteIdentifier(objectName);
     }

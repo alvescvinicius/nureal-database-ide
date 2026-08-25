@@ -116,7 +116,18 @@ public class MetadataService implements MetadataRepository {
             }
         }
 
-        return new SchemaInfo(schema, tables, views, procedures, functions, triggers);
+        // 5) Eventos agendados.
+        List<String> events = new ArrayList<>();
+        try (PreparedStatement ps = conn.prepareStatement(dialect.eventNamesQuery())) {
+            ps.setString(1, schema);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    events.add(rs.getString("EVENT_NAME"));
+                }
+            }
+        }
+
+        return new SchemaInfo(schema, tables, views, procedures, functions, triggers, events);
     }
 
     /**

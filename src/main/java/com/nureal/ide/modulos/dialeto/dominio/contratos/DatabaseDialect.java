@@ -64,6 +64,17 @@ public interface DatabaseDialect {
     String triggersQuery();
 
     /**
+     * Lista os NOMES dos eventos agendados do schema, para o Explorador de
+     * Objetos (ver {@code SchemaInfo#events}) — mesmo padrao bind (?) das
+     * outras consultas de categoria acima (tabelas/rotinas/triggers), ao
+     * contrario de {@link #eventsQuery(String)} (embutida direto na
+     * consulta, sem bind, porque roda via {@code Statement} puro no dialogo
+     * "Eventos e Replicacao" que mostra o detalhe completo). Um parametro
+     * (?) para o schema; retorna a coluna EVENT_NAME.
+     */
+    String eventNamesQuery();
+
+    /**
      * Consulta que retorna a definicao (DDL) de um objeto. {@code objectKind} e
      * o tipo do objeto (ex.: "TABLE", "VIEW", "PROCEDURE", "FUNCTION",
      * "TRIGGER"); {@code objectName} e o nome. O DDL fica em alguma coluna do

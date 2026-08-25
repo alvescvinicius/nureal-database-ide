@@ -344,6 +344,7 @@ final class ObjectExplorerController {
 		addNameCategory(root, "Procedures", schema.procedures(), NodeType.ROUTINE, "PROCEDURE", f, filtering);
 		addNameCategory(root, "Functions", schema.functions(), NodeType.ROUTINE, "FUNCTION", f, filtering);
 		addNameCategory(root, "Triggers", schema.triggers(), NodeType.TRIGGER, "TRIGGER", f, filtering);
+		addNameCategory(root, "Eventos", schema.events(), NodeType.EVENT, "EVENT", f, filtering);
 
 		if (filtering && root.getChildCount() == 0) {
 			root.add(new DefaultMutableTreeNode(new ObjNode(NodeType.EMPTY_MESSAGE,
@@ -489,6 +490,10 @@ final class ObjectExplorerController {
 			buildRoutinesCategoryContextMenu(obj.kind()).show(objectTree, e.getX(), e.getY());
 			return;
 		}
+		if (obj.type() == NodeType.CATEGORY && "EVENT".equals(obj.kind())) {
+			buildEventsCategoryContextMenu().show(objectTree, e.getX(), e.getY());
+			return;
+		}
 		if (!isOpenableObject(obj.type())) {
 			return;
 		}
@@ -582,6 +587,15 @@ final class ObjectExplorerController {
 		JMenuItem createTriggerItem = new JMenuItem("Novo trigger...");
 		createTriggerItem.addActionListener(a -> ddlActions.createTrigger());
 		menu.add(createTriggerItem);
+		return menu;
+	}
+
+	/** Unico item: abre o dialogo ja existente de eventos/replicacao (ver {@link #openEventsReplication}) — nao ha assistente de criacao de evento hoje. */
+	private JPopupMenu buildEventsCategoryContextMenu() {
+		JPopupMenu menu = new JPopupMenu();
+		JMenuItem openItem = new JMenuItem("Abrir eventos e replicacao...");
+		openItem.addActionListener(a -> openEventsReplication());
+		menu.add(openItem);
 		return menu;
 	}
 
@@ -1274,7 +1288,7 @@ final class ObjectExplorerController {
 
 	private static boolean isOpenableObject(NodeType type) {
 		return type == NodeType.TABLE || type == NodeType.VIEW
-				|| type == NodeType.ROUTINE || type == NodeType.TRIGGER;
+				|| type == NodeType.ROUTINE || type == NodeType.TRIGGER || type == NodeType.EVENT;
 	}
 
 	void openEditorObject(String kind, String name, TableInfo table) {
@@ -1282,6 +1296,7 @@ final class ObjectExplorerController {
 			case "TABLE" -> NodeType.TABLE;
 			case "VIEW" -> NodeType.VIEW;
 			case "TRIGGER" -> NodeType.TRIGGER;
+			case "EVENT" -> NodeType.EVENT;
 			default -> NodeType.ROUTINE;
 		};
 		ObjNode node = new ObjNode(type, name, name, kind, table, null);
@@ -1520,7 +1535,7 @@ final class ObjectExplorerController {
 	 * classes de UI da arvore, no mesmo pacote (ver {@code ui}).
 	 */
 	enum NodeType {
-		SCHEMA, SCHEMA_PICK, CATEGORY, TABLE, VIEW, ROUTINE, TRIGGER, COLUMN,
+		SCHEMA, SCHEMA_PICK, CATEGORY, TABLE, VIEW, ROUTINE, TRIGGER, EVENT, COLUMN,
 		EMPTY_MESSAGE
 	}
 

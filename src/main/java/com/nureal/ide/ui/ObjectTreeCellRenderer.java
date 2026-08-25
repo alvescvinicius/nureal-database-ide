@@ -279,6 +279,11 @@ final class ObjectTreeCellRenderer extends DefaultTreeCellRenderer {
             case "PROCEDURE" -> IconType.PROCEDURE;
             case "FUNCTION" -> IconType.FUNCTION;
             case "TRIGGER" -> IconType.TRIGGER;
+            // Sem icone dedicado de "evento agendado" no design system ainda —
+            // reaproveita HISTORY (relogio), semanticamente proximo o
+            // suficiente ("algo que acontece com o tempo") sem precisar de um
+            // asset SVG novo so para esta categoria.
+            case "EVENT" -> IconType.HISTORY;
             default -> null;
         };
     }
