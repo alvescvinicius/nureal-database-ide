@@ -64,7 +64,10 @@ import java.awt.Graphics;
 import java.awt.GraphicsEnvironment;
 import java.awt.Rectangle;
 import java.awt.Shape;
+import java.awt.Toolkit;
 import java.awt.Window;
+import java.awt.datatransfer.DataFlavor;
+import java.awt.datatransfer.Transferable;
 import java.awt.event.ActionEvent;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
@@ -487,7 +490,7 @@ public class SqlEditorPane extends JPanel {
                     performRedo();
                     e.consume();
                 } else if (e.getKeyCode() == KeyEvent.VK_V && !e.isShiftDown() && textArea.isEditable()) {
-                    undoManager.runAsSingleEdit(textArea::paste);
+                    pasteFast();
                     e.consume();
                 } else if (e.getKeyCode() == KeyEvent.VK_X && !e.isShiftDown() && textArea.isEditable()) {
                     undoManager.runAsSingleEdit(textArea::cut);
@@ -495,6 +498,55 @@ public class SqlEditorPane extends JPanel {
                 }
             }
         });
+    }
+
+    /** Colar so fica lento a partir daqui (ver {@link #pasteFast}) — abaixo disso a diferenca nao e perceptivel. */
+    private static final int LARGE_PASTE_THRESHOLD_CHARS = 50_000;
+
+    /**
+     * Cola o conteudo da area de transferencia — igual a {@code textArea.paste()},
+     * mas rapido tambem para textos GRANDES (scripts SQL de dezenas de
+     * milhares de caracteres, pedido explicito do usuario: "textos grandes
+     * quando colo no terminal devem ser colados de forma rapida"). A
+     * insercao em si ja e uma unica mutacao do Document (nao O(n) por
+     * caractere); o gargalo e o CODE FOLDING (ver
+     * {@code SqlFoldParser}) reprocessando o documento inteiro logo em
+     * seguida — desligado temporariamente so quando o colado e grande o
+     * suficiente pra isso importar, e religado (com um unico
+     * reprocessamento, nao um por caractere) assim que a colagem termina.
+     * Sempre uma unica operacao no historico de desfazer (ver
+     * {@link EditorUndoManager#runAsSingleEdit}), como antes.
+     */
+    private void pasteFast() {
+        String clipboardText = clipboardTextOrNull();
+        boolean large = clipboardText != null && clipboardText.length() > LARGE_PASTE_THRESHOLD_CHARS;
+        if (!large) {
+            undoManager.runAsSingleEdit(textArea::paste);
+            return;
+        }
+        boolean foldingWasEnabled = textArea.isCodeFoldingEnabled();
+        textArea.setCodeFoldingEnabled(false);
+        try {
+            undoManager.runAsSingleEdit(textArea::paste);
+        } finally {
+            if (foldingWasEnabled) {
+                textArea.setCodeFoldingEnabled(true);
+            }
+        }
+    }
+
+    /** Texto atual da area de transferencia do sistema, ou {@code null} se vazia/indisponivel/nao-texto. */
+    private static String clipboardTextOrNull() {
+        try {
+            Transferable content = Toolkit.getDefaultToolkit().getSystemClipboard().getContents(null);
+            if (content != null && content.isDataFlavorSupported(DataFlavor.stringFlavor)) {
+                return (String) content.getTransferData(DataFlavor.stringFlavor);
+            }
+        } catch (Exception ignore) {
+            // Clipboard indisponivel/ocupado por outro processo no instante da
+            // checagem — segue sem a otimizacao (paste normal ainda funciona).
+        }
+        return null;
     }
 
     /** Zoom: Ctrl + '=' / '+' / numpad+  aumenta; Ctrl + '-' diminui; Ctrl+0 reseta. */
@@ -2317,7 +2369,7 @@ public class SqlEditorPane extends JPanel {
         JMenuItem copy = new JMenuItem("Copiar");
         copy.addActionListener(e -> textArea.copy());
         JMenuItem paste = new JMenuItem("Colar");
-        paste.addActionListener(e -> undoManager.runAsSingleEdit(textArea::paste));
+        paste.addActionListener(e -> pasteFast());
         menu.add(cut);
         menu.add(copy);
         menu.add(paste);
