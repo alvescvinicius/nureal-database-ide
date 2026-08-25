@@ -4288,13 +4288,35 @@ public class MainWindow extends JFrame {
 		panel.add(new JLabel(message), BorderLayout.NORTH);
 		panel.add(scroll, BorderLayout.CENTER);
 
+		// JOptionPane montado na mao (nao mais JOptionPane.showOptionDialog):
+		// pra duplo-clique na lista poder confirmar sozinho (pedido explicito
+		// do usuario — "queria poder dar dois cliques e entrar tambem"),
+		// precisa de uma referencia ao proprio optionPane pra chamar
+		// setValue(...) de dentro do listener da lista — o metodo estatico de
+		// conveniencia nao devolve isso, so o RESULTADO depois do dialogo ja
+		// fechado. optionPane.setValue(...) e exatamente o que os botoes
+		// internos do JOptionPane chamam sozinhos ao clicar; setar na mao
+		// fecha o dialogo do mesmo jeito, sem duplicar logica de abrir/fechar.
 		Object[] options = { confirmLabel, "Nova conexao...", "Cancelar" };
-		int choice = JOptionPane.showOptionDialog(this, panel, "Selecionar conexao", JOptionPane.YES_NO_CANCEL_OPTION,
-				JOptionPane.QUESTION_MESSAGE, null, options, options[0]);
-		if (choice == 0) {
+		JOptionPane optionPane = new JOptionPane(panel, JOptionPane.QUESTION_MESSAGE, JOptionPane.YES_NO_CANCEL_OPTION,
+				null, options, options[0]);
+		JDialog dialog = optionPane.createDialog(this, "Selecionar conexao");
+		list.addMouseListener(new MouseAdapter() {
+			@Override
+			public void mouseClicked(MouseEvent e) {
+				if (e.getClickCount() == 2 && list.getSelectedValue() != null) {
+					optionPane.setValue(confirmLabel);
+				}
+			}
+		});
+		dialog.setVisible(true); // bloqueia ate o usuario escolher/fechar
+		dialog.dispose();
+
+		Object chosen = optionPane.getValue();
+		if (confirmLabel.equals(chosen)) {
 			return list.getSelectedValue();
 		}
-		if (choice == 1) {
+		if ("Nova conexao...".equals(chosen)) {
 			connectionsPanel.createNewConnection();
 		}
 		return null;
