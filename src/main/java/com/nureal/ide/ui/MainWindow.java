@@ -2668,7 +2668,19 @@ public class MainWindow extends JFrame {
 		JPanel plusDummy = new JPanel();
 		plusDummy.putClientProperty("JTabbedPane.tabClosable", false);
 		connectionPlusTab = plusDummy;
-		connectionTabs.addTab("+", plusDummy);
+		// Guardado com switchingConnectionTab: esta e a PRIMEIRA aba (0->1),
+		// e o JTabbedPane seleciona (e dispara ChangeEvent) automaticamente
+		// ao adicionar a primeira aba — sem o guard, o ChangeListener via
+		// "aba + selecionada" e chamava promptConnectionSelection() no MEIO
+		// da construcao da janela, bem antes de buildToolbar() existir
+		// (connectionCard ainda null) — NullPointerException relatada pelo
+		// usuario logo no arranque.
+		switchingConnectionTab = true;
+		try {
+			connectionTabs.addTab("+", plusDummy);
+		} finally {
+			switchingConnectionTab = false;
+		}
 		connectionTabs.setToolTipTextAt(connectionTabs.indexOfComponent(plusDummy), "Conectar/nova conexao");
 
 		// Inicializa o workspace "sem conexao" com as abas salvas (+ aba "+"),
