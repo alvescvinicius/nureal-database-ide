@@ -1,4 +1,4 @@
-# Nureal Database IDE
+# Nureal Database IDE 
 
 IDE para desenvolvedores de banco de dados. Desktop, multiplataforma (Windows, macOS e
 Linux — ver [Compatibilidade multiplataforma](#compatibilidade-multiplataforma)),
