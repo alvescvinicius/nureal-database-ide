@@ -2613,6 +2613,13 @@ public class MainWindow extends JFrame {
 		// Sem override de tabType aqui: herda "underlined" do FlatLaf.properties
 		// (redesenho "novo e leve", Fase 6) — mesma linguagem visual do
 		// restante das abas do app.
+		// Fechavel (pedido explicito do usuario) — exceto a aba "Sem conexao"
+		// em si, que nunca fecha (ver #ensureConnectionTab, que marca o painel
+		// dela com tabClosable=false individualmente, mesmo truque ja usado
+		// pela aba "+" do editor).
+		connectionTabs.putClientProperty("JTabbedPane.tabClosable", true);
+		connectionTabs.putClientProperty("JTabbedPane.tabCloseCallback",
+				(BiConsumer<JTabbedPane, Integer>) (k, index) -> closeConnectionTab(index));
 		// Trocar de aba de CONEXAO reativa o workspace correspondente (mesmo
 		// caminho de ativacao usado pela lista lateral de conexoes, ver
 		// #activateWorkspace) — reentrancia evitada por switchingConnectionTab,
@@ -2674,6 +2681,12 @@ public class MainWindow extends JFrame {
 			JPanel p = new JPanel(new BorderLayout());
 			p.setBorder(BorderFactory.createEmptyBorder(0, 0, 4, 0));
 			p.add(w.ownEditorTabs, BorderLayout.CENTER);
+			if (SCRATCH.equals(w.name())) {
+				// Mesmo truque da aba "+" do editor (ver #addPlusTab): marca o
+				// PAINEL desta aba especifica como nao-fechavel, mesmo com
+				// "JTabbedPane.tabClosable"=true no nivel da tira inteira.
+				p.putClientProperty("JTabbedPane.tabClosable", false);
+			}
 			w.ownPanel = p;
 			connectionTabs.addTab(connectionTabLabel(w), p);
 		} else {
@@ -2695,6 +2708,47 @@ public class MainWindow extends JFrame {
 
 	private static String connectionTabLabel(Conexao w) {
 		return SCRATCH.equals(w.name()) ? "Sem conexao" : w.name();
+	}
+
+	/**
+	 * Fecha uma aba de CONEXAO (botao "x" na tira de abas, pedido explicito
+	 * do usuario) — desconecta (se conectada), fecha a conexao JDBC dedicada
+	 * de cada terminal dela, remove o workspace da lista viva e a propria
+	 * aba. O SQL de cada terminal continua salvo em disco (ver
+	 * {@code SessionStore}) e volta a aparecer se o usuario conectar de novo
+	 * a esta mesma conexao — "fechar a aba" nao apaga nada, so tira da tela.
+	 * A aba "Sem conexao" nunca chega aqui (ver {@link #ensureConnectionTab},
+	 * que a marca como nao-fechavel).
+	 */
+	private void closeConnectionTab(int index) {
+		Component target = connectionTabs.getComponentAt(index);
+		Conexao w = workspaceForPanel(target);
+		if (w == null || SCRATCH.equals(w.name())) {
+			return;
+		}
+		int ok = JOptionPane.showConfirmDialog(this,
+				"Fechar a conexao \"" + w.name() + "\"?\n\nOs terminais desta conexao serao fechados — o SQL de cada "
+						+ "aba continua salvo e volta a aparecer da proxima vez que voce conectar.",
+				"Fechar conexao", JOptionPane.YES_NO_OPTION);
+		if (ok != JOptionPane.YES_OPTION) {
+			return;
+		}
+		if (w.ownEditorTabs != null) {
+			for (int i = 0; i < w.ownEditorTabs.getTabCount(); i++) {
+				if (w.ownEditorTabs.getComponentAt(i) instanceof SqlEditorPane sep) {
+					closeTerminalConnection(sep);
+					resultsController.forgetTab(sep);
+				}
+			}
+		}
+		w.mgr.close();
+		workspaces.remove(w.name);
+		connectionTabs.remove(target);
+		if (activeWorkspace == w) {
+			activateWorkspace(workspaces.get(SCRATCH));
+		}
+		refreshConnectionIndicators();
+		statusBar.setText(" Conexao \"" + w.name() + "\" fechada.");
 	}
 
 	private boolean addQueryTab() {
@@ -3824,9 +3878,18 @@ public class MainWindow extends JFrame {
 					if (pickSchema) {
 						statusBar.setText(
 								" Conectado  (" + ((List<?>) result).size() + " esquema(s) - duplo-clique para abrir)");
-						// Sem schema resolvido ainda, nao da pra rodar a instrucao
-						// sozinho (falta contexto) — o usuario escolhe o schema
-						// primeiro (duplo-clique) e clica Executar de novo.
+						// Sem schema resolvido ainda, nao da pra RODAR a instrucao
+						// sozinho (falta contexto) — mas o callback ainda roda (ver
+						// #runNewTabWithSql, unico chamador com onConnected != null
+						// hoje), que sabe deixar o SQL numa aba nova em vez de
+						// perde-lo, mesmo sem poder executar ainda. Bug corrigido:
+						// antes o callback so rodava no ramo "else" (schema ja
+						// resolvido) — quando a conexao escolhida exigia
+						// duplo-clique pra escolher o esquema, o SQL digitado
+						// simplesmente sumia (nenhuma aba nova era criada).
+						if (onConnected != null) {
+							onConnected.run();
+						}
 					} else {
 						statusBar.setText(" Conectado  (" + ws.schema.tables().size() + " tabelas)");
 						if (onConnected != null) {
