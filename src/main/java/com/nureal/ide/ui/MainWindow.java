@@ -4061,6 +4061,32 @@ public class MainWindow extends JFrame {
 			}
 		}
 		Connection fresh = connectionManager().borrowConnection();
+		// Uma conexao RECEM-emprestada do pool nasce no esquema padrao do
+		// PERFIL (definido na URL JDBC de conexao), nao no esquema que o
+		// usuario tenha aberto na arvore/aba enquanto isso — antes, com uma
+		// unica conexao compartilhada por toda a IDE, isso nunca era um
+		// problema (a troca de esquema, ver #openSchema/#switchCatalogThenRun,
+		// sempre acontecia na MESMA conexao que ia rodar a consulta). Agora
+		// cada terminal tem a sua propria conexao fisica, entao a primeira
+		// vez que ele roda algo precisa alinhar essa conexao nova ao esquema
+		// que o usuario espera — o preferido desta aba (ver
+		// SqlEditorPane#getSchema, ja herdado do esquema atual quando a aba
+		// foi criada) ou, na falta dele, o esquema atualmente aberto —
+		// senao o usuario seria obrigado a qualificar toda tabela com
+		// "esquema." so porque abriu um terminal novo. Bug relatado pelo
+		// usuario logo apos a introducao do pool por terminal.
+		String schemaName = editor.getSchema();
+		if (schemaName == null || schemaName.isBlank()) {
+			schemaName = currentActiveSchemaName();
+		}
+		if (schemaName != null && !schemaName.isBlank()) {
+			try {
+				fresh.setCatalog(schemaName);
+			} catch (SQLException ex) {
+				fresh.close();
+				throw ex;
+			}
+		}
 		terminalConnections.put(editor, fresh);
 		return fresh;
 	}
