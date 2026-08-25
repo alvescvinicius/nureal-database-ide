@@ -2739,7 +2739,21 @@ public class MainWindow extends JFrame {
 			// editorTabs): ela precisa continuar sendo sempre a ULTIMA.
 			int at = (connectionPlusTab != null) ? connectionTabs.indexOfComponent(connectionPlusTab)
 					: connectionTabs.getTabCount();
-			connectionTabs.insertTab(connectionTabLabel(w), null, p, null, at);
+			// Guardado com switchingConnectionTab: inserir ANTES da aba "+"
+			// (que estava selecionada, ver acima) faz o proprio JTabbedPane
+			// reajustar o INDICE selecionado internamente pra continuar
+			// apontando pra ela (0 -> 1, por exemplo) — isso dispara um
+			// ChangeEvent SINCRONO aqui dentro do insertTab, antes do
+			// #ensureConnectionTab reselecionar a aba certa mais abaixo. Sem
+			// o guard, o ChangeListener via "+" ainda selecionada e reabria
+			// o seletor de conexao LOGO APOS a primeira conexao bem-sucedida
+			// (bug relatado pelo usuario).
+			switchingConnectionTab = true;
+			try {
+				connectionTabs.insertTab(connectionTabLabel(w), null, p, null, at);
+			} finally {
+				switchingConnectionTab = false;
+			}
 		} else {
 			int idx = connectionTabs.indexOfComponent(w.ownPanel);
 			if (idx >= 0) {
