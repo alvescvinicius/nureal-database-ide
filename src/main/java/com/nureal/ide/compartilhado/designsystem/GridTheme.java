@@ -359,30 +359,38 @@ public final class GridTheme {
             SELECTION_FOREGROUND = new Color(0x26, 0x32, 0x38);
             ACTIVE_CELL_BORDER = new Color(0x37, 0x47, 0x4F);
 
-            // Branco PURO (0xFFFFFF) era duro/ofuscante contra o resto da
-            // paleta clara (cabecalho 0xF1F3F5, zebra impar 0xF7F8FA) —
-            // pedido explicito do usuario ("deixe mais suave"). Um branco
-            // levemente quebrado mantem a mesma leitura de "linha clara"
-            // sem o salto de contraste brusco pro branco absoluto.
-            ZEBRA_EVEN = new Color(0xFC, 0xFD, 0xFE);
-            ZEBRA_ODD = new Color(0xF7, 0xF8, 0xFA);
-            HOVER_BACKGROUND = new Color(0xEE, 0xF2, 0xF5);
+            // Branco puro pra zebra "par" agora (era 0xFCFDFE): redesenho "novo
+            // e leve" (Fase 6) achatou as superficies de conteudo pra branco em
+            // toda a IDE (ver FlatLaf.properties) — a zebra ODD e quem carrega
+            // o contraste sutil sozinha, um tom bem mais proximo do branco que
+            // antes (era 0xF7F8FA) pra nao reintroduzir a "camada de cinza" que
+            // este redesenho removeu de todo o resto da UI.
+            ZEBRA_EVEN = new Color(0xFF, 0xFF, 0xFF);
+            ZEBRA_ODD = new Color(0xFA, 0xFB, 0xFC);
+            HOVER_BACKGROUND = new Color(0xF1, 0xF4, 0xF6);
 
             EDIT_DIRTY_CELL = new Color(0xFE, 0xF3, 0xC7);
             EDIT_NEW_ROW = new Color(0xDC, 0xFC, 0xE7);
             EDIT_DELETED_ROW = new Color(0xFE, 0xE2, 0xE2);
 
-            GRID_LINE = new Color(0xED, 0xEF, 0xF2);
+            // Linha de grade quase invisivel (era 0xEDEFF2) — a leitura de
+            // "linha" vem mais da zebra do que de um traco solido agora.
+            GRID_LINE = new Color(0xF2, 0xF4, 0xF6);
 
-            HEADER_BACKGROUND = new Color(0xF1, 0xF3, 0xF5);
+            // Cabecalho com peso TIPOGRAFICO (ver HEADER_FOREGROUND em negrito
+            // via Typography), nao mais um bloco de fundo cinza distinto do
+            // resto da grade (era 0xF1F3F5) — so uma borda inferior fina
+            // (HEADER_BORDER, bem mais clara que antes) separa cabecalho de
+            // dados.
+            HEADER_BACKGROUND = new Color(0xFA, 0xFB, 0xFC);
             HEADER_FOREGROUND = new Color(0x33, 0x41, 0x55);
-            HEADER_BORDER = new Color(0xCB, 0xD5, 0xE1);
+            HEADER_BORDER = new Color(0xE4, 0xE7, 0xEB);
             SORT_INDICATOR_ACTIVE = new Color(0x05, 0x96, 0x69);
             SORT_INDICATOR_INACTIVE = new Color(0xB0, 0xB8, 0xC1);
             HEADER_HIGHLIGHT_BACKGROUND = new Color(0xFE, 0xF0, 0x8A);
             HEADER_HIGHLIGHT_BORDER = new Color(0xCA, 0x8A, 0x04);
 
-            GUTTER_BACKGROUND = new Color(0xF3, 0xF4, 0xF6);
+            GUTTER_BACKGROUND = new Color(0xFA, 0xFB, 0xFC);
             GUTTER_FOREGROUND = new Color(0x9A, 0xA3, 0xAF);
 
             MUTED_TEXT = new Color(0x6B, 0x72, 0x80);

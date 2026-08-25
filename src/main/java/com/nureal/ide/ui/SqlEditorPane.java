@@ -774,7 +774,7 @@ public class SqlEditorPane extends JPanel {
     private void applyGutterPalette() {
         boolean dark = FlatLaf.isLafDark();
         scrollPane.getGutter().setBackground(dark ? new Color(0x1A, 0x1B, 0x1E) : new Color(0xEC, 0xEE, 0xF1));
-        scrollPane.getGutter().setBorderColor(dark ? new Color(0x33, 0x36, 0x3A) : new Color(0xE0, 0xE3, 0xE7));
+        scrollPane.getGutter().setBorderColor(dark ? new Color(0x33, 0x36, 0x3A) : new Color(0xEB, 0xED, 0xEF));
     }
 
     /**

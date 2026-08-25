@@ -36,7 +36,7 @@ public final class Buttons {
     /** Botao secundario: contorno fino, cantos arredondados, sem preenchimento — a maioria dos botoes do app. */
     public static void styleSecondary(JButton button) {
         button.putClientProperty("JButton.buttonType", "roundRect");
-        button.putClientProperty(FlatClientProperties.STYLE, "arc: 8; borderWidth: 1");
+        button.putClientProperty(FlatClientProperties.STYLE, "arc: 6; borderWidth: 1");
         button.setMargin(new Insets(4, 10, 4, 10));
     }
 
@@ -45,7 +45,7 @@ public final class Buttons {
         button.setBackground(GridTheme.BRAND_GREEN);
         button.setForeground(Color.WHITE);
         button.setMargin(new Insets(6, 14, 6, 14));
-        button.putClientProperty(FlatClientProperties.STYLE, "arc: 8; focusWidth: 0; innerFocusWidth: 0; borderWidth: 0");
+        button.putClientProperty(FlatClientProperties.STYLE, "arc: 6; focusWidth: 0; innerFocusWidth: 0; borderWidth: 0");
     }
 
     /**
@@ -60,7 +60,7 @@ public final class Buttons {
      */
     public static void styleIconButton(JButton button) {
         button.putClientProperty("JButton.buttonType", "toolBarButton");
-        button.putClientProperty(FlatClientProperties.STYLE, "arc: 8");
+        button.putClientProperty(FlatClientProperties.STYLE, "arc: 6");
         button.setMargin(new Insets(4, 4, 4, 4));
     }
 

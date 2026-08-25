@@ -2610,7 +2610,9 @@ public class MainWindow extends JFrame {
 		// linha de abas, com rolagem, nunca empilhada em varias linhas.
 		connectionTabs.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
 		connectionTabs.putClientProperty("JTabbedPane.tabAreaInsets", new Insets(0, 0, 0, 0));
-		connectionTabs.putClientProperty("JTabbedPane.tabType", "card");
+		// Sem override de tabType aqui: herda "underlined" do FlatLaf.properties
+		// (redesenho "novo e leve", Fase 6) — mesma linguagem visual do
+		// restante das abas do app.
 		// Trocar de aba de CONEXAO reativa o workspace correspondente (mesmo
 		// caminho de ativacao usado pela lista lateral de conexoes, ver
 		// #activateWorkspace) — reentrancia evitada por switchingConnectionTab,

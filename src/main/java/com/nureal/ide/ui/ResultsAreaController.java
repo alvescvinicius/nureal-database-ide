@@ -98,7 +98,10 @@ final class ResultsAreaController {
 		// unica linha de abas, com rolagem, em vez do padrao do Swing de
 		// empilhar em varias linhas — pedido explicito do usuario.
 		resultTabs.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
-		resultTabs.putClientProperty("JTabbedPane.tabType", "card");
+		// Sem override de tabType aqui: herda "underlined" do FlatLaf.properties
+		// (redesenho "novo e leve", Fase 6) — mesma linguagem visual das abas
+		// de conexao/terminal, nao mais um estilo "card" (pilula preenchida)
+		// so nesta tira.
 		resultTabs.putClientProperty("JTabbedPane.minimumTabWidth", 96);
 		resultTabs.addMouseListener(new MouseAdapter() {
 			@Override
@@ -216,7 +219,7 @@ final class ResultsAreaController {
 
 		JPanel card = new JPanel();
 		card.setLayout(new BoxLayout(card, BoxLayout.Y_AXIS));
-		card.setBorder(BorderFactory.createCompoundBorder(BorderFactory.createLineBorder(new Color(0xE0E3E7)),
+		card.setBorder(BorderFactory.createCompoundBorder(BorderFactory.createLineBorder(new Color(0xEBEDEF)),
 				BorderFactory.createEmptyBorder(18, 28, 18, 28)));
 		card.add(label);
 		card.add(Box.createVerticalStrut(12));
@@ -257,7 +260,7 @@ final class ResultsAreaController {
 		boolean dark = FlatLaf.isLafDark();
 		executingCard.setBackground(dark ? new Color(0x2B, 0x2D, 0x30) : new Color(0xFF, 0xFF, 0xFF));
 		executingCard.setBorder(BorderFactory.createCompoundBorder(
-				BorderFactory.createLineBorder(dark ? new Color(0x44, 0x48, 0x4D) : new Color(0xE0, 0xE3, 0xE7)),
+				BorderFactory.createLineBorder(dark ? new Color(0x44, 0x48, 0x4D) : new Color(0xEB, 0xED, 0xEF)),
 				BorderFactory.createEmptyBorder(18, 28, 18, 28)));
 	}
 
