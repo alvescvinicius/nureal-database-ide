@@ -4004,15 +4004,17 @@ public class MainWindow extends JFrame {
 	 * conectar e ja executar a instrucao — mostrando a BASE e o SCHEMA que
 	 * serao usados (os da aba/workspace atual), pra deixar claro onde a
 	 * instrucao vai rodar antes de disparar a conexao. Pedido explicito do
-	 * usuario. So se aplica quando a aba atual pertence a um workspace com
-	 * perfil de conexao conhecido (nao a aba SCRATCH, que nunca teve uma base
-	 * "certa" pra oferecer) — nesse caso cai no aviso simples de sempre.
+	 * usuario. Quando a aba atual NAO pertence a nenhum workspace com perfil
+	 * conhecido (aba SCRATCH/"Sem conexao", que nunca teve uma base "certa"
+	 * pra oferecer), abre um seletor com as conexoes salvas em vez de so
+	 * avisar na barra de status (ver {@link #openConnectionPickerThenRun}) —
+	 * pedido explicito do usuario ("ao executar abrir selecao de conexao").
 	 */
 	private void offerConnectThenRun() {
 		Conexao ws = activeWorkspace;
 		ConnectionProfile profile = (ws != null) ? ws.profile() : null;
 		if (profile == null) {
-			statusBar.setText(" Conecte-se a uma base antes de executar.");
+			openConnectionPickerThenRun();
 			return;
 		}
 		String schemaLabel = (profile.schema() != null && !profile.schema().isBlank())
@@ -4030,6 +4032,84 @@ public class MainWindow extends JFrame {
 		} else {
 			statusBar.setText(" Execucao cancelada: nao conectado.");
 		}
+	}
+
+	/**
+	 * Seletor de conexoes salvas, aberto quando o usuario tenta executar um
+	 * terminal que ainda nao pertence a nenhuma conexao (aba SCRATCH). O
+	 * terminal atual continua na aba "Sem conexao" (nao existe hoje como
+	 * "mover uma aba de workspace" sem duplicar); em vez disso, o SQL ja
+	 * digitado e levado para uma aba NOVA, criada ja dentro da conexao
+	 * escolhida, e executado la — o usuario nao perde o que escreveu nem
+	 * precisa colar de novo.
+	 */
+	private void openConnectionPickerThenRun() {
+		List<ConnectionProfile> profiles;
+		try {
+			profiles = connectionStore.load();
+		} catch (Exception ex) {
+			showError("Falha ao carregar conexoes salvas", ex);
+			return;
+		}
+		if (profiles.isEmpty()) {
+			int create = JOptionPane.showConfirmDialog(this,
+					"Voce ainda nao tem nenhuma conexao salva.\n\nCriar uma agora?",
+					"Nenhuma conexao salva", JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
+			if (create == JOptionPane.YES_OPTION) {
+				connectionsPanel.createNewConnection();
+			}
+			statusBar.setText(" Execucao cancelada: nao conectado.");
+			return;
+		}
+
+		SqlEditorPane sourceEditor = currentEditor();
+		String sql = (sourceEditor != null) ? sourceEditor.currentSql() : "";
+
+		JList<ConnectionProfile> list = new JList<>(profiles.toArray(new ConnectionProfile[0]));
+		list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+		list.setSelectedIndex(0);
+		list.setCellRenderer(new DefaultListCellRenderer() {
+			private static final long serialVersionUID = 1L;
+
+			@Override
+			public Component getListCellRendererComponent(JList<?> l, Object value, int index, boolean isSelected,
+					boolean cellHasFocus) {
+				super.getListCellRendererComponent(l, value, index, isSelected, cellHasFocus);
+				if (value instanceof ConnectionProfile p) {
+					setText(p.name() + "  —  " + p.user() + "@" + p.host());
+				}
+				return this;
+			}
+		});
+		JScrollPane scroll = new JScrollPane(list);
+		scroll.setPreferredSize(new Dimension(scaledPx(360), scaledPx(220)));
+
+		JPanel panel = new JPanel(new BorderLayout(0, 8));
+		panel.add(new JLabel("Esta aba ainda nao esta conectada a nenhuma base. Escolha uma conexao:"),
+				BorderLayout.NORTH);
+		panel.add(scroll, BorderLayout.CENTER);
+
+		Object[] options = { "Conectar e executar", "Nova conexao...", "Cancelar" };
+		int choice = JOptionPane.showOptionDialog(this, panel, "Selecionar conexao", JOptionPane.YES_NO_CANCEL_OPTION,
+				JOptionPane.QUESTION_MESSAGE, null, options, options[0]);
+		if (choice == 0) {
+			ConnectionProfile selected = list.getSelectedValue();
+			if (selected != null) {
+				statusBar.setText(" Conectando a " + selected.name() + " para executar...");
+				connectTo(selected, () -> runNewTabWithSql(sql));
+			}
+		} else if (choice == 1) {
+			connectionsPanel.createNewConnection();
+			statusBar.setText(" Conexao criada — clique em Executar de novo para conectar e rodar.");
+		} else {
+			statusBar.setText(" Execucao cancelada: nao conectado.");
+		}
+	}
+
+	/** Abre uma aba nova (na conexao ja ativa no momento) com o SQL informado e ja executa — ver {@link #openConnectionPickerThenRun}. */
+	private void runNewTabWithSql(String sql) {
+		addQueryTab(nextQueryTitle(), sql == null ? "" : sql);
+		onRun();
 	}
 
 	private void onRun() {
