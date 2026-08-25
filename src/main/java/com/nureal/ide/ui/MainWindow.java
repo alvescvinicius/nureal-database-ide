@@ -4127,6 +4127,7 @@ public class MainWindow extends JFrame {
 			return;
 		}
 
+		Conexao sourceWorkspace = activeWorkspace;
 		SqlEditorPane sourceEditor = currentEditor();
 		String sql = (sourceEditor != null) ? sourceEditor.currentSql() : "";
 
@@ -4161,7 +4162,16 @@ public class MainWindow extends JFrame {
 			ConnectionProfile selected = list.getSelectedValue();
 			if (selected != null) {
 				statusBar.setText(" Conectando a " + selected.name() + " para executar...");
-				connectTo(selected, () -> runNewTabWithSql(sql));
+				connectTo(selected, () -> {
+					runNewTabWithSql(sql);
+					// "Move" o terminal de origem pra conexao escolhida (nao so
+					// copia): sem isto, o mesmo SQL ficava duplicado — uma copia
+					// na aba nova da conexao escolhida, o original intacto ainda
+					// na aba "Sem conexao" — pedido explicito do usuario ("nao
+					// fica com essa aba sem conexao aberta"). So remove a
+					// ORIGEM depois que o destino ja existe e ja rodou.
+					removeTerminalFrom(sourceWorkspace, sourceEditor);
+				});
 			}
 		} else if (choice == 1) {
 			connectionsPanel.createNewConnection();
@@ -4175,6 +4185,39 @@ public class MainWindow extends JFrame {
 	private void runNewTabWithSql(String sql) {
 		addQueryTab(nextQueryTitle(), sql == null ? "" : sql);
 		onRun();
+	}
+
+	/**
+	 * Remove {@code target} da aba de terminais de {@code w} DIRETAMENTE, sem
+	 * passar pelos campos "atalho" {@code editorTabs}/{@code plusTab} (que a
+	 * essa altura ja apontam pra OUTRO workspace — ver
+	 * {@link #openConnectionPickerThenRun}, unico chamador: {@code w} aqui e
+	 * sempre a origem, "Sem conexao", enquanto o workspace ATIVO ja e o
+	 * destino). Nunca remove a ULTIMA aba real do workspace (mesma regra de
+	 * {@link #closeQueryTab}) — se {@code w} so tinha esta aba, ela fica
+	 * (vazia) em vez de deixar o workspace sem nenhuma aba.
+	 */
+	private void removeTerminalFrom(Conexao w, SqlEditorPane target) {
+		if (w == null || target == null || w.ownEditorTabs == null) {
+			return;
+		}
+		JTabbedPane pane = w.ownEditorTabs;
+		int idx = pane.indexOfComponent(target);
+		if (idx < 0) {
+			return;
+		}
+		int realCount = 0;
+		for (int i = 0; i < pane.getTabCount(); i++) {
+			if (pane.getComponentAt(i) != w.ownPlusTab) {
+				realCount++;
+			}
+		}
+		if (realCount <= 1) {
+			return;
+		}
+		pane.removeTabAt(idx);
+		resultsController.forgetTab(target);
+		closeTerminalConnection(target);
 	}
 
 	private void onRun() {
