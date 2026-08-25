@@ -46,6 +46,7 @@ import javax.swing.JScrollPane;
 import javax.swing.JTabbedPane;
 import javax.swing.JTable;
 import javax.swing.JTextArea;
+import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import javax.swing.table.DefaultTableModel;
@@ -842,14 +843,48 @@ final class ResultsAreaController {
 	 * poder cancela-lo depois (ver o botao "Cancelar" ligado a ele em
 	 * {@link #buildGridPanel}) — pedido explicito do usuario ("preciso de um
 	 * botao cancelar quando estiver carregando tudo").
+	 * <p>
+	 * Cada bloco e aplicado no modelo com {@code SwingUtilities#invokeAndWait}
+	 * (nao mais {@code publish}/{@code process}) — driver MySQL Connector/J
+	 * ja traz o {@code ResultSet} INTEIRO pro cliente antes de devolver
+	 * (nao e streaming por padrao), entao o loop abaixo consegue ler MILHOES
+	 * de linhas em segundos, publicando blocos muito mais rapido do que a
+	 * EDT consegue absorver — {@code publish}/{@code process} so AGRUPAM
+	 * chamadas rapidas demais numa so, mas nao FREIAM quem publica; pra um
+	 * resultado grande o suficiente, isso podia significar dezenas de milhares
+	 * de linhas chegando de uma vez num UNICO {@code process()}, travando a
+	 * EDT (e a janela inteira, incluindo o proprio botao "Cancelar") pelo
+	 * tempo que essa insercao gigante levasse — bug relatado pelo usuario
+	 * ("quando clico pra carregar tudo trava e nao consigo mexer em nada").
+	 * {@code invokeAndWait} forca a thread de fundo a ESPERAR cada bloco ser
+	 * aplicado antes de ler o proximo — a EDT sempre tem a chance de
+	 * processar outros eventos (incluindo um clique em "Cancelar") entre um
+	 * bloco e outro, e o trabalho de cada despacho na EDT fica limitado ao
+	 * tamanho de UM bloco.
 	 */
-	private SwingWorker<Void, List<Vector<Object>>> loadAll(QueryResult r, Runnable refresh) {
+	private SwingWorker<Void, Void> loadAll(QueryResult r, Runnable refresh) {
 		SqlExecutionEngine.ResultCursor c = r.cursor();
 		if (c == null || c.exhausted) {
 			return null;
 		}
 		owner.statusBar().setText(" Carregando todas as linhas...");
-		SwingWorker<Void, List<Vector<Object>>> worker = new SwingWorker<>() {
+		SwingWorker<Void, Void> worker = new SwingWorker<>() {
+			private void applyBatch(List<Vector<Object>> batch) throws Exception {
+				SwingUtilities.invokeAndWait(() -> {
+					// Mesmo guard de #loadPage: a aba pode ter sido fechada
+					// enquanto este "carregar tudo" ainda rodava em segundo
+					// plano — sem isto, cada leva de linhas continuaria sendo
+					// aplicada a um modelo que ninguem mais exibe.
+					if (!openCursors.contains(c)) {
+						return;
+					}
+					int before = r.model().getRowCount();
+					r.model().addRows(batch);
+					r.model().editController().onRowsAppended(before);
+					refresh.run();
+				});
+			}
+
 			@Override
 			protected Void doInBackground() throws Exception {
 				int cols = r.model().getColumnCount();
@@ -861,35 +896,18 @@ final class ResultsAreaController {
 					}
 					batch.add(row);
 					if (batch.size() >= LOAD_ALL_BULK_SIZE) {
-						publish(batch);
+						applyBatch(batch);
 						batch = new ArrayList<>(LOAD_ALL_BULK_SIZE);
 					}
 				}
-				// Mesmo cancelado, publica o que ja tinha lido no bloco atual
+				// Mesmo cancelado, aplica o que ja tinha lido no bloco atual
 				// — o usuario ve as linhas que ja tinham sido buscadas do
 				// banco antes do cancelamento, nao as perde por estarem
 				// "no meio" de um bloco incompleto.
 				if (!batch.isEmpty()) {
-					publish(batch);
+					applyBatch(batch);
 				}
 				return null;
-			}
-
-			@Override
-			protected void process(List<List<Vector<Object>>> batches) {
-				// Mesmo guard de #loadPage: a aba pode ter sido fechada
-				// enquanto este "carregar tudo" ainda rodava em segundo
-				// plano — sem isto, cada leva de linhas continuaria sendo
-				// aplicada a um modelo que ninguem mais exibe.
-				if (!openCursors.contains(c)) {
-					return;
-				}
-				int before = r.model().getRowCount();
-				for (List<Vector<Object>> batch : batches) {
-					r.model().addRows(batch);
-				}
-				r.model().editController().onRowsAppended(before);
-				refresh.run();
 			}
 
 			@Override
