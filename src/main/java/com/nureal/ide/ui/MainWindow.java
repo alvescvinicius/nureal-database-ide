@@ -322,8 +322,28 @@ public class MainWindow extends JFrame {
 	private JButton themeButton;
 	/** Nome da conexao em processo de conectar agora (ver {@link #setConnectingState}), ou null. */
 	private String connectingWorkspaceName;
-	SwingWorker<List<QueryResult>, Void> runWorker;
-	volatile Statement runningStatement;
+	/**
+	 * Execucao em andamento de UM terminal: o {@link SwingWorker} e o
+	 * {@link Statement} JDBC atualmente rodando (para {@code Statement#cancel}
+	 * — ver {@link #cancelExecution}). Nao sao mais campos UNICOS
+	 * ({@code runWorker}/{@code runningStatement} da IDE inteira): cada
+	 * terminal executa/cancela de forma independente (ver
+	 * {@link #terminalExecutions}), senao executar numa aba desabilitaria
+	 * "Executar" e a barra de progresso de TODAS as outras, mesmo de
+	 * conexoes diferentes — o oposto do que foi pedido ("um terminal nao
+	 * impede o outro").
+	 */
+	private static final class TerminalExecution {
+		final SwingWorker<List<QueryResult>, Void> worker;
+		volatile Statement statement;
+
+		TerminalExecution(SwingWorker<List<QueryResult>, Void> worker) {
+			this.worker = worker;
+		}
+	}
+
+	/** Execucoes em andamento, uma entrada por terminal que esta rodando algo agora — ver {@link TerminalExecution}. */
+	private final Map<SqlEditorPane, TerminalExecution> terminalExecutions = new HashMap<>();
 
 	/**
 	 * Conexao JDBC DEDICADA de cada terminal (emprestada do pool da conexao
@@ -2565,6 +2585,8 @@ public class MainWindow extends JFrame {
 				scheduleSave();
 				resultsController.showResultsForActiveEditor();
 				updateSaveButtonState();
+				refreshRunButtonState();
+				refreshExecutingOverlay();
 			}
 		});
 		// Botao direito no titulo da aba: fechar / fechar as outras.
@@ -3201,7 +3223,8 @@ public class MainWindow extends JFrame {
 			objectExplorer.showDisconnected(label);
 		}
 		refreshConnectionIndicators();
-		runButton.setEnabled(w.mgr.isConnected());
+		refreshRunButtonState();
+		refreshExecutingOverlay();
 		focusEditor();
 	}
 
@@ -4241,15 +4264,19 @@ public class MainWindow extends JFrame {
 			@Override
 			protected List<QueryResult> doInBackground() throws SQLException {
 				return SqlExecutionEngine.executeStatements(terminalConnection(editor), statements,
-						this::isCancelled, st -> runningStatement = st);
+						this::isCancelled, st -> {
+							TerminalExecution exec = terminalExecutions.get(editor);
+							if (exec != null) {
+								exec.statement = st;
+							}
+						});
 			}
 
 			@Override
 			protected void done() {
-				resultsController.showExecuting(false);
-				runningStatement = null;
-				runWorker = null;
-				runButton.setEnabled(true);
+				terminalExecutions.remove(editor);
+				refreshRunButtonState();
+				refreshExecutingOverlay();
 				try {
 					handleStatementResults(editor, statements, get());
 				} catch (CancellationException ce) {
@@ -4260,8 +4287,59 @@ public class MainWindow extends JFrame {
 				}
 			}
 		};
-		runWorker = worker;
+		terminalExecutions.put(editor, new TerminalExecution(worker));
+		refreshRunButtonState();
+		refreshExecutingOverlay();
 		worker.execute();
+	}
+
+	/** "Executar" so fica habilitado se a conexao do terminal ATUAL estiver ativa E ele nao estiver ja rodando algo. */
+	private void refreshRunButtonState() {
+		if (runButton == null) {
+			return;
+		}
+		SqlEditorPane cur = currentEditor();
+		boolean running = cur != null && terminalExecutions.containsKey(cur);
+		boolean connected = activeWorkspace != null && activeWorkspace.mgr().isConnected();
+		runButton.setEnabled(connected && !running);
+	}
+
+	/**
+	 * A barra "Executando..." (ver {@code ResultsAreaController#showExecuting})
+	 * e da area de RESULTADOS, compartilhada por todos os terminais — so faz
+	 * sentido mostra-la quando o terminal ATUALMENTE VISIVEL e o que esta
+	 * rodando algo, senao o usuario nao conseguiria nem OLHAR os resultados
+	 * de um terminal ocioso so porque outro, em OUTRA aba, esta executando.
+	 */
+	private void refreshExecutingOverlay() {
+		SqlEditorPane cur = currentEditor();
+		resultsController.showExecuting(cur != null && terminalExecutions.containsKey(cur));
+	}
+
+	/**
+	 * Cancela a execucao em andamento do terminal informado (Statement.cancel
+	 * + SwingWorker), se houver — chamado pelo botao "Cancelar" da area de
+	 * resultados (ver {@code ResultsAreaController#cancelExecution}), sempre
+	 * para o terminal ATUALMENTE visivel (o unico cujo "Cancelar" o usuario
+	 * consegue ver/clicar).
+	 */
+	void cancelExecution(SqlEditorPane editor) {
+		TerminalExecution exec = (editor != null) ? terminalExecutions.get(editor) : null;
+		if (exec == null) {
+			return;
+		}
+		Statement st = exec.statement;
+		if (st != null) {
+			// roda em outra thread: nao pode bloquear a EDT esperando o KILL QUERY
+			new Thread(() -> {
+				try {
+					st.cancel();
+				} catch (SQLException ignore) {
+					// ignora
+				}
+			}, "cancel-query").start();
+		}
+		exec.worker.cancel(true);
 	}
 
 	/** Split + validacoes pre-execucao (data sem aspas, confirmacao de instrucoes arriscadas). {@code null} = nao deve executar. */
@@ -4307,8 +4385,10 @@ public class MainWindow extends JFrame {
 		if (resultsArea != null && !resultsArea.isVisible()) {
 			toggleResults(); // reabre os resultados para mostrar o carregamento
 		}
-		runButton.setEnabled(false);
-		resultsController.showExecuting(true);
+		// "Executar" desabilitado e a barra "Executando..." aparecem so
+		// depois de registrar esta execucao em terminalExecutions (ver
+		// #runStatements, chamador) — refreshRunButtonState/refreshExecutingOverlay
+		// olham esse mapa, entao so refletem o terminal ATUAL, nunca todos.
 		boolean usingSelection = editor.hasSelection();
 		statusBar.setText(" Executando " + statements.size() + " instrucao(oes)"
 				+ (usingSelection ? "  —  ATENCAO: rodando apenas a SELECAO" : "") + "...");

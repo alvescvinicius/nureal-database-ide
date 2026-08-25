@@ -271,23 +271,10 @@ final class ResultsAreaController {
 		}
 	}
 
-	/** Cancela de fato a instrucao em execucao (Statement.cancel) e o worker. */
+	/** Cancela de fato a instrucao em execucao (Statement.cancel) e o worker DO TERMINAL ATUAL — ver {@code MainWindow#cancelExecution}. */
 	private void cancelExecution() {
 		owner.statusBar().setText(" Cancelando execucao...");
-		Statement st = owner.runningStatement;
-		if (st != null) {
-			// roda em outra thread: nao pode bloquear a EDT esperando o KILL QUERY
-			new Thread(() -> {
-				try {
-					st.cancel();
-				} catch (SQLException ignore) {
-					// ignora
-				}
-			}, "cancel-query").start();
-		}
-		if (owner.runWorker != null) {
-			owner.runWorker.cancel(true);
-		}
+		owner.cancelExecution(owner.currentEditor());
 	}
 
 	/**
