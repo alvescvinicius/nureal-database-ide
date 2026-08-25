@@ -78,12 +78,33 @@ class SqlExecutionEngineTest {
 				() -> false, st -> {
 				});
 
-		assertEquals(2, results.size());
+		// DDL/DML (sem ResultSet) sao combinados numa UNICA aba, mesmo quando
+		// uma delas falha no meio do lote — ver javadoc de #executeStatements.
+		// A terceira instrucao (UPDATE c) nunca roda, pois o lote para na
+		// primeira que falhou.
+		assertEquals(1, results.size());
+		assertTrue(results.get(0).error());
+		assertTrue(results.get(0).message().contains("1 linha(s) afetada(s)"),
+				"resumo combinado deveria conter o resultado da instrucao anterior: " + results.get(0).message());
+		assertTrue(results.get(0).message().contains("erro de sintaxe perto de 'X'"),
+				"resumo combinado deveria conter o texto original da excecao SQL: " + results.get(0).message());
+	}
+
+	@Test
+	void executeStatementsCombinaVariosComandosSemResultSetNumaUnicaAba() {
+		Deque<Object> statementScripts = new ArrayDeque<>(
+				List.of(updateCountScript(1), updateCountScript(3), updateCountScript(0)));
+
+		List<QueryResult> results = SqlExecutionEngine.executeStatements(
+				fakeConnection(statementScripts),
+				List.of("INSERT INTO a VALUES (1)", "UPDATE a SET x=1", "DELETE FROM a WHERE x=0"),
+				() -> false, st -> {
+				});
+
+		assertEquals(1, results.size());
 		assertFalse(results.get(0).error());
-		assertEquals("1 linha(s) afetada(s)", results.get(0).message());
-		assertTrue(results.get(1).error());
-		assertTrue(results.get(1).message().contains("erro de sintaxe perto de 'X'"),
-				"mensagem de erro deveria conter o texto original da excecao SQL: " + results.get(1).message());
+		assertTrue(results.get(0).message().contains("1. "), "deveria numerar cada comando: " + results.get(0).message());
+		assertTrue(results.get(0).message().contains("3. "), "deveria listar as 3 instrucoes: " + results.get(0).message());
 	}
 
 	@Test
