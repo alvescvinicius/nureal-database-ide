@@ -11,6 +11,10 @@ import com.nureal.ide.modulos.conexoes.dominio.entidades.ConnectionProfile;
 import com.nureal.ide.modulos.metadados.dominio.entidades.SchemaInfo;
 import com.nureal.ide.modulos.historico.infraestrutura.SessionStore;
 
+import java.awt.Component;
+import javax.swing.JComponent;
+import javax.swing.JTabbedPane;
+
 /**
  * Conexao (workspace) de uma conexao: sua sessao JDBC, esquema e abas de SQL
  * proprias.
@@ -53,6 +57,24 @@ final class Conexao {
 	 * consumido em {@code rebuildEditorTabs} (ao VOLTAR pra ela).
 	 */
 	Map<String, List<QueryResult>> tabResults = new HashMap<>();
+
+	/**
+	 * Abas de terminal SQL VIVAS desta conexao (nao a representacao salva
+	 * {@link #tabs}, mas o {@code JTabbedPane} de verdade com as instancias
+	 * de {@code SqlEditorPane} ja abertas) — construido uma UNICA vez, na
+	 * primeira ativacao desta conexao (ver {@code MainWindow#activateWorkspace}),
+	 * e nunca mais destruido enquanto a conexao continuar aberta: e o que
+	 * permite trocar de aba de conexao e voltar sem perder o estado dos
+	 * terminais (texto digitado, resultados, conexao JDBC dedicada de cada
+	 * um) — pedido explicito do usuario ("abas de conexao... dentro dessa
+	 * aba de conexao posso ter varias abas de terminais"). {@code null}
+	 * ate a primeira ativacao.
+	 */
+	JTabbedPane ownEditorTabs;
+	/** A aba "+" (nova query) desta conexao — ver {@link #ownEditorTabs}. */
+	Component ownPlusTab;
+	/** Painel de nivel superior desta conexao dentro da tira de abas de conexao (ver {@code MainWindow#connectionTabs}). */
+	JComponent ownPanel;
 
 	/**
 	 * Instante (epoch millis) da ultima execucao de verdade nesta conexao —

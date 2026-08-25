@@ -192,8 +192,21 @@ public class MainWindow extends JFrame {
 	private final RepositorioDeReleasesPort releasesRepository;
 	private Timer autosaveTimer;
 
+	/**
+	 * "Ponteiro" para os terminais SQL da conexao ATIVA no momento — nao mais
+	 * uma unica instancia fixa pra IDE inteira: cada {@code Conexao} tem seu
+	 * proprio {@code JTabbedPane} vivo ({@code Conexao#ownEditorTabs}), e
+	 * este campo (e {@link #plusTab}) e repontado pra ele sempre que o
+	 * workspace ativo muda (ver {@link #activateWorkspace}) — assim o resto
+	 * do arquivo (~100 usos) continua falando com "a aba de terminais atual"
+	 * sem saber que existe mais de uma conexao por tras.
+	 */
 	private JTabbedPane editorTabs;
 	private Component plusTab;
+	/** Tira de abas de CONEXAO (uma por conexao aberta, mais "Sem conexao") — ver {@link #buildEditorArea}. */
+	private JTabbedPane connectionTabs;
+	/** Evita reentrancia entre o ChangeListener de {@link #connectionTabs} e {@link #ensureConnectionTab} selecionando a aba programaticamente. */
+	private boolean switchingConnectionTab;
 	private ChatWindow chatWindow;
 	/** Mesma instancia usada pelo {@link #chatWindow} — reaproveitada ao reconstruir o Agent (troca de modelo/configuracao), em vez de uma nova a cada vez (ver {@link #onChatModelChanged}/{@link #openAiSettings}). */
 	private ChatHistoryStore chatHistoryStore;
@@ -2494,32 +2507,45 @@ public class MainWindow extends JFrame {
 
 	// ---------- Editor (abas) ----------
 
-	private JComponent buildEditorArea() {
-		editorTabs = new JTabbedPane();
+	/**
+	 * Cria um {@link JTabbedPane} de terminais SQL NOVO, com os mesmos
+	 * listeners/estilo de sempre — usado uma vez por CONEXAO (ver
+	 * {@code Conexao#ownEditorTabs}), nao mais uma unica vez pra IDE
+	 * inteira: cada conexao ganha o seu proprio, construido na primeira
+	 * ativacao (ver {@link #activateWorkspace}) e nunca destruido depois,
+	 * pra trocar de aba de conexao nao perder o estado dos terminais.
+	 */
+	private JTabbedPane newTerminalTabsPane() {
+		JTabbedPane pane = new JTabbedPane();
 		// Padrao do Swing (WRAP_TAB_LAYOUT) empilha as abas em VARIAS linhas
 		// quando nao cabem mais numa so — pedido explicito do usuario para
 		// manter SEMPRE uma unica linha, com setinhas de rolagem (estilo
 		// navegador/VS Code) quando ha abas demais para caber.
-		editorTabs.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
+		pane.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
 		// Sem isto, o FlatLaf reserva um respiro antes da primeira aba (a area
 		// de abas tem um inset esquerdo proprio, independente do painel que a
 		// contem) — a primeira aba ficava alguns pixels mais a direita que o
 		// botao "Executar" da barra logo acima, mesmo os dois partindo de
 		// x=0 no layout. Zerar o inset alinha a aba com a barra de ferramentas.
-		editorTabs.putClientProperty("JTabbedPane.tabAreaInsets", new Insets(0, 0, 0, 0));
+		pane.putClientProperty("JTabbedPane.tabAreaInsets", new Insets(0, 0, 0, 0));
 		// Mesma largura minima das abas de Resultados (ver resultTabs abaixo)
 		// — sem isto, abrir varias queries deixava as abas do editor
 		// afinarem muito mais que as de Resultados, uma inconsistencia de
 		// tamanho entre as duas areas de abas mais usadas do app.
-		editorTabs.putClientProperty("JTabbedPane.minimumTabWidth", 96);
-		editorTabs.putClientProperty("JTabbedPane.tabClosable", true);
-		editorTabs.putClientProperty("JTabbedPane.tabCloseCallback",
+		pane.putClientProperty("JTabbedPane.minimumTabWidth", 96);
+		pane.putClientProperty("JTabbedPane.tabClosable", true);
+		pane.putClientProperty("JTabbedPane.tabCloseCallback",
 				(BiConsumer<JTabbedPane, Integer>) (k, index) -> closeQueryTab(index));
 		// Selecionar a aba "+" abre uma nova query; qualquer outra troca salva a
 		// sessao E redesenha RESULTADOS com o que essa aba tinha da ultima
 		// vez (cada aba de SQL tem seus proprios resultados — ver
-		// resultsByTab/showResultsForActiveEditor).
-		editorTabs.addChangeListener(e -> {
+		// resultsByTab/showResultsForActiveEditor). Le sempre os CAMPOS
+		// editorTabs/plusTab (nao esta variavel local "pane") de proposito:
+		// so dispara de verdade quando este pane e o ATIVO no momento (ver
+		// invariante em #activateWorkspace — os campos so apontam pra um
+		// pane que acabou de ser mutado/selecionado), entao os dois sempre
+		// concordam quando isto roda.
+		pane.addChangeListener(e -> {
 			if (addingTab) {
 				return; // evita reentrancia: insertTab desloca a selecao da aba "+"
 			}
@@ -2542,7 +2568,7 @@ public class MainWindow extends JFrame {
 			}
 		});
 		// Botao direito no titulo da aba: fechar / fechar as outras.
-		editorTabs.addMouseListener(new MouseAdapter() {
+		pane.addMouseListener(new MouseAdapter() {
 			@Override
 			public void mousePressed(MouseEvent e) {
 				maybeTabMenu(e);
@@ -2553,8 +2579,34 @@ public class MainWindow extends JFrame {
 				maybeTabMenu(e);
 			}
 		});
+		return pane;
+	}
 
-		// Inicializa o workspace "sem conexao" com as abas salvas (+ aba "+").
+	private JComponent buildEditorArea() {
+		connectionTabs = new JTabbedPane();
+		// Mesmo motivo do editorTabs (ver #newTerminalTabsPane): uma unica
+		// linha de abas, com rolagem, nunca empilhada em varias linhas.
+		connectionTabs.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
+		connectionTabs.putClientProperty("JTabbedPane.tabAreaInsets", new Insets(0, 0, 0, 0));
+		connectionTabs.putClientProperty("JTabbedPane.tabType", "card");
+		// Trocar de aba de CONEXAO reativa o workspace correspondente (mesmo
+		// caminho de ativacao usado pela lista lateral de conexoes, ver
+		// #activateWorkspace) — reentrancia evitada por switchingConnectionTab,
+		// ja que #activateWorkspace TAMBEM seleciona a aba de conexao certa
+		// (ver #ensureConnectionTab), o que disparia este mesmo listener de
+		// volta sem o guard.
+		connectionTabs.addChangeListener(e -> {
+			if (switchingConnectionTab) {
+				return;
+			}
+			Conexao w = workspaceForPanel(connectionTabs.getSelectedComponent());
+			if (w != null && w != activeWorkspace) {
+				activateWorkspace(w);
+			}
+		});
+
+		// Inicializa o workspace "sem conexao" com as abas salvas (+ aba "+"),
+		// como a primeira aba de conexao.
 		initWorkspaces();
 		// Dot inicial nas abas ja criadas por initWorkspaces() acima — ver
 		// updateWorkspaceContextBar() (chamada de novo a cada troca de estado
@@ -2571,8 +2623,54 @@ public class MainWindow extends JFrame {
 		// #buildToolbar.
 		JPanel panel = new JPanel(new BorderLayout());
 		panel.setBorder(BorderFactory.createEmptyBorder(0, 0, 4, 0));
-		panel.add(editorTabs, BorderLayout.CENTER);
+		panel.add(connectionTabs, BorderLayout.CENTER);
 		return panel;
+	}
+
+	/** A {@link Conexao} dona do painel de nivel superior informado (ver {@code Conexao#ownPanel}), ou {@code null}. */
+	private Conexao workspaceForPanel(Component panel) {
+		for (Conexao w : workspaces.values()) {
+			if (w.ownPanel == panel) {
+				return w;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Garante que {@code w} tem uma aba na tira de conexoes (cria na
+	 * primeira vez, ver {@code Conexao#ownPanel}) e a deixa selecionada —
+	 * chamado sempre no final de {@link #activateWorkspace}, entao a UI de
+	 * abas de conexao sempre reflete o workspace ativo, tanto quando o
+	 * usuario clica numa aba de conexao diretamente quanto quando a troca
+	 * vem de outro lugar (lista lateral, conectar, desconectar).
+	 */
+	private void ensureConnectionTab(Conexao w) {
+		if (w.ownPanel == null) {
+			JPanel p = new JPanel(new BorderLayout());
+			p.setBorder(BorderFactory.createEmptyBorder(0, 0, 4, 0));
+			p.add(w.ownEditorTabs, BorderLayout.CENTER);
+			w.ownPanel = p;
+			connectionTabs.addTab(connectionTabLabel(w), p);
+		} else {
+			int idx = connectionTabs.indexOfComponent(w.ownPanel);
+			if (idx >= 0) {
+				connectionTabs.setTitleAt(idx, connectionTabLabel(w));
+			}
+		}
+		int idx = connectionTabs.indexOfComponent(w.ownPanel);
+		if (idx >= 0 && connectionTabs.getSelectedIndex() != idx) {
+			switchingConnectionTab = true;
+			try {
+				connectionTabs.setSelectedIndex(idx);
+			} finally {
+				switchingConnectionTab = false;
+			}
+		}
+	}
+
+	private static String connectionTabLabel(Conexao w) {
+		return SCRATCH.equals(w.name()) ? "Sem conexao" : w.name();
 	}
 
 	private boolean addQueryTab() {
@@ -2906,7 +3004,12 @@ public class MainWindow extends JFrame {
 		if (historyPanel != null) {
 			historyPanel.setActiveConnection(null);
 		}
+		scratch.ownEditorTabs = newTerminalTabsPane();
+		editorTabs = scratch.ownEditorTabs;
+		plusTab = null;
 		rebuildEditorTabs(scratch.tabs, scratch.selectedTab, scratch.tabResults);
+		scratch.ownPlusTab = plusTab;
+		ensureConnectionTab(scratch);
 	}
 
 	/**
@@ -3058,7 +3161,31 @@ public class MainWindow extends JFrame {
 		if (historyPanel != null) {
 			historyPanel.setActiveConnection(w.profile == null ? null : w.profile.name());
 		}
-		rebuildEditorTabs(w.tabs, w.selectedTab, w.tabResults);
+		if (w.ownEditorTabs == null) {
+			// Primeira vez que esta conexao fica ativa nesta sessao: constroi
+			// os terminais dela do zero (a partir do salvo/restaurado, ver
+			// Conexao#tabs) — so acontece uma vez por conexao.
+			w.ownEditorTabs = newTerminalTabsPane();
+			editorTabs = w.ownEditorTabs;
+			plusTab = null;
+			rebuildEditorTabs(w.tabs, w.selectedTab, w.tabResults);
+			w.ownPlusTab = plusTab;
+		} else {
+			// Conexao ja tinha sido ativada antes nesta sessao: os terminais
+			// dela continuam vivos (texto, resultados, conexao JDBC dedicada
+			// de cada um) — so reponta os campos "atalho" pra eles, SEM
+			// destruir/recriar nada (pedido explicito do usuario: trocar de
+			// aba de conexao e voltar nao pode perder o que estava rodando
+			// ali).
+			editorTabs = w.ownEditorTabs;
+			plusTab = w.ownPlusTab;
+			if (w.selectedTab >= 0 && w.selectedTab < editorTabs.getTabCount()
+					&& editorTabs.getComponentAt(w.selectedTab) != plusTab) {
+				editorTabs.setSelectedIndex(w.selectedTab);
+			}
+			resultsController.showResultsForActiveEditor();
+		}
+		ensureConnectionTab(w);
 		if (w.schema != null) {
 			metadataCache.set(w.schema);
 			completionProvider.refresh(w.loadedSchemas.values(), w.schema.name());
