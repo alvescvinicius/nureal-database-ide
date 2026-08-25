@@ -77,6 +77,7 @@ import javax.swing.JTable;
 import javax.swing.JTextArea;
 import javax.swing.KeyStroke;
 import javax.swing.ListSelectionModel;
+import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 import javax.swing.Timer;
 import javax.swing.UIManager;
@@ -457,6 +458,14 @@ public class MainWindow extends JFrame {
 		// o provider passa a sugerir primeiro as tabelas relacionadas por FK.
 		completionProvider.setForeignKeyLookup(objectExplorer::lookupForeignKeysForCompletion);
 		buildUi();
+		// Nenhuma conexao aberta ainda logo apos o arranque (so a estrutura
+		// interna "Sem conexao" existe, sem aba visivel — ver #initWorkspaces)
+		// — pedido explicito do usuario: mostra o seletor de conexoes ja de
+		// cara, em vez de deixar o usuario descobrir sozinho que precisa
+		// clicar em algum lugar pra conectar. invokeLater: espera a janela
+		// terminar de montar/aparecer antes de abrir um dialogo modal por
+		// cima dela.
+		SwingUtilities.invokeLater(this::promptConnectionSelection);
 		registerWindowShortcuts();
 		startKeepAliveTimer();
 		scheduleStartupUpdateCheck();
@@ -2749,6 +2758,12 @@ public class MainWindow extends JFrame {
 		}
 		refreshConnectionIndicators();
 		statusBar.setText(" Conexao \"" + w.name() + "\" fechada.");
+		// Fechou a ULTIMA conexao aberta: mesma regra do arranque — pedido
+		// explicito do usuario ("nao existe essa aba sem conexao, quando nao
+		// houver nenhuma conexao aberta abra uma caixa de selecao").
+		if (connectionTabs.getTabCount() == 0) {
+			promptConnectionSelection();
+		}
 	}
 
 	private boolean addQueryTab() {
@@ -3087,7 +3102,11 @@ public class MainWindow extends JFrame {
 		plusTab = null;
 		rebuildEditorTabs(scratch.tabs, scratch.selectedTab, scratch.tabResults);
 		scratch.ownPlusTab = plusTab;
-		ensureConnectionTab(scratch);
+		// Sem ensureConnectionTab(scratch) aqui — a aba "Sem conexao" nao
+		// aparece mais na tira de saida (pedido explicito do usuario);
+		// #promptConnectionSelection, chamado logo apos a janela terminar de
+		// montar (ver construtor), e quem decide se ela precisa aparecer
+		// como ultimo recurso (ver #ensureScratchTabFallback).
 	}
 
 	/**
@@ -3263,7 +3282,16 @@ public class MainWindow extends JFrame {
 			}
 			resultsController.showResultsForActiveEditor();
 		}
-		ensureConnectionTab(w);
+		// "Sem conexao" nunca ganha aba propria so por ser ativada (ver
+		// #promptConnectionSelection/#ensureScratchTabFallback, os UNICOS
+		// lugares que decidem se ela precisa aparecer como ultimo recurso) —
+		// sem este guard, qualquer caminho que reative o workspace SCRATCH
+		// internamente (ex.: #closeConnectionTab caindo de volta pra ele)
+		// a traria de volta pra tira de abas sempre, contrariando o pedido
+		// explicito do usuario ("nao existe essa aba sem conexao").
+		if (!SCRATCH.equals(w.name())) {
+			ensureConnectionTab(w);
+		}
 		if (w.schema != null) {
 			metadataCache.set(w.schema);
 			completionProvider.refresh(w.loadedSchemas.values(), w.schema.name());
@@ -3901,6 +3929,11 @@ public class MainWindow extends JFrame {
 					refreshConnectionIndicators();
 					showError("Falha ao conectar", ex);
 					statusBar.setText(" Falha ao conectar");
+					// Se isto veio do seletor de "nenhuma conexao aberta" (ver
+					// #promptConnectionSelection) e a conexao falhou, a tira de
+					// abas continuaria vazia sem isto — nao deixa a tela sem
+					// nenhuma aba pra mostrar o editor.
+					ensureScratchTabFallback();
 				}
 			}
 		}.execute();
@@ -4109,12 +4142,45 @@ public class MainWindow extends JFrame {
 	 * precisa colar de novo.
 	 */
 	private void openConnectionPickerThenRun() {
+		Conexao sourceWorkspace = activeWorkspace;
+		SqlEditorPane sourceEditor = currentEditor();
+		String sql = (sourceEditor != null) ? sourceEditor.currentSql() : "";
+
+		ConnectionProfile selected = pickSavedConnection(
+				"Esta aba ainda nao esta conectada a nenhuma base. Escolha uma conexao:", "Conectar e executar");
+		if (selected == null) {
+			statusBar.setText(" Execucao cancelada: nao conectado.");
+			return;
+		}
+		statusBar.setText(" Conectando a " + selected.name() + " para executar...");
+		connectTo(selected, () -> {
+			runNewTabWithSql(sql);
+			// "Move" o terminal de origem pra conexao escolhida (nao so
+			// copia): sem isto, o mesmo SQL ficava duplicado — uma copia na
+			// aba nova da conexao escolhida, o original intacto ainda na
+			// aba de origem. So remove a ORIGEM depois que o destino ja
+			// existe e ja rodou.
+			removeTerminalFrom(sourceWorkspace, sourceEditor);
+		});
+	}
+
+	/**
+	 * Dialogo de escolha entre as conexoes salvas ("Conectar"/"Nova conexao..."/
+	 * "Cancelar") — compartilhado por {@link #openConnectionPickerThenRun}
+	 * (executar sem conexao) e {@link #promptConnectionSelection} (nenhuma
+	 * conexao aberta na IDE inteira). Devolve o perfil escolhido, ou
+	 * {@code null} se cancelado OU se o usuario preferiu criar uma conexao
+	 * nova agora (nesse caso {@code connectionsPanel.createNewConnection()}
+	 * ja foi chamado — cabe ao chamador decidir o que fazer a seguir, ja que
+	 * criar so SALVA o perfil, nao conecta).
+	 */
+	private ConnectionProfile pickSavedConnection(String message, String confirmLabel) {
 		List<ConnectionProfile> profiles;
 		try {
 			profiles = connectionStore.load();
 		} catch (Exception ex) {
 			showError("Falha ao carregar conexoes salvas", ex);
-			return;
+			return null;
 		}
 		if (profiles.isEmpty()) {
 			int create = JOptionPane.showConfirmDialog(this,
@@ -4123,13 +4189,8 @@ public class MainWindow extends JFrame {
 			if (create == JOptionPane.YES_OPTION) {
 				connectionsPanel.createNewConnection();
 			}
-			statusBar.setText(" Execucao cancelada: nao conectado.");
-			return;
+			return null;
 		}
-
-		Conexao sourceWorkspace = activeWorkspace;
-		SqlEditorPane sourceEditor = currentEditor();
-		String sql = (sourceEditor != null) ? sourceEditor.currentSql() : "";
 
 		JList<ConnectionProfile> list = new JList<>(profiles.toArray(new ConnectionProfile[0]));
 		list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
@@ -4151,33 +4212,51 @@ public class MainWindow extends JFrame {
 		scroll.setPreferredSize(new Dimension(scaledPx(360), scaledPx(220)));
 
 		JPanel panel = new JPanel(new BorderLayout(0, 8));
-		panel.add(new JLabel("Esta aba ainda nao esta conectada a nenhuma base. Escolha uma conexao:"),
-				BorderLayout.NORTH);
+		panel.add(new JLabel(message), BorderLayout.NORTH);
 		panel.add(scroll, BorderLayout.CENTER);
 
-		Object[] options = { "Conectar e executar", "Nova conexao...", "Cancelar" };
+		Object[] options = { confirmLabel, "Nova conexao...", "Cancelar" };
 		int choice = JOptionPane.showOptionDialog(this, panel, "Selecionar conexao", JOptionPane.YES_NO_CANCEL_OPTION,
 				JOptionPane.QUESTION_MESSAGE, null, options, options[0]);
 		if (choice == 0) {
-			ConnectionProfile selected = list.getSelectedValue();
-			if (selected != null) {
-				statusBar.setText(" Conectando a " + selected.name() + " para executar...");
-				connectTo(selected, () -> {
-					runNewTabWithSql(sql);
-					// "Move" o terminal de origem pra conexao escolhida (nao so
-					// copia): sem isto, o mesmo SQL ficava duplicado — uma copia
-					// na aba nova da conexao escolhida, o original intacto ainda
-					// na aba "Sem conexao" — pedido explicito do usuario ("nao
-					// fica com essa aba sem conexao aberta"). So remove a
-					// ORIGEM depois que o destino ja existe e ja rodou.
-					removeTerminalFrom(sourceWorkspace, sourceEditor);
-				});
-			}
-		} else if (choice == 1) {
+			return list.getSelectedValue();
+		}
+		if (choice == 1) {
 			connectionsPanel.createNewConnection();
-			statusBar.setText(" Conexao criada — clique em Executar de novo para conectar e rodar.");
-		} else {
-			statusBar.setText(" Execucao cancelada: nao conectado.");
+		}
+		return null;
+	}
+
+	/**
+	 * Mostra o seletor de conexoes assim que a IDE nao tem NENHUMA conexao
+	 * aberta (arranque, ou depois de fechar a ultima aba de conexao) —
+	 * pedido explicito do usuario: "nao existe essa aba sem conexao, quando
+	 * nao houver nenhuma conexao aberta abra uma caixa de selecao". A aba
+	 * "Sem conexao" continua existindo so como estrutura INTERNA (varios
+	 * caminhos do app dependem de sempre haver um workspace ativo — ver
+	 * {@code Conexao} SCRATCH), mas nunca mais aparece na tira de abas de
+	 * conexao a nao ser como ultimo recurso, se o usuario cancelar este
+	 * seletor sem escolher nem criar nenhuma conexao (ver
+	 * {@link #ensureScratchTabFallback}) — sem isso a tela ficaria vazia,
+	 * sem nenhuma aba pra mostrar o editor.
+	 */
+	private void promptConnectionSelection() {
+		ConnectionProfile selected = pickSavedConnection("Nenhuma conexao aberta. Escolha uma conexao para comecar:",
+				"Conectar");
+		if (selected == null) {
+			ensureScratchTabFallback();
+			return;
+		}
+		connectTo(selected);
+	}
+
+	/** So mostra a aba "Sem conexao" na tira se, mesmo assim, continuar sem NENHUMA aba de conexao visivel — ver {@link #promptConnectionSelection}. */
+	private void ensureScratchTabFallback() {
+		if (connectionTabs.getTabCount() == 0) {
+			Conexao scratch = workspaces.get(SCRATCH);
+			if (scratch != null) {
+				ensureConnectionTab(scratch);
+			}
 		}
 	}
 
