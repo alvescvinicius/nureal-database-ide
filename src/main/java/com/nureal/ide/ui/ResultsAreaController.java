@@ -382,9 +382,37 @@ final class ResultsAreaController {
 				+ (error ? " - parou em erro" : ""));
 	}
 
-	/** Guarda/esquece os resultados de UMA aba de SQL — ver {@code Conexao#tabResults}/{@code MainWindow#closeQueryTab}. */
+	/**
+	 * Guarda/esquece os resultados de UMA aba de SQL — ver
+	 * {@code Conexao#tabResults}/{@code MainWindow#closeQueryTab}.
+	 * <p>
+	 * Esquecer TAMBEM fecha e destrava (ver {@link #openCursors}) qualquer
+	 * cursor de paginacao ainda aberto entre os resultados desta aba — vazamento
+	 * de memoria encontrado numa auditoria pedida pelo usuario: fechar uma
+	 * aba que tinha um resultado grande NAO totalmente carregado (cursor
+	 * ainda aberto, ver {@code SqlExecutionEngine.ResultCursor}) nunca
+	 * fechava esse {@code Statement}/{@code ResultSet} nem tirava o cursor
+	 * de {@link #openCursors} — a UNICA rotina que fechava cursores
+	 * (#closeOpenCursors) so roda ao trocar de esquema/rodar de novo/fechar
+	 * a janela, nunca ao fechar UMA aba especifica. Em uma sessao longa
+	 * abrindo/fechando muitas abas com resultados grandes nao totalmente
+	 * carregados, {@link #openCursors} so crescia, prendendo cada
+	 * {@code ResultTableModel}/{@code Statement} pra sempre, mesmo com a aba
+	 * ja fechada havia muito tempo.
+	 */
 	void forgetTab(SqlEditorPane tab) {
-		resultsByTab.remove(tab);
+		List<QueryResult> results = resultsByTab.remove(tab);
+		if (results == null) {
+			return;
+		}
+		for (QueryResult r : results) {
+			SqlExecutionEngine.ResultCursor cursor = r.cursor();
+			if (cursor != null && !cursor.exhausted) {
+				cursor.exhausted = true;
+				cursor.close();
+				openCursors.remove(cursor);
+			}
+		}
 	}
 
 	void rememberTab(SqlEditorPane tab, List<QueryResult> results) {
