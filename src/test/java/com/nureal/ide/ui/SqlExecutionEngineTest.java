@@ -14,8 +14,7 @@ import java.sql.Statement;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.List;
-
-import javax.swing.table.DefaultTableModel;
+import java.util.Vector;
 
 import org.junit.jupiter.api.Test;
 
@@ -36,7 +35,7 @@ class SqlExecutionEngineTest {
 
 	@Test
 	void appendPageParaNoLimiteSolicitadoMesmoComMaisLinhasDisponiveis() throws Exception {
-		DefaultTableModel model = new DefaultTableModel(new Object[] { "id" }, 0);
+		ResultTableModel model = fakeResultTableModel();
 		ResultSet rs = fakeResultSet(List.of(row(1), row(2), row(3)));
 
 		int read = SqlExecutionEngine.appendPage(model, rs, 2);
@@ -49,13 +48,20 @@ class SqlExecutionEngineTest {
 
 	@Test
 	void appendPageParaAntesDoLimiteQuandoResultSetAcaba() throws Exception {
-		DefaultTableModel model = new DefaultTableModel(new Object[] { "id" }, 0);
+		ResultTableModel model = fakeResultTableModel();
 		ResultSet rs = fakeResultSet(List.<Object[]>of(row(1)));
 
 		int read = SqlExecutionEngine.appendPage(model, rs, 200);
 
 		assertEquals(1, read);
 		assertEquals(1, model.getRowCount());
+	}
+
+	/** {@link ResultTableModel} minimo, coluna unica "id" — usado pelos testes de {@code appendPage} acima. */
+	private static ResultTableModel fakeResultTableModel() {
+		Vector<String> columnNames = new Vector<>(List.of("id"));
+		return new ResultTableModel(columnNames, new Class<?>[] { Object.class }, new String[1], new String[1],
+				new String[1]);
 	}
 
 	@Test

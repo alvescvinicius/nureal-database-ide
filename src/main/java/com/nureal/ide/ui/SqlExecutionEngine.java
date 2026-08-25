@@ -11,7 +11,6 @@ import java.util.Vector;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
-import javax.swing.table.DefaultTableModel;
 
 import com.nureal.ide.core.log.AppLogger;
 
@@ -272,18 +271,20 @@ final class SqlExecutionEngine {
 	 * Anexa ate {@code max} linhas do ResultSet ao modelo; retorna quantas leu.
 	 * Visibilidade de pacote: tambem usado por {@link FkInspectorWindow}.
 	 */
-	static int appendPage(DefaultTableModel model, ResultSet rs, int max) throws SQLException {
+	static int appendPage(ResultTableModel model, ResultSet rs, int max) throws SQLException {
 		int cols = model.getColumnCount();
-		int read = 0;
-		while (read < max && rs.next()) {
+		List<Vector<Object>> rows = new ArrayList<>();
+		while (rows.size() < max && rs.next()) {
 			Vector<Object> row = new Vector<>(cols);
 			for (int i = 1; i <= cols; i++) {
 				row.add(rs.getObject(i));
 			}
-			model.addRow(row);
-			read++;
+			rows.add(row);
 		}
-		return read;
+		// addRows (nao addRow em loop): UM evento de mudanca pra pagina
+		// inteira — ver javadoc de ResultTableModel#addRows.
+		model.addRows(rows);
+		return rows.size();
 	}
 
 	/** Cursor aberto (Statement + ResultSet) para paginacao sob demanda. */

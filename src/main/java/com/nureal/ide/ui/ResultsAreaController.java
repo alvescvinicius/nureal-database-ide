@@ -406,6 +406,18 @@ final class ResultsAreaController {
 			if (busy[0]) {
 				return;
 			}
+			// So avisa quando ja da pra saber, por evidencia (nao suposicao),
+			// que o resultado e grande: o total real e desconhecido ate
+			// carregar tudo (ou pedir "Ver total exato", que pode ser lento
+			// — ver seu javadoc), mas ja ter mais que
+			// LOAD_ALL_WARN_THRESHOLD_ROWS linhas CARREGADAS (varias paginas
+			// automaticas via rolagem, ou um "Carregar tudo" anterior nesta
+			// mesma grade) e sinal suficiente de que o resto pode ser grande
+			// tambem — pedido explicito do usuario ("aviso de confirmacao
+			// para resultados muito grandes").
+			if (r.model().getRowCount() >= LOAD_ALL_WARN_THRESHOLD_ROWS && !confirmLoadAll()) {
+				return;
+			}
 			busy[0] = true;
 			resultStatusBar.setLoadAllBusy(true);
 			loadAll(r, () -> {
@@ -745,10 +757,11 @@ final class ResultsAreaController {
 				try {
 					List<Vector<Object>> rows = get();
 					int before = r.model().getRowCount();
-					for (Vector<Object> row : rows) {
-						r.model().addRow(row);
-					}
-					((ResultTableModel) r.model()).editController().onRowsAppended(before);
+					// addRows (nao addRow em loop): UM evento de mudanca pra
+					// pagina inteira, nao um por linha — ver javadoc de
+					// ResultTableModel#addRows.
+					r.model().addRows(rows);
+					r.model().editController().onRowsAppended(before);
 					if (rows.size() < max) {
 						c.exhausted = true;
 						c.close();
@@ -767,29 +780,61 @@ final class ResultsAreaController {
 		}.execute();
 	}
 
-	/** Le todas as linhas restantes do cursor em segundo plano. */
+	/**
+	 * Tamanho do BLOCO lido de cada vez por {@link #loadAll} — le e publica
+	 * em lotes deste tamanho (nao linha a linha), pra dar um ritmo previsivel
+	 * de atualizacao da grade em resultados muito grandes: cada lote vira
+	 * UMA insercao em massa no modelo (ver {@link ResultTableModel#addRows})
+	 * e UM refresh da barra de status, em vez de depender so do agrupamento
+	 * implicito (e imprevisivel, varia conforme a velocidade relativa do
+	 * banco vs. da EDT) que o proprio {@code SwingWorker#publish} ja faz
+	 * quando chamado linha a linha.
+	 */
+	private static final int LOAD_ALL_BULK_SIZE = 500;
+
+	/** A partir de quantas linhas JA CARREGADAS "Carregar tudo" passa a pedir confirmacao — ver {@link #confirmLoadAll}. */
+	private static final int LOAD_ALL_WARN_THRESHOLD_ROWS = 5_000;
+
+	/** Confirmacao antes de carregar o restante de um resultado ja grande — ver uso em {@link #buildGridPanel}. */
+	private boolean confirmLoadAll() {
+		int ok = JOptionPane.showConfirmDialog(owner,
+				"Este resultado ja tem varias linhas carregadas. Carregar TODAS as linhas restantes pode ser lento "
+						+ "e usar bastante memoria, dependendo do tamanho da consulta.\n\nContinuar?",
+				"Carregar todas as linhas", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+		return ok == JOptionPane.YES_OPTION;
+	}
+
+	/** Le todas as linhas restantes do cursor em segundo plano, em blocos de {@link #LOAD_ALL_BULK_SIZE}. */
 	private void loadAll(QueryResult r, Runnable refresh) {
 		SqlExecutionEngine.ResultCursor c = r.cursor();
 		if (c == null || c.exhausted) {
 			return;
 		}
 		owner.statusBar().setText(" Carregando todas as linhas...");
-		new SwingWorker<Void, Vector<Object>>() {
+		new SwingWorker<Void, List<Vector<Object>>>() {
 			@Override
 			protected Void doInBackground() throws Exception {
 				int cols = r.model().getColumnCount();
+				List<Vector<Object>> batch = new ArrayList<>(LOAD_ALL_BULK_SIZE);
 				while (c.rs.next()) {
 					Vector<Object> row = new Vector<>(cols);
 					for (int i = 1; i <= cols; i++) {
 						row.add(c.rs.getObject(i));
 					}
-					publish(row);
+					batch.add(row);
+					if (batch.size() >= LOAD_ALL_BULK_SIZE) {
+						publish(batch);
+						batch = new ArrayList<>(LOAD_ALL_BULK_SIZE);
+					}
+				}
+				if (!batch.isEmpty()) {
+					publish(batch);
 				}
 				return null;
 			}
 
 			@Override
-			protected void process(List<Vector<Object>> chunks) {
+			protected void process(List<List<Vector<Object>>> batches) {
 				// Mesmo guard de #loadPage: a aba pode ter sido fechada
 				// enquanto este "carregar tudo" ainda rodava em segundo
 				// plano — sem isto, cada leva de linhas continuaria sendo
@@ -798,10 +843,10 @@ final class ResultsAreaController {
 					return;
 				}
 				int before = r.model().getRowCount();
-				for (Vector<Object> row : chunks) {
-					r.model().addRow(row);
+				for (List<Vector<Object>> batch : batches) {
+					r.model().addRows(batch);
 				}
-				((ResultTableModel) r.model()).editController().onRowsAppended(before);
+				r.model().editController().onRowsAppended(before);
 				refresh.run();
 			}
 

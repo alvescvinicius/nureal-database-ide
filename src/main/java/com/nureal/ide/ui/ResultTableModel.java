@@ -94,6 +94,30 @@ public final class ResultTableModel extends DefaultTableModel implements TabelaE
         this.editController = editController;
     }
 
+    /**
+     * Insere varias linhas de uma vez, disparando UM UNICO evento de mudanca
+     * ({@code fireTableRowsInserted}) para o lote inteiro, em vez de um
+     * evento por linha (o que chamar {@link #addRow(java.util.Vector)} em
+     * loop faz por baixo dos panos — cada chamada dispara o proprio evento).
+     * Usado pela paginacao/"carregar tudo" de resultados grandes (ver
+     * {@code ResultsAreaController#loadPage}/{@code #loadAll}): inserir
+     * centenas ou milhares de linhas uma a uma deixava a grade visivelmente
+     * travada durante o carregamento, ja que cada evento aciona uma
+     * revalidacao/repintura da {@code JTable}. Sem efeito se {@code rows}
+     * estiver vazio (nenhum evento disparado a toa).
+     */
+    @SuppressWarnings("unchecked")
+    public void addRows(java.util.List<Vector<Object>> rows) {
+        if (rows.isEmpty()) {
+            return;
+        }
+        int firstRow = getRowCount();
+        for (Vector<Object> row : rows) {
+            dataVector.addElement(row);
+        }
+        fireTableRowsInserted(firstRow, getRowCount() - 1);
+    }
+
     GridEditController editController() {
         return editController;
     }
