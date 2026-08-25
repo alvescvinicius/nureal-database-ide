@@ -206,6 +206,8 @@ public class MainWindow extends JFrame {
 	private Component plusTab;
 	/** Tira de abas de CONEXAO (uma por conexao aberta, mais "Sem conexao") — ver {@link #buildEditorArea}. */
 	private JTabbedPane connectionTabs;
+	/** Aba "+" (pequena, nao fechavel) ao final de {@link #connectionTabs} — abre {@link #promptConnectionSelection}, mesmo padrao da aba "+" do editor (ver {@link #plusTab}). */
+	private Component connectionPlusTab;
 	/** Evita reentrancia entre o ChangeListener de {@link #connectionTabs} e {@link #ensureConnectionTab} selecionando a aba programaticamente. */
 	private boolean switchingConnectionTab;
 	private ChatWindow chatWindow;
@@ -2639,11 +2641,35 @@ public class MainWindow extends JFrame {
 			if (switchingConnectionTab) {
 				return;
 			}
+			if (connectionTabs.getSelectedComponent() == connectionPlusTab) {
+				// Aba "+": nao e um workspace de verdade — abre o seletor de
+				// conexoes (pedido explicito do usuario, mesmo botao "+" que
+				// ja existe nas abas de terminal) e devolve a selecao pra aba
+				// que estava ativa antes, caso o usuario cancele sem conectar
+				// nem criar nada (senao a propria aba "+" ficaria "selecionada"
+				// sozinha, sem nenhum workspace de verdade por tras dela).
+				Conexao previousActive = activeWorkspace;
+				promptConnectionSelection();
+				if (connectionTabs.getSelectedComponent() == connectionPlusTab) {
+					reselectConnectionTab(previousActive);
+				}
+				return;
+			}
 			Conexao w = workspaceForPanel(connectionTabs.getSelectedComponent());
 			if (w != null && w != activeWorkspace) {
 				activateWorkspace(w);
 			}
 		});
+		// Aba "+" (nao fechavel, sempre por ultimo) — abre o seletor de
+		// conexoes salvas, mesmo padrao ja usado pela aba "+" do editor (ver
+		// #addPlusTab). Precisa existir ANTES de #initWorkspaces/qualquer
+		// #ensureConnectionTab, que passam a inserir as abas de conexao de
+		// verdade sempre ANTES dela (ver #ensureConnectionTab).
+		JPanel plusDummy = new JPanel();
+		plusDummy.putClientProperty("JTabbedPane.tabClosable", false);
+		connectionPlusTab = plusDummy;
+		connectionTabs.addTab("+", plusDummy);
+		connectionTabs.setToolTipTextAt(connectionTabs.indexOfComponent(plusDummy), "Conectar/nova conexao");
 
 		// Inicializa o workspace "sem conexao" com as abas salvas (+ aba "+"),
 		// como a primeira aba de conexao.
@@ -2697,7 +2723,11 @@ public class MainWindow extends JFrame {
 				p.putClientProperty("JTabbedPane.tabClosable", false);
 			}
 			w.ownPanel = p;
-			connectionTabs.addTab(connectionTabLabel(w), p);
+			// insere ANTES da aba "+" (mesma regra de #addQueryTab pra
+			// editorTabs): ela precisa continuar sendo sempre a ULTIMA.
+			int at = (connectionPlusTab != null) ? connectionTabs.indexOfComponent(connectionPlusTab)
+					: connectionTabs.getTabCount();
+			connectionTabs.insertTab(connectionTabLabel(w), null, p, null, at);
 		} else {
 			int idx = connectionTabs.indexOfComponent(w.ownPanel);
 			if (idx >= 0) {
@@ -2717,6 +2747,22 @@ public class MainWindow extends JFrame {
 
 	private static String connectionTabLabel(Conexao w) {
 		return SCRATCH.equals(w.name()) ? "Sem conexao" : w.name();
+	}
+
+	/** Reseleciona a aba de {@code w} (se ainda tiver uma) — ver uso na aba "+" de {@link #buildEditorArea}. */
+	private void reselectConnectionTab(Conexao w) {
+		if (w == null || w.ownPanel == null) {
+			return;
+		}
+		int idx = connectionTabs.indexOfComponent(w.ownPanel);
+		if (idx >= 0) {
+			switchingConnectionTab = true;
+			try {
+				connectionTabs.setSelectedIndex(idx);
+			} finally {
+				switchingConnectionTab = false;
+			}
+		}
 	}
 
 	/**
@@ -2758,10 +2804,11 @@ public class MainWindow extends JFrame {
 		}
 		refreshConnectionIndicators();
 		statusBar.setText(" Conexao \"" + w.name() + "\" fechada.");
-		// Fechou a ULTIMA conexao aberta: mesma regra do arranque — pedido
-		// explicito do usuario ("nao existe essa aba sem conexao, quando nao
-		// houver nenhuma conexao aberta abra uma caixa de selecao").
-		if (connectionTabs.getTabCount() == 0) {
+		// Fechou a ULTIMA conexao aberta (so sobrou a aba "+"): mesma regra
+		// do arranque — pedido explicito do usuario ("nao existe essa aba
+		// sem conexao, quando nao houver nenhuma conexao aberta abra uma
+		// caixa de selecao").
+		if (connectionTabs.getTabCount() <= 1) {
 			promptConnectionSelection();
 		}
 	}
@@ -4250,9 +4297,9 @@ public class MainWindow extends JFrame {
 		connectTo(selected);
 	}
 
-	/** So mostra a aba "Sem conexao" na tira se, mesmo assim, continuar sem NENHUMA aba de conexao visivel — ver {@link #promptConnectionSelection}. */
+	/** So mostra a aba "Sem conexao" na tira se, mesmo assim, continuar sem NENHUMA conexao de verdade (so a aba "+" sobrando) — ver {@link #promptConnectionSelection}. */
 	private void ensureScratchTabFallback() {
-		if (connectionTabs.getTabCount() == 0) {
+		if (connectionTabs.getTabCount() <= 1) {
 			Conexao scratch = workspaces.get(SCRATCH);
 			if (scratch != null) {
 				ensureConnectionTab(scratch);
