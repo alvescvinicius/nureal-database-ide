@@ -10,6 +10,7 @@ import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Cursor;
+import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
@@ -58,6 +59,20 @@ import com.nureal.ide.compartilhado.designsystem.NTheme;
 final class ConnectionStatusCard extends JPanel {
 
 	private static final long serialVersionUID = 1L;
+
+	/**
+	 * Largura MINIMA da pilula inteira — pedido explicito do usuario: como
+	 * ela vive no CENTRO da barra de acoes (ver javadoc da classe), a
+	 * largura dela variar conforme o nome da conexao (curto = pilula
+	 * pequena, longo = pilula grande) deslocava visivelmente tudo ao redor
+	 * toda vez que o usuario trocava de conexao ativa — "fica variando
+	 * conforme o nome da conexao, ai fica estranho". Um piso comum absorve
+	 * nomes curtos/medios sem a pilula encolher; nomes bem mais longos que
+	 * isto ainda esticam ela alem do minimo (aceito: o NOME nunca pode
+	 * truncar, ver o resto do javadoc da classe) — este e so um PISO, nunca
+	 * um teto.
+	 */
+	private static final int MIN_WIDTH_PX = 260;
 
 	private enum State {
 		DISCONNECTED, CONNECTING, CONNECTED
@@ -108,6 +123,20 @@ final class ConnectionStatusCard extends JPanel {
 	public void updateUI() {
 		super.updateUI();
 		fill = NTheme.surfaceBackground();
+	}
+
+	/** Piso de largura (ver {@link #MIN_WIDTH_PX}) — nunca menor que isso, mesmo com "Sem conexao"/nomes curtos. */
+	@Override
+	public Dimension getPreferredSize() {
+		Dimension pref = super.getPreferredSize();
+		return new Dimension(Math.max(pref.width, MIN_WIDTH_PX), pref.height);
+	}
+
+	/** Mesmo piso no MINIMO (nao so no preferido) — layouts que respeitam getMinimumSize tambem nao encolhem a pilula alem disto. */
+	@Override
+	public Dimension getMinimumSize() {
+		Dimension min = super.getMinimumSize();
+		return new Dimension(Math.max(min.width, MIN_WIDTH_PX), min.height);
 	}
 
 	@Override
