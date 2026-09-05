@@ -37,7 +37,7 @@ import javax.swing.JTextField;
 import javax.swing.KeyStroke;
 import javax.swing.ListSelectionModel;
 
-import com.nureal.ide.modulos.dialeto.dominio.contratos.DatabaseDialect;
+import com.nureal.ide.modulos.dialeto.dominio.contratos.SecurityCapability;
 import com.nureal.ide.modulos.metadados.dominio.entidades.DbUserInfo;
 
 /**
@@ -78,7 +78,7 @@ final class UserManagementDialog {
      * para qualquer outro schema, o campo continua editavel (o usuario digita
      * o nome da tabela).
      */
-    static void open(Component parent, DatabaseDialect dialect, List<DbUserInfo> initialUsers,
+    static void open(Component parent, SecurityCapability dialect, List<DbUserInfo> initialUsers,
             List<String> schemaNames, String currentSchemaName, List<String> currentSchemaTables,
             DdlAssistantDialog.DdlRunner runner, QueryRunner queryRunner) {
         new Session(parent, dialect, initialUsers, schemaNames, currentSchemaName, currentSchemaTables,
@@ -91,7 +91,7 @@ final class UserManagementDialog {
 
     private static final class Session {
         private final Window owner;
-        private final DatabaseDialect dialect;
+        private final SecurityCapability dialect;
         private final List<String> schemaNames;
         private final String currentSchemaName;
         private final List<String> currentSchemaTables;
@@ -123,7 +123,7 @@ final class UserManagementDialog {
         // Aba "Roles"
         private UserRolesTab rolesTab;
 
-        Session(Component parent, DatabaseDialect dialect, List<DbUserInfo> initialUsers, List<String> schemaNames,
+        Session(Component parent, SecurityCapability dialect, List<DbUserInfo> initialUsers, List<String> schemaNames,
                 String currentSchemaName, List<String> currentSchemaTables, DdlAssistantDialog.DdlRunner runner,
                 QueryRunner queryRunner) {
             this.owner = (DialogUtil.owner(parent) instanceof Window w) ? w : null;

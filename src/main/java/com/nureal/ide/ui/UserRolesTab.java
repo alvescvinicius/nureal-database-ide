@@ -19,7 +19,7 @@ import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 
-import com.nureal.ide.modulos.dialeto.dominio.contratos.DatabaseDialect;
+import com.nureal.ide.modulos.dialeto.dominio.contratos.SecurityCapability;
 import com.nureal.ide.modulos.metadados.dominio.entidades.DbUserInfo;
 
 /**
@@ -33,7 +33,7 @@ import com.nureal.ide.modulos.metadados.dominio.entidades.DbUserInfo;
  */
 final class UserRolesTab {
 
-    private final DatabaseDialect dialect;
+    private final SecurityCapability dialect;
     private final QueryRunner queryRunner;
     private final DdlAssistantDialog.DdlRunner runner;
     private final JDialog dialog;
@@ -42,7 +42,7 @@ final class UserRolesTab {
     private final DefaultListModel<String> rolesListModel = new DefaultListModel<>();
     private JList<String> rolesList;
 
-    UserRolesTab(DatabaseDialect dialect, QueryRunner queryRunner, DdlAssistantDialog.DdlRunner runner,
+    UserRolesTab(SecurityCapability dialect, QueryRunner queryRunner, DdlAssistantDialog.DdlRunner runner,
             JDialog dialog, Supplier<DbUserInfo> selectedUser) {
         this.dialect = dialect;
         this.queryRunner = queryRunner;

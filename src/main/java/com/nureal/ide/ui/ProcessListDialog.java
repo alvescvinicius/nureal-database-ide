@@ -22,7 +22,7 @@ import javax.swing.JTable;
 import javax.swing.Timer;
 import javax.swing.table.DefaultTableModel;
 
-import com.nureal.ide.modulos.dialeto.dominio.contratos.DatabaseDialect;
+import com.nureal.ide.modulos.dialeto.dominio.contratos.AdminCapability;
 
 /**
  * Monitor de sessoes do servidor ({@code information_schema.PROCESSLIST}),
@@ -40,7 +40,7 @@ final class ProcessListDialog {
     private ProcessListDialog() {
     }
 
-    static void open(Component parent, DatabaseDialect dialect, QueryRunner queryRunner,
+    static void open(Component parent, AdminCapability dialect, QueryRunner queryRunner,
             DdlAssistantDialog.DdlRunner runner) {
         new Session(parent, dialect, queryRunner, runner).show();
     }
@@ -49,7 +49,7 @@ final class ProcessListDialog {
 
     private static final class Session {
         private final Window owner;
-        private final DatabaseDialect dialect;
+        private final AdminCapability dialect;
         private final QueryRunner queryRunner;
         private final DdlAssistantDialog.DdlRunner runner;
 
@@ -69,7 +69,7 @@ final class ProcessListDialog {
          */
         private int refreshSeq;
 
-        Session(Component parent, DatabaseDialect dialect, QueryRunner queryRunner, DdlAssistantDialog.DdlRunner runner) {
+        Session(Component parent, AdminCapability dialect, QueryRunner queryRunner, DdlAssistantDialog.DdlRunner runner) {
             this.owner = (DialogUtil.owner(parent) instanceof Window w) ? w : null;
             this.dialect = dialect;
             this.queryRunner = queryRunner;

@@ -1,6 +1,7 @@
 package com.nureal.ide.modulos.conexoes.infraestrutura;
 import com.nureal.ide.modulos.conexoes.dominio.contratos.ConnectionRepository;
 import com.nureal.ide.modulos.conexoes.dominio.entidades.ConnectionProfile;
+import com.nureal.ide.modulos.dialeto.dominio.entidades.ProviderType;
 
 import com.nureal.ide.compartilhado.persistencia.ArquivoChaveValorUtil;
 import com.nureal.ide.compartilhado.seguranca.CredentialCipher;
@@ -110,6 +111,7 @@ public class ConnectionStore implements ConnectionRepository {
             sb.append("schema=").append(nullToEmpty(c.schema())).append('\n');
             sb.append("user=").append(nullToEmpty(c.user())).append('\n');
             sb.append("savePassword=").append(c.savePassword()).append('\n');
+            sb.append("provider=").append(c.provider().name()).append('\n');
             if (c.savePassword() && c.password() != null && !c.password().isEmpty()) {
                 sb.append("password=").append(ArquivoChaveValorUtil.encode(c.password())).append('\n');
             }
@@ -171,6 +173,10 @@ public class ConnectionStore implements ConnectionRepository {
         private String user = "";
         private boolean savePassword = false;
         private String password = "";
+        // MYSQL: unico driver registrado ate hoje E o default de qualquer
+        // arquivo salvo ANTES deste campo existir (chave "provider" ausente
+        // nunca quebra a leitura de conexoes antigas).
+        private ProviderType provider = ProviderType.MYSQL;
 
         void set(String key, String value) {
             switch (key) {
@@ -181,7 +187,16 @@ public class ConnectionStore implements ConnectionRepository {
                 case "user" -> user = value.trim();
                 case "savePassword" -> savePassword = Boolean.parseBoolean(value.trim());
                 case "password" -> password = ArquivoChaveValorUtil.decode(value.trim());
+                case "provider" -> provider = parseProvider(value.trim());
                 default -> { /* ignora chaves desconhecidas */ }
+            }
+        }
+
+        private static ProviderType parseProvider(String s) {
+            try {
+                return ProviderType.valueOf(s.toUpperCase(java.util.Locale.ROOT));
+            } catch (IllegalArgumentException ex) {
+                return ProviderType.MYSQL;
             }
         }
 
@@ -194,7 +209,7 @@ public class ConnectionStore implements ConnectionRepository {
         }
 
         ConnectionProfile build() {
-            return new ConnectionProfile(name, host, port, schema, user, password, savePassword);
+            return new ConnectionProfile(name, host, port, schema, user, password, savePassword, provider);
         }
     }
 }

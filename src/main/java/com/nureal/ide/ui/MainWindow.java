@@ -100,12 +100,14 @@ import com.nureal.ide.modulos.conexoes.dominio.contratos.ConnectionRepository;
 import com.nureal.ide.modulos.conexoes.infraestrutura.ConnectionManager;
 import com.nureal.ide.modulos.conexoes.dominio.entidades.ConnectionProfile;
 import com.nureal.ide.modulos.dialeto.dominio.contratos.DatabaseDialect;
+import com.nureal.ide.modulos.dialeto.infraestrutura.DriverRegistry;
 import com.nureal.ide.modulos.backupexportacao.infraestrutura.ExcelExporter;
 import com.nureal.ide.core.format.FormatPreferences;
 import com.nureal.ide.core.format.SqlFormatter;
 import com.nureal.ide.core.log.AppLogger;
 import com.nureal.ide.modulos.metadados.infraestrutura.MetadataCache;
 import com.nureal.ide.modulos.metadados.dominio.contratos.MetadataRepository;
+import com.nureal.ide.modulos.metadados.infraestrutura.MetadataService;
 import com.nureal.ide.modulos.metadados.dominio.entidades.SchemaInfo;
 import com.nureal.ide.modulos.historico.infraestrutura.SavedQueryStore;
 import com.nureal.ide.modulos.historico.infraestrutura.ExecutionHistoryStore;
@@ -172,7 +174,8 @@ public class MainWindow extends JFrame {
 
 	private static final String SCRATCH = "(sem conexao)";
 
-	private final DatabaseDialect dialect;
+	/** Ver {@code ComposicaoRaiz#driverRegistry} — repassado pra {@link ConnectionsPanel}/{@link ConnectionEditDialog} resolverem o driver certo ao testar uma conexao, em vez de assumir MySQL direto; tambem usado ao abrir cada {@code Conexao} (ver {@link #connect}), pra resolver o {@link DatabaseDialect} do {@code ProviderType} dela, nao mais um dialeto global fixo. */
+	private final DriverRegistry driverRegistry;
 	/**
 	 * Usado SO para criar a conexao SCRATCH em {@code initWorkspaces()}, antes
 	 * de {@code activeWorkspace} existir — depois disso, {@code activeWorkspace}
@@ -184,7 +187,6 @@ public class MainWindow extends JFrame {
 	private final Map<String, Conexao> workspaces = new LinkedHashMap<>();
 	private Conexao activeWorkspace;
 	private Map<String, SessionStore.Session> savedSessions = new LinkedHashMap<>();
-	private final MetadataRepository metadataService;
 	private final MetadataCache metadataCache;
 	// Cache de metadados de tabela (colunas/PK/indices/FKs) para a grade de
 	// resultados — indicador de FK no cabecalho e popup/menu de metadados de
@@ -441,9 +443,8 @@ public class MainWindow extends JFrame {
 
 	public MainWindow(ComposicaoRaiz raiz) {
 		super("Nureal Database IDE");
-		this.dialect = raiz.dialect();
+		this.driverRegistry = raiz.driverRegistry();
 		this.bootstrapConnectionManager = raiz.bootstrapConnectionManager();
-		this.metadataService = raiz.metadataService();
 		this.metadataCache = raiz.metadataCache();
 		this.tableMetadataCache = raiz.tableMetadataCache();
 		this.completionProvider = raiz.completionProvider();
@@ -545,7 +546,7 @@ public class MainWindow extends JFrame {
 				continue; // teve atividade de verdade recente, nao precisa de ping
 			}
 			w.setLastActivityMillis(now); // evita reenviar no proximo tick se a rede estiver lenta
-			String query = dialect.keepAliveQuery();
+			String query = w.mgr().dialect().keepAliveQuery();
 			new Thread(() -> {
 				try {
 					ConexaoAtivaPort mgr = w.mgr();
@@ -2186,7 +2187,7 @@ public class MainWindow extends JFrame {
 		// continuar visivel). Se #connectTo precisar pedir senha antes
 		// (dialogo modal sincrono), o popup so fecha DEPOIS desse dialogo
 		// ser respondido, nunca antes.
-		connectionsPanel = new ConnectionsPanel(connectionStore, p -> {
+		connectionsPanel = new ConnectionsPanel(connectionStore, driverRegistry, p -> {
 			connectTo(p);
 			connectionsPopup.close();
 		}, this::disconnectFrom);
@@ -3644,12 +3645,32 @@ public class MainWindow extends JFrame {
 		return statusBar;
 	}
 
+	/**
+	 * Dialeto da conexao ATIVA (via {@link #connectionManager()}, que resolve
+	 * {@code activeWorkspace.mgr} ou o {@code bootstrapConnectionManager} sem
+	 * workspace ativo) — nao mais um dialeto global fixo. Cada {@code Conexao}
+	 * carrega, desde a conexao, o {@code DatabaseDialect} do PROPRIO
+	 * {@code ConnectionProfile#provider()} (ver resolucao em {@link #connect}),
+	 * entao duas conexoes abertas a bancos diferentes cada uma usa o driver
+	 * certo aqui, sem precisar saber qual workspace esta ativo no momento em
+	 * que foi montada.
+	 */
 	DatabaseDialect dialect() {
-		return dialect;
+		return connectionManager().dialect();
 	}
 
+	/**
+	 * {@link MetadataService} novo a cada chamada, envolvendo o dialeto DA
+	 * CONEXAO ATIVA ({@link #dialect()}) — nao mais uma instancia fixa presa
+	 * ao MySQL. {@code MetadataService} e so um delegador puro (sem estado),
+	 * entao criar uma instancia por chamada e barato; sem isto, abrir uma
+	 * conexao SQLite ou Postgres rodava sempre a consulta {@code
+	 * information_schema.COLUMNS} do MySQL contra o banco errado (bug real:
+	 * "no such table: information_schema.COLUMNS" ao conectar num arquivo
+	 * SQLite).
+	 */
 	MetadataRepository metadataService() {
-		return metadataService;
+		return new MetadataService(dialect());
 	}
 
 	MetadataCache metadataCache() {
@@ -3921,7 +3942,7 @@ public class MainWindow extends JFrame {
 		LLMProvider provider = LLMProviderFactory.create(prefs, aiCredentials);
 		IdeStateAccessor accessor = new IdeContextAccessor(
 				this::connectionManager,
-				() -> metadataService,
+				this::metadataService,
 				() -> currentSchema,
 				() -> currentSchema != null ? currentSchema.name() : null,
 				this::activeConnectionLabelForAi,
@@ -4171,17 +4192,21 @@ public class MainWindow extends JFrame {
 
 		final boolean pickSchema = target.schema() == null || target.schema().isBlank();
 		final Conexao ws = (existing != null) ? existing
-				: new Conexao(target.name(), target, new ConnectionManager(dialect));
+				: new Conexao(target.name(), target, new ConnectionManager(driverRegistry.driverFor(target.provider())));
 
 		new SwingWorker<Object, Void>() {
 			@Override
 			protected Object doInBackground() throws Exception {
 				ws.mgr.open(target);
 				Connection conn = ws.mgr.getConnection();
+				// ws.mgr.dialect() (nao metadataService()/dialect()): esta
+				// conexao ainda NAO e a activeWorkspace neste ponto (so vira
+				// depois, em done()), entao o dialeto certo e o desta
+				// conexao especifica, ja resolvido pelo provider dela.
 				if (pickSchema) {
-					return metadataService.listSchemas(conn); // List<String>
+					return ws.mgr.dialect().listSchemas(conn); // List<String>
 				}
-				return metadataService.loadSchema(conn, target.schema()); // SchemaInfo
+				return ws.mgr.dialect().loadSchema(conn, target.schema()); // SchemaInfo
 			}
 
 			@Override
@@ -4299,7 +4324,7 @@ public class MainWindow extends JFrame {
 			protected SchemaInfo doInBackground() throws Exception {
 				Connection conn = connectionManager().getConnection();
 				conn.setCatalog(schemaName); // define o banco padrao (USE schema)
-				return metadataService.loadSchema(conn, schemaName);
+				return connectionManager().dialect().loadSchema(conn, schemaName);
 			}
 
 			@Override
@@ -4761,7 +4786,7 @@ public class MainWindow extends JFrame {
 				// principal (ver comentario equivalente acima).
 				return withReconnect(editor, NEVER_CANCELLED, conn -> {
 					conn.setCatalog(schemaName); // define o banco padrao (USE schema)
-					return metadataService.loadSchema(conn, schemaName);
+					return ws.mgr.dialect().loadSchema(conn, schemaName);
 				});
 			}
 
@@ -5123,7 +5148,7 @@ public class MainWindow extends JFrame {
 		new SwingWorker<List<String>, Void>() {
 			@Override
 			protected List<String> doInBackground() throws Exception {
-				return metadataService.listSchemas(ws.mgr.getConnection());
+				return ws.mgr.dialect().listSchemas(ws.mgr.getConnection());
 			}
 
 			@Override

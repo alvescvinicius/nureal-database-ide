@@ -14,7 +14,7 @@ import javax.swing.KeyStroke;
 import javax.swing.table.DefaultTableModel;
 import javax.swing.table.TableRowSorter;
 
-import com.nureal.ide.modulos.dialeto.dominio.contratos.DatabaseDialect;
+import com.nureal.ide.modulos.dialeto.dominio.contratos.AdminCapability;
 
 /**
  * Visor de variaveis ({@code SHOW GLOBAL VARIABLES}) e status
@@ -31,18 +31,18 @@ final class ServerStatusDialog {
     private ServerStatusDialog() {
     }
 
-    static void open(Component parent, DatabaseDialect dialect, QueryRunner queryRunner) {
+    static void open(Component parent, AdminCapability dialect, QueryRunner queryRunner) {
         new Session(parent, dialect, queryRunner).show();
     }
 
     private static final class Session {
         private final Window owner;
-        private final DatabaseDialect dialect;
+        private final AdminCapability dialect;
         private final QueryRunner queryRunner;
 
         private JDialog dialog;
 
-        Session(Component parent, DatabaseDialect dialect, QueryRunner queryRunner) {
+        Session(Component parent, AdminCapability dialect, QueryRunner queryRunner) {
             this.owner = (DialogUtil.owner(parent) instanceof Window w) ? w : null;
             this.dialect = dialect;
             this.queryRunner = queryRunner;

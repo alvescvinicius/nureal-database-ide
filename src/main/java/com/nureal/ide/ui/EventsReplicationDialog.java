@@ -2,7 +2,7 @@ package com.nureal.ide.ui;
 import com.nureal.ide.compartilhado.designsystem.Buttons;
 import com.nureal.ide.compartilhado.designsystem.Typography;
 
-import com.nureal.ide.modulos.dialeto.dominio.contratos.DatabaseDialect;
+import com.nureal.ide.modulos.dialeto.dominio.contratos.ReplicationCapability;
 
 import javax.swing.JButton;
 import javax.swing.JComponent;
@@ -38,7 +38,7 @@ final class EventsReplicationDialog {
     private EventsReplicationDialog() {
     }
 
-    static void open(Component parent, String schemaName, DatabaseDialect dialect,
+    static void open(Component parent, String schemaName, ReplicationCapability dialect,
             QueryRunner queryRunner, ColumnQueryRunner columnQueryRunner) {
         new Session(parent, schemaName, dialect, queryRunner, columnQueryRunner).show();
     }
@@ -49,14 +49,14 @@ final class EventsReplicationDialog {
     private static final class Session {
         private final Window owner;
         private final String schemaName;
-        private final DatabaseDialect dialect;
+        private final ReplicationCapability dialect;
         private final QueryRunner queryRunner;
         private final ColumnQueryRunner columnQueryRunner;
 
         private JDialog dialog;
         private DefaultTableModel eventsModel;
 
-        Session(Component parent, String schemaName, DatabaseDialect dialect,
+        Session(Component parent, String schemaName, ReplicationCapability dialect,
                 QueryRunner queryRunner, ColumnQueryRunner columnQueryRunner) {
             this.owner = (DialogUtil.owner(parent) instanceof Window w) ? w : null;
             this.schemaName = schemaName;

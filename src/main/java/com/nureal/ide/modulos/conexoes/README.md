@@ -21,7 +21,7 @@ infraestrutura/ ConnectionStore (implementa ConnectionRepository), ConnectionMan
 
 ## Dependências
 
-- `dialeto` (via `DatabaseDialect`) — monta a URL JDBC e as instruções de inicialização de sessão.
+- `dialeto` (via `DatabaseDialect`/`ProviderType`) — monta a URL JDBC e as instruções de inicialização de sessão; `ConnectionProfile.provider()` identifica o SGBD da conexão, resolvido para o `DatabaseDialect` certo via `DriverRegistry` (ver `MainWindow#connect`). Cada `ConnectionManager` guarda o dialeto da SUA própria conexão (não um dialeto global compartilhado) — dois workspaces abertos a bancos diferentes cada um usa o driver certo.
 - `compartilhado.seguranca` (via `CredentialCipher`) — cifra/decifra a senha salva.
 
 ## Lacunas conhecidas

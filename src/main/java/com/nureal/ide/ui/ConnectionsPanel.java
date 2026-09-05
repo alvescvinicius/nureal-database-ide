@@ -10,6 +10,7 @@ import com.nureal.ide.compartilhado.designsystem.Spacing;
 
 import com.nureal.ide.modulos.conexoes.dominio.entidades.ConnectionProfile;
 import com.nureal.ide.modulos.conexoes.dominio.contratos.ConnectionRepository;
+import com.nureal.ide.modulos.dialeto.infraestrutura.DriverRegistry;
 import com.nureal.ide.compartilhado.designsystem.NSearchField;
 
 import javax.swing.BorderFactory;
@@ -54,6 +55,7 @@ public class ConnectionsPanel extends JPanel {
 
 
     private final ConnectionRepository store;
+    private final DriverRegistry driverRegistry;
     private final Consumer<ConnectionProfile> connectAction;
     private final Consumer<ConnectionProfile> disconnectAction;
     private final DefaultListModel<ConnectionProfile> model = new DefaultListModel<>();
@@ -90,10 +92,11 @@ public class ConnectionsPanel extends JPanel {
      */
     private Window ownerOverride;
 
-    public ConnectionsPanel(ConnectionRepository store, Consumer<ConnectionProfile> connectAction,
-            Consumer<ConnectionProfile> disconnectAction) {
+    public ConnectionsPanel(ConnectionRepository store, DriverRegistry driverRegistry,
+            Consumer<ConnectionProfile> connectAction, Consumer<ConnectionProfile> disconnectAction) {
         super(new BorderLayout(0, 8));
         this.store = store;
+        this.driverRegistry = driverRegistry;
         this.connectAction = connectAction;
         this.disconnectAction = disconnectAction;
         setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
@@ -511,7 +514,8 @@ public class ConnectionsPanel extends JPanel {
     }
 
     private void onNew() {
-        ConnectionProfile created = ConnectionEditDialog.show(dialogOwner(), null, name -> nameTaken(name, null));
+        ConnectionProfile created = ConnectionEditDialog.show(dialogOwner(), driverRegistry, null,
+                name -> nameTaken(name, null));
         if (created != null) {
             all.add(created);
             persist();
@@ -525,7 +529,8 @@ public class ConnectionsPanel extends JPanel {
         if (selected == null) {
             return;
         }
-        ConnectionProfile edited = ConnectionEditDialog.show(dialogOwner(), selected, name -> nameTaken(name, selected));
+        ConnectionProfile edited = ConnectionEditDialog.show(dialogOwner(), driverRegistry, selected,
+                name -> nameTaken(name, selected));
         if (edited != null) {
             int idx = all.indexOf(selected);
             if (idx >= 0) {
@@ -556,9 +561,9 @@ public class ConnectionsPanel extends JPanel {
         }
         String newName = nextAvailableCopyName(selected.name());
         ConnectionProfile draft = new ConnectionProfile(newName, selected.host(), selected.port(), selected.schema(),
-                selected.user(), selected.password(), selected.savePassword());
-        ConnectionProfile created = ConnectionEditDialog.show(dialogOwner(), draft, name -> nameTaken(name, null),
-                "Duplicar conexao");
+                selected.user(), selected.password(), selected.savePassword(), selected.provider());
+        ConnectionProfile created = ConnectionEditDialog.show(dialogOwner(), driverRegistry, draft,
+                name -> nameTaken(name, null), "Duplicar conexao");
         if (created != null) {
             all.add(created);
             persist();

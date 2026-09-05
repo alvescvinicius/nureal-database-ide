@@ -1,22 +1,62 @@
 package com.nureal.ide.modulos.dialeto.infraestrutura;
 
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 
+import com.nureal.ide.modulos.dialeto.dominio.contratos.AdminCapability;
 import com.nureal.ide.modulos.dialeto.dominio.contratos.DatabaseDialect;
+import com.nureal.ide.modulos.dialeto.dominio.contratos.ReplicationCapability;
+import com.nureal.ide.modulos.dialeto.dominio.contratos.SecurityCapability;
 import com.nureal.ide.modulos.conexoes.dominio.entidades.ConnectionProfile;
+import com.nureal.ide.modulos.metadados.dominio.entidades.ColumnDetail;
+import com.nureal.ide.modulos.metadados.dominio.entidades.ColumnInfo;
 import com.nureal.ide.modulos.metadados.dominio.entidades.ForeignKeyInfo;
 import com.nureal.ide.modulos.metadados.dominio.entidades.IndexInfo;
 import com.nureal.ide.modulos.metadados.dominio.entidades.NewColumnSpec;
 import com.nureal.ide.modulos.metadados.dominio.entidades.NewTableSpec;
+import com.nureal.ide.modulos.metadados.dominio.entidades.SchemaForeignKey;
+import com.nureal.ide.modulos.metadados.dominio.entidades.SchemaInfo;
+import com.nureal.ide.modulos.metadados.dominio.entidades.TableDetails;
+import com.nureal.ide.modulos.metadados.dominio.entidades.TableInfo;
 
 /**
  * Implementacao para MySQL. Le metadados via information_schema em UMA
  * consulta,
  * que e a base para o autocomplete rapido.
+ * <p>
+ * Implementa as 3 capacidades OPCIONAIS ({@link SecurityCapability}/
+ * {@link AdminCapability}/{@link ReplicationCapability}) alem das 4
+ * obrigatorias — MySQL suporta tudo isso hoje, entao {@link #security()}/
+ * {@link #admin()}/{@link #replication()} sempre devolvem
+ * {@code Optional.of(this)}.
  */
-public class MySqlDialect implements DatabaseDialect {
+public class MySqlDialect implements DatabaseDialect, SecurityCapability, AdminCapability, ReplicationCapability {
+
+    @Override
+    public Optional<SecurityCapability> security() {
+        return Optional.of(this);
+    }
+
+    @Override
+    public Optional<AdminCapability> admin() {
+        return Optional.of(this);
+    }
+
+    @Override
+    public Optional<ReplicationCapability> replication() {
+        return Optional.of(this);
+    }
 
     @Override
     public String id() {
@@ -62,52 +102,131 @@ public class MySqlDialect implements DatabaseDialect {
         return List.of();
     }
 
+    private static final String SCHEMAS_SQL = "SELECT SCHEMA_NAME FROM information_schema.SCHEMATA "
+            + "WHERE SCHEMA_NAME NOT IN "
+            + "('information_schema','performance_schema','mysql','sys') "
+            + "ORDER BY SCHEMA_NAME";
+
+    private static final String COLUMNS_SQL = "SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, ORDINAL_POSITION "
+            + "FROM information_schema.COLUMNS "
+            + "WHERE TABLE_SCHEMA = ? "
+            + "ORDER BY TABLE_NAME, ORDINAL_POSITION";
+
+    private static final String TABLES_SQL = "SELECT TABLE_NAME, TABLE_TYPE "
+            + "FROM information_schema.TABLES "
+            + "WHERE TABLE_SCHEMA = ? "
+            + "ORDER BY TABLE_NAME";
+
+    private static final String ROUTINES_SQL = "SELECT ROUTINE_NAME, ROUTINE_TYPE "
+            + "FROM information_schema.ROUTINES "
+            + "WHERE ROUTINE_SCHEMA = ? "
+            + "ORDER BY ROUTINE_NAME";
+
+    private static final String TRIGGERS_SQL = "SELECT TRIGGER_NAME "
+            + "FROM information_schema.TRIGGERS "
+            + "WHERE TRIGGER_SCHEMA = ? "
+            + "ORDER BY TRIGGER_NAME";
+
+    private static final String EVENT_NAMES_SQL = "SELECT EVENT_NAME "
+            + "FROM information_schema.EVENTS "
+            + "WHERE EVENT_SCHEMA = ? "
+            + "ORDER BY EVENT_NAME";
+
+    /** Lista os esquemas (databases) acessiveis ao usuario conectado — ver {@link com.nureal.ide.modulos.dialeto.dominio.contratos.MetadataCapability}. */
     @Override
-    public String schemasQuery() {
-        return "SELECT SCHEMA_NAME FROM information_schema.SCHEMATA "
-                + "WHERE SCHEMA_NAME NOT IN "
-                + "('information_schema','performance_schema','mysql','sys') "
-                + "ORDER BY SCHEMA_NAME";
+    public List<String> listSchemas(Connection conn) throws SQLException {
+        List<String> schemas = new ArrayList<>();
+        try (PreparedStatement ps = conn.prepareStatement(SCHEMAS_SQL);
+                ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                schemas.add(rs.getString(1));
+            }
+        }
+        return schemas;
     }
 
+    /**
+     * Carrega tabelas, views, procedures, functions, triggers e eventos
+     * agendados de um schema numa UNICA consulta de colunas (a chave da
+     * performance: informacao_schema.COLUMNS de TODAS as tabelas de uma vez,
+     * agrupada em memoria) mais 4 consultas leves — movido de
+     * {@code MetadataService.loadSchema} (agora so um delegador, ver
+     * {@link com.nureal.ide.modulos.dialeto.dominio.contratos.MetadataCapability}).
+     */
     @Override
-    public String columnsQuery() {
-        return "SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, ORDINAL_POSITION "
-                + "FROM information_schema.COLUMNS "
-                + "WHERE TABLE_SCHEMA = ? "
-                + "ORDER BY TABLE_NAME, ORDINAL_POSITION";
-    }
+    public SchemaInfo loadSchema(Connection conn, String schema) throws SQLException {
+        Map<String, List<ColumnInfo>> columnsByObject = new LinkedHashMap<>();
+        try (PreparedStatement ps = conn.prepareStatement(COLUMNS_SQL)) {
+            ps.setString(1, schema);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    String object = rs.getString("TABLE_NAME");
+                    ColumnInfo col = new ColumnInfo(
+                            rs.getString("COLUMN_NAME"),
+                            rs.getString("COLUMN_TYPE"),
+                            rs.getInt("ORDINAL_POSITION"));
+                    columnsByObject.computeIfAbsent(object, k -> new ArrayList<>()).add(col);
+                }
+            }
+        }
 
-    @Override
-    public String tablesQuery() {
-        return "SELECT TABLE_NAME, TABLE_TYPE "
-                + "FROM information_schema.TABLES "
-                + "WHERE TABLE_SCHEMA = ? "
-                + "ORDER BY TABLE_NAME";
-    }
+        List<TableInfo> tables = new ArrayList<>();
+        List<TableInfo> views = new ArrayList<>();
+        try (PreparedStatement ps = conn.prepareStatement(TABLES_SQL)) {
+            ps.setString(1, schema);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    String name = rs.getString("TABLE_NAME");
+                    String type = rs.getString("TABLE_TYPE");
+                    List<ColumnInfo> cols = columnsByObject.getOrDefault(name, List.of());
+                    TableInfo info = new TableInfo(name, cols);
+                    if (type != null && type.toUpperCase(Locale.ROOT).contains("VIEW")) {
+                        views.add(info);
+                    } else {
+                        tables.add(info);
+                    }
+                }
+            }
+        }
 
-    @Override
-    public String routinesQuery() {
-        return "SELECT ROUTINE_NAME, ROUTINE_TYPE "
-                + "FROM information_schema.ROUTINES "
-                + "WHERE ROUTINE_SCHEMA = ? "
-                + "ORDER BY ROUTINE_NAME";
-    }
+        List<String> procedures = new ArrayList<>();
+        List<String> functions = new ArrayList<>();
+        try (PreparedStatement ps = conn.prepareStatement(ROUTINES_SQL)) {
+            ps.setString(1, schema);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    String name = rs.getString("ROUTINE_NAME");
+                    String type = rs.getString("ROUTINE_TYPE");
+                    if (type != null && type.toUpperCase(Locale.ROOT).contains("FUNCTION")) {
+                        functions.add(name);
+                    } else {
+                        procedures.add(name);
+                    }
+                }
+            }
+        }
 
-    @Override
-    public String triggersQuery() {
-        return "SELECT TRIGGER_NAME "
-                + "FROM information_schema.TRIGGERS "
-                + "WHERE TRIGGER_SCHEMA = ? "
-                + "ORDER BY TRIGGER_NAME";
-    }
+        List<String> triggers = new ArrayList<>();
+        try (PreparedStatement ps = conn.prepareStatement(TRIGGERS_SQL)) {
+            ps.setString(1, schema);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    triggers.add(rs.getString("TRIGGER_NAME"));
+                }
+            }
+        }
 
-    @Override
-    public String eventNamesQuery() {
-        return "SELECT EVENT_NAME "
-                + "FROM information_schema.EVENTS "
-                + "WHERE EVENT_SCHEMA = ? "
-                + "ORDER BY EVENT_NAME";
+        List<String> events = new ArrayList<>();
+        try (PreparedStatement ps = conn.prepareStatement(EVENT_NAMES_SQL)) {
+            ps.setString(1, schema);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    events.add(rs.getString("EVENT_NAME"));
+                }
+            }
+        }
+
+        return new SchemaInfo(schema, tables, views, procedures, functions, triggers, events);
     }
 
     @Override
@@ -410,58 +529,186 @@ public class MySqlDialect implements DatabaseDialect {
         return "'" + value.replace("'", "''") + "'";
     }
 
+    private static final String COLUMN_DETAILS_SQL = "SELECT ORDINAL_POSITION, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, "
+            + "COLUMN_KEY, COLUMN_DEFAULT, EXTRA, COLUMN_COMMENT "
+            + "FROM information_schema.COLUMNS "
+            + "WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? "
+            + "ORDER BY ORDINAL_POSITION";
+
+    private static final String INDEXES_SQL = "SELECT INDEX_NAME, NON_UNIQUE, INDEX_TYPE, SEQ_IN_INDEX, COLUMN_NAME "
+            + "FROM information_schema.STATISTICS "
+            + "WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? "
+            + "ORDER BY INDEX_NAME, SEQ_IN_INDEX";
+
+    private static final String FOREIGN_KEYS_SQL = "SELECT k.CONSTRAINT_NAME, k.COLUMN_NAME, k.REFERENCED_TABLE_NAME, "
+            + "k.REFERENCED_COLUMN_NAME, r.UPDATE_RULE, r.DELETE_RULE "
+            + "FROM information_schema.KEY_COLUMN_USAGE k "
+            + "JOIN information_schema.REFERENTIAL_CONSTRAINTS r "
+            + "  ON r.CONSTRAINT_SCHEMA = k.CONSTRAINT_SCHEMA "
+            + "  AND r.CONSTRAINT_NAME = k.CONSTRAINT_NAME "
+            + "WHERE k.TABLE_SCHEMA = ? AND k.TABLE_NAME = ? "
+            + "  AND k.REFERENCED_TABLE_NAME IS NOT NULL "
+            + "ORDER BY k.CONSTRAINT_NAME, k.ORDINAL_POSITION";
+
+    private static final String FOREIGN_KEYS_FOR_SCHEMA_SQL = "SELECT k.CONSTRAINT_NAME, k.TABLE_NAME, k.COLUMN_NAME, k.REFERENCED_TABLE_NAME, "
+            + "k.REFERENCED_COLUMN_NAME, r.UPDATE_RULE, r.DELETE_RULE "
+            + "FROM information_schema.KEY_COLUMN_USAGE k "
+            + "JOIN information_schema.REFERENTIAL_CONSTRAINTS r "
+            + "  ON r.CONSTRAINT_SCHEMA = k.CONSTRAINT_SCHEMA "
+            + "  AND r.CONSTRAINT_NAME = k.CONSTRAINT_NAME "
+            + "WHERE k.TABLE_SCHEMA = ? "
+            + "  AND k.REFERENCED_TABLE_NAME IS NOT NULL "
+            + "ORDER BY k.TABLE_NAME, k.CONSTRAINT_NAME, k.ORDINAL_POSITION";
+
+    // No MySQL/InnoDB o nome da constraint de chave primaria e SEMPRE
+    // literalmente "PRIMARY" — nao ha necessidade de olhar
+    // TABLE_CONSTRAINTS.CONSTRAINT_TYPE para confirmar.
+    private static final String PRIMARY_KEYS_FOR_SCHEMA_SQL = "SELECT TABLE_NAME, COLUMN_NAME "
+            + "FROM information_schema.KEY_COLUMN_USAGE "
+            + "WHERE TABLE_SCHEMA = ? AND CONSTRAINT_NAME = 'PRIMARY' "
+            + "ORDER BY TABLE_NAME, ORDINAL_POSITION";
+
+    /**
+     * Detalhe completo de UMA tabela/view — movido de
+     * {@code MetadataService.loadTableDetails} (agora so um delegador, ver
+     * {@link com.nureal.ide.modulos.dialeto.dominio.contratos.MetadataCapability}).
+     */
     @Override
-    public String columnDetailsQuery() {
-        return "SELECT ORDINAL_POSITION, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, "
-                + "COLUMN_KEY, COLUMN_DEFAULT, EXTRA, COLUMN_COMMENT "
-                + "FROM information_schema.COLUMNS "
-                + "WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? "
-                + "ORDER BY ORDINAL_POSITION";
+    public TableDetails loadTableDetails(Connection conn, String schema, String table) throws SQLException {
+        return new TableDetails(
+                loadColumnDetails(conn, schema, table),
+                loadIndexes(conn, schema, table),
+                loadForeignKeys(conn, schema, table));
     }
 
-    @Override
-    public String indexesQuery() {
-        return "SELECT INDEX_NAME, NON_UNIQUE, INDEX_TYPE, SEQ_IN_INDEX, COLUMN_NAME "
-                + "FROM information_schema.STATISTICS "
-                + "WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? "
-                + "ORDER BY INDEX_NAME, SEQ_IN_INDEX";
+    private List<ColumnDetail> loadColumnDetails(Connection conn, String schema, String table) throws SQLException {
+        List<ColumnDetail> columns = new ArrayList<>();
+        try (PreparedStatement ps = conn.prepareStatement(COLUMN_DETAILS_SQL)) {
+            ps.setString(1, schema);
+            ps.setString(2, table);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    columns.add(new ColumnDetail(
+                            rs.getInt("ORDINAL_POSITION"),
+                            rs.getString("COLUMN_NAME"),
+                            rs.getString("COLUMN_TYPE"),
+                            "YES".equalsIgnoreCase(rs.getString("IS_NULLABLE")),
+                            rs.getString("COLUMN_KEY"),
+                            rs.getString("COLUMN_DEFAULT"),
+                            rs.getString("EXTRA"),
+                            rs.getString("COLUMN_COMMENT")));
+                }
+            }
+        }
+        return columns;
     }
 
-    @Override
-    public String foreignKeysQuery() {
-        return "SELECT k.CONSTRAINT_NAME, k.COLUMN_NAME, k.REFERENCED_TABLE_NAME, "
-                + "k.REFERENCED_COLUMN_NAME, r.UPDATE_RULE, r.DELETE_RULE "
-                + "FROM information_schema.KEY_COLUMN_USAGE k "
-                + "JOIN information_schema.REFERENTIAL_CONSTRAINTS r "
-                + "  ON r.CONSTRAINT_SCHEMA = k.CONSTRAINT_SCHEMA "
-                + "  AND r.CONSTRAINT_NAME = k.CONSTRAINT_NAME "
-                + "WHERE k.TABLE_SCHEMA = ? AND k.TABLE_NAME = ? "
-                + "  AND k.REFERENCED_TABLE_NAME IS NOT NULL "
-                + "ORDER BY k.CONSTRAINT_NAME, k.ORDINAL_POSITION";
+    private List<IndexInfo> loadIndexes(Connection conn, String schema, String table) throws SQLException {
+        Map<String, List<String>> cols = new LinkedHashMap<>();
+        Map<String, Boolean> unique = new HashMap<>();
+        Map<String, String> type = new HashMap<>();
+        try (PreparedStatement ps = conn.prepareStatement(INDEXES_SQL)) {
+            ps.setString(1, schema);
+            ps.setString(2, table);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    String name = rs.getString("INDEX_NAME");
+                    cols.computeIfAbsent(name, k -> new ArrayList<>())
+                            .add(rs.getString("COLUMN_NAME"));
+                    unique.put(name, rs.getInt("NON_UNIQUE") == 0);
+                    type.put(name, rs.getString("INDEX_TYPE"));
+                }
+            }
+        }
+        List<IndexInfo> indexes = new ArrayList<>();
+        cols.forEach((name, columns) -> indexes.add(
+                new IndexInfo(name, unique.get(name), type.get(name), columns)));
+        return indexes;
     }
 
-    @Override
-    public String foreignKeysQueryForSchema() {
-        return "SELECT k.CONSTRAINT_NAME, k.TABLE_NAME, k.COLUMN_NAME, k.REFERENCED_TABLE_NAME, "
-                + "k.REFERENCED_COLUMN_NAME, r.UPDATE_RULE, r.DELETE_RULE "
-                + "FROM information_schema.KEY_COLUMN_USAGE k "
-                + "JOIN information_schema.REFERENTIAL_CONSTRAINTS r "
-                + "  ON r.CONSTRAINT_SCHEMA = k.CONSTRAINT_SCHEMA "
-                + "  AND r.CONSTRAINT_NAME = k.CONSTRAINT_NAME "
-                + "WHERE k.TABLE_SCHEMA = ? "
-                + "  AND k.REFERENCED_TABLE_NAME IS NOT NULL "
-                + "ORDER BY k.TABLE_NAME, k.CONSTRAINT_NAME, k.ORDINAL_POSITION";
+    private List<ForeignKeyInfo> loadForeignKeys(Connection conn, String schema, String table) throws SQLException {
+        Map<String, List<String>> cols = new LinkedHashMap<>();
+        Map<String, List<String>> refCols = new LinkedHashMap<>();
+        Map<String, String> refTable = new HashMap<>();
+        Map<String, String> onUpdate = new HashMap<>();
+        Map<String, String> onDelete = new HashMap<>();
+        try (PreparedStatement ps = conn.prepareStatement(FOREIGN_KEYS_SQL)) {
+            ps.setString(1, schema);
+            ps.setString(2, table);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    String name = rs.getString("CONSTRAINT_NAME");
+                    cols.computeIfAbsent(name, k -> new ArrayList<>())
+                            .add(rs.getString("COLUMN_NAME"));
+                    refCols.computeIfAbsent(name, k -> new ArrayList<>())
+                            .add(rs.getString("REFERENCED_COLUMN_NAME"));
+                    refTable.put(name, rs.getString("REFERENCED_TABLE_NAME"));
+                    onUpdate.put(name, rs.getString("UPDATE_RULE"));
+                    onDelete.put(name, rs.getString("DELETE_RULE"));
+                }
+            }
+        }
+        List<ForeignKeyInfo> fks = new ArrayList<>();
+        cols.forEach((name, columns) -> fks.add(new ForeignKeyInfo(
+                name, columns, refTable.get(name), refCols.get(name),
+                onUpdate.get(name), onDelete.get(name))));
+        return fks;
     }
 
+    /**
+     * Todas as chaves estrangeiras do schema INTEIRO, numa unica consulta —
+     * movido de {@code MetadataService.loadSchemaForeignKeys} (usada pelo
+     * Diagrama ER, ver {@link com.nureal.ide.modulos.dialeto.dominio.contratos.MetadataCapability}).
+     */
     @Override
-    public String primaryKeysQueryForSchema() {
-        // No MySQL/InnoDB o nome da constraint de chave primaria e SEMPRE
-        // literalmente "PRIMARY" — nao ha necessidade de olhar
-        // TABLE_CONSTRAINTS.CONSTRAINT_TYPE para confirmar.
-        return "SELECT TABLE_NAME, COLUMN_NAME "
-                + "FROM information_schema.KEY_COLUMN_USAGE "
-                + "WHERE TABLE_SCHEMA = ? AND CONSTRAINT_NAME = 'PRIMARY' "
-                + "ORDER BY TABLE_NAME, ORDINAL_POSITION";
+    public List<SchemaForeignKey> loadSchemaForeignKeys(Connection conn, String schema) throws SQLException {
+        Map<String, List<String>> cols = new LinkedHashMap<>();
+        Map<String, List<String>> refCols = new LinkedHashMap<>();
+        Map<String, String> fromTable = new HashMap<>();
+        Map<String, String> refTable = new HashMap<>();
+        Map<String, String> onUpdate = new HashMap<>();
+        Map<String, String> onDelete = new HashMap<>();
+        try (PreparedStatement ps = conn.prepareStatement(FOREIGN_KEYS_FOR_SCHEMA_SQL)) {
+            ps.setString(1, schema);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    String name = rs.getString("CONSTRAINT_NAME");
+                    cols.computeIfAbsent(name, k -> new ArrayList<>())
+                            .add(rs.getString("COLUMN_NAME"));
+                    refCols.computeIfAbsent(name, k -> new ArrayList<>())
+                            .add(rs.getString("REFERENCED_COLUMN_NAME"));
+                    fromTable.put(name, rs.getString("TABLE_NAME"));
+                    refTable.put(name, rs.getString("REFERENCED_TABLE_NAME"));
+                    onUpdate.put(name, rs.getString("UPDATE_RULE"));
+                    onDelete.put(name, rs.getString("DELETE_RULE"));
+                }
+            }
+        }
+        List<SchemaForeignKey> fks = new ArrayList<>();
+        cols.forEach((name, columns) -> fks.add(new SchemaForeignKey(
+                name, fromTable.get(name), columns, refTable.get(name), refCols.get(name),
+                onUpdate.get(name), onDelete.get(name))));
+        return fks;
+    }
+
+    /**
+     * Colunas de chave primaria de TODO o schema, agrupadas por tabela —
+     * movido de {@code MetadataService.loadSchemaPrimaryKeys} (usada pelo
+     * Diagrama ER, ver {@link com.nureal.ide.modulos.dialeto.dominio.contratos.MetadataCapability}).
+     */
+    @Override
+    public Map<String, Set<String>> loadSchemaPrimaryKeys(Connection conn, String schema) throws SQLException {
+        Map<String, Set<String>> byTable = new HashMap<>();
+        try (PreparedStatement ps = conn.prepareStatement(PRIMARY_KEYS_FOR_SCHEMA_SQL)) {
+            ps.setString(1, schema);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    byTable.computeIfAbsent(rs.getString("TABLE_NAME"), k -> new LinkedHashSet<>())
+                            .add(rs.getString("COLUMN_NAME"));
+                }
+            }
+        }
+        return byTable;
     }
 
     @Override

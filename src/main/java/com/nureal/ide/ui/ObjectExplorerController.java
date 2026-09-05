@@ -26,6 +26,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.Vector;
 
@@ -56,7 +57,10 @@ import javax.swing.tree.DefaultTreeModel;
 import javax.swing.tree.TreePath;
 
 import com.nureal.ide.core.log.AppLogger;
+import com.nureal.ide.modulos.dialeto.dominio.contratos.AdminCapability;
 import com.nureal.ide.modulos.dialeto.dominio.contratos.DatabaseDialect;
+import com.nureal.ide.modulos.dialeto.dominio.contratos.ReplicationCapability;
+import com.nureal.ide.modulos.dialeto.dominio.contratos.SecurityCapability;
 import com.nureal.ide.modulos.metadados.dominio.entidades.ColumnDetail;
 import com.nureal.ide.modulos.metadados.dominio.entidades.ColumnInfo;
 import com.nureal.ide.modulos.metadados.dominio.entidades.DbUserInfo;
@@ -925,13 +929,25 @@ final class ObjectExplorerController {
 			owner.statusBar().setText(" Conecte-se a um servidor antes de gerenciar usuarios.");
 			return;
 		}
+		// Administracao de usuarios/privilegios e capacidade OPCIONAL (ver
+		// SecurityCapability) — MySQL suporta hoje, entao isto nunca cai
+		// aqui na pratica ainda, mas um driver futuro sem esse recurso
+		// (ou um modelo de privilegios incompativel) tem um jeito limpo de
+		// dizer isso, sem os ~19 metodos de SecurityCapability precisarem
+		// de uma implementacao "lanca excecao" so pra existir.
+		Optional<SecurityCapability> security = owner.dialect().security();
+		if (security.isEmpty()) {
+			owner.statusBar().setText(" Este banco nao suporta gerenciamento de usuarios/privilegios pela IDE.");
+			return;
+		}
+		SecurityCapability dialect = security.get();
 		Conexao ws = owner.activeWorkspace();
 		String schemaNameNow = owner.currentSchema() != null ? owner.currentSchema().name() : null;
 		List<String> currentSchemaTables = owner.currentSchema() != null
 				? owner.currentSchema().tables().stream().map(TableInfo::name).toList()
 				: List.of();
 		owner.statusBar().setText(" Carregando usuarios do servidor...");
-		runQuery(ws, owner.dialect().listUsersQuery(), userRows -> {
+		runQuery(ws, dialect.listUsersQuery(), userRows -> {
 			List<DbUserInfo> users = new ArrayList<>();
 			for (Object[] row : userRows) {
 				String user = String.valueOf(row[0]);
@@ -941,20 +957,29 @@ final class ObjectExplorerController {
 				users.add(new DbUserInfo(user, host, locked, expired));
 			}
 			owner.statusBar().setText(" Carregando lista de esquemas...");
-			runQuery(ws, owner.dialect().schemasQuery(), schemaRows -> {
-				List<String> schemaNames = new ArrayList<>();
-				for (Object[] row : schemaRows) {
-					schemaNames.add(String.valueOf(row[0]));
+			new SwingWorker<List<String>, Void>() {
+				@Override
+				protected List<String> doInBackground() throws Exception {
+					return owner.metadataService().listSchemas(ws.mgr.getConnection());
 				}
-				owner.statusBar().setText(" Pronto.");
-				UserManagementDialog.open(owner, owner.dialect(), users, schemaNames, schemaNameNow, currentSchemaTables,
-						(statements, onOk, onErr) -> ddlActions.runDdlStatements(ws, statements, onOk, onErr),
-						(sql, onRows, onErr) -> runQuery(ws, sql, onRows, onErr));
-			}, ex -> {
-				owner.statusBar().setText(" Falha ao listar esquemas.");
-				JOptionPane.showMessageDialog(owner, "Falha ao listar esquemas:\n" + ex.getMessage(),
-						"Usuarios e privilegios", JOptionPane.ERROR_MESSAGE);
-			});
+
+				@Override
+				protected void done() {
+					try {
+						List<String> schemaNames = get();
+						owner.statusBar().setText(" Pronto.");
+						UserManagementDialog.open(owner, dialect, users, schemaNames, schemaNameNow,
+								currentSchemaTables,
+								(statements, onOk, onErr) -> ddlActions.runDdlStatements(ws, statements, onOk, onErr),
+								(sql, onRows, onErr) -> runQuery(ws, sql, onRows, onErr));
+					} catch (Exception ex) {
+						Throwable cause = ex instanceof java.util.concurrent.ExecutionException ? ex.getCause() : ex;
+						owner.statusBar().setText(" Falha ao listar esquemas.");
+						JOptionPane.showMessageDialog(owner, "Falha ao listar esquemas:\n" + cause.getMessage(),
+								"Usuarios e privilegios", JOptionPane.ERROR_MESSAGE);
+					}
+				}
+			}.execute();
 		}, ex -> {
 			owner.statusBar().setText(" Falha ao listar usuarios.");
 			JOptionPane.showMessageDialog(owner,
@@ -970,8 +995,13 @@ final class ObjectExplorerController {
 			owner.statusBar().setText(" Conecte-se a um servidor antes de ver as sessoes ativas.");
 			return;
 		}
+		Optional<AdminCapability> admin = owner.dialect().admin();
+		if (admin.isEmpty()) {
+			owner.statusBar().setText(" Este banco nao suporta monitoramento de sessoes pela IDE.");
+			return;
+		}
 		Conexao ws = owner.activeWorkspace();
-		ProcessListDialog.open(owner, owner.dialect(), (sql, onRows, onErr) -> runQuery(ws, sql, onRows, onErr),
+		ProcessListDialog.open(owner, admin.get(), (sql, onRows, onErr) -> runQuery(ws, sql, onRows, onErr),
 				(statements, onOk, onErr) -> ddlActions.runDdlStatements(ws, statements, onOk, onErr));
 	}
 
@@ -985,8 +1015,13 @@ final class ObjectExplorerController {
 			owner.statusBar().setText(" Conecte-se a um servidor antes de ver variaveis/status.");
 			return;
 		}
+		Optional<AdminCapability> admin = owner.dialect().admin();
+		if (admin.isEmpty()) {
+			owner.statusBar().setText(" Este banco nao suporta variaveis/status de servidor pela IDE.");
+			return;
+		}
 		Conexao ws = owner.activeWorkspace();
-		ServerStatusDialog.open(owner, owner.dialect(), (sql, onRows, onErr) -> runQuery(ws, sql, onRows, onErr));
+		ServerStatusDialog.open(owner, admin.get(), (sql, onRows, onErr) -> runQuery(ws, sql, onRows, onErr));
 	}
 
 	private void openErDiagram() {
@@ -1028,9 +1063,14 @@ final class ObjectExplorerController {
 			owner.statusBar().setText(" Abra um esquema antes de ver eventos/replicacao.");
 			return;
 		}
+		Optional<ReplicationCapability> replication = owner.dialect().replication();
+		if (replication.isEmpty()) {
+			owner.statusBar().setText(" Este banco nao suporta eventos agendados/replicacao pela IDE.");
+			return;
+		}
 		Conexao ws = owner.activeWorkspace();
 		String schemaName = owner.currentSchema().name();
-		EventsReplicationDialog.open(owner, schemaName, owner.dialect(),
+		EventsReplicationDialog.open(owner, schemaName, replication.get(),
 				(sql, onRows, onErr) -> runQuery(ws, sql, onRows, onErr),
 				(sql, onResult, onErr) -> runQueryWithColumns(ws, sql, onResult, onErr));
 	}
@@ -1086,8 +1126,11 @@ final class ObjectExplorerController {
 			JMenuItem populateItem = new JMenuItem("Popular tabela...");
 			populateItem.addActionListener(a -> dataTransfer.populateTable(obj));
 			menu.add(populateItem);
-			menu.addSeparator();
-			menu.add(buildTableMaintenanceMenu(obj));
+			JMenu maintenanceMenu = buildTableMaintenanceMenu(obj);
+			if (maintenanceMenu != null) {
+				menu.addSeparator();
+				menu.add(maintenanceMenu);
+			}
 		}
 		if (obj.type() == NodeType.VIEW) {
 			menu.addSeparator();
@@ -1126,11 +1169,17 @@ final class ObjectExplorerController {
 		return menu;
 	}
 
+	/** {@code null} se o driver ativo nao suportar {@link AdminCapability} (ver {@link #buildObjectContextMenu}, que so anexa o submenu quando isto nao for nulo). */
 	private JMenu buildTableMaintenanceMenu(ObjNode obj) {
+		Optional<AdminCapability> admin = owner.dialect().admin();
+		if (admin.isEmpty()) {
+			return null;
+		}
+		AdminCapability dialect = admin.get();
 		JMenu menu = new JMenu("Manutencao");
-		menu.add(maintenanceItem("Otimizar (OPTIMIZE TABLE)", obj, owner.dialect()::optimizeTableStatement));
-		menu.add(maintenanceItem("Recalcular estatisticas (ANALYZE TABLE)", obj, owner.dialect()::analyzeTableStatement));
-		menu.add(maintenanceItem("Verificar integridade (CHECK TABLE)", obj, owner.dialect()::checkTableStatement));
+		menu.add(maintenanceItem("Otimizar (OPTIMIZE TABLE)", obj, dialect::optimizeTableStatement));
+		menu.add(maintenanceItem("Recalcular estatisticas (ANALYZE TABLE)", obj, dialect::analyzeTableStatement));
+		menu.add(maintenanceItem("Verificar integridade (CHECK TABLE)", obj, dialect::checkTableStatement));
 		return menu;
 	}
 

@@ -2,7 +2,6 @@ package com.nureal.ide.ui;
 
 import com.nureal.ide.modulos.conexoes.dominio.contratos.ConexaoAtivaPort;
 import com.nureal.ide.core.log.AppLogger;
-import com.nureal.ide.modulos.metadados.dominio.contratos.MetadataRepository;
 import com.nureal.ide.modulos.metadados.dominio.entidades.TableDetails;
 
 import javax.swing.SwingWorker;
@@ -19,36 +18,21 @@ import java.util.concurrent.ConcurrentHashMap;
  * carregados sob demanda em segundo plano.
  *
  * Generaliza o antigo "fkCache" que existia so para o indicador de FK do
- * cabecalho: agora a MESMA chamada a {@link MetadataRepository#loadTableDetails}
+ * cabecalho: agora a MESMA chamada a {@code DatabaseDialect#loadTableDetails}
  * tambem alimenta o {@link ColumnMetadataPopup}, sem nenhum round-trip extra
  * ao banco. Cada tabela e carregada no maximo uma vez por sessao (por
- * schema+tabela); chamadas repetidas so leem o cache.
+ * schema+tabela); chamadas repetidas so leem o cache. Resolve o dialeto a
+ * partir do {@link ConexaoAtivaPort} recebido em cada chamada (nao guarda um
+ * {@code MetadataRepository} fixo) — assim duas conexoes simultaneas a
+ * bancos diferentes cada uma le metadados com o driver certo.
  */
 public final class TableMetadataCache {
 
     private final Map<String, TableDetails> cache = new ConcurrentHashMap<>();
     private final Set<String> loading = ConcurrentHashMap.newKeySet();
-    private final MetadataRepository metadataService;
-
-    public TableMetadataCache(MetadataRepository metadataService) {
-        this.metadataService = metadataService;
-    }
 
     private static String key(String schema, String table) {
         return ((schema == null ? "" : schema) + "." + table).toLowerCase(Locale.ROOT);
-    }
-
-    /**
-     * O {@link MetadataRepository} usado internamente por este cache — para
-     * quem so tem uma {@code ResultGrid}/{@code TableMetadataCache} a mao
-     * (sem referencia de volta a {@code MainWindow}) e precisa de uma
-     * chamada de metadados que este cache nao guarda (ex.: grafo de FK do
-     * SCHEMA inteiro, ver {@code RelationalExportDialog}) — evita passar
-     * mais um parametro por toda a cadeia {@code ResultGrid}/{@code
-     * ResultContextMenu} so para isso.
-     */
-    MetadataRepository metadataService() {
-        return metadataService;
     }
 
     /**
@@ -91,7 +75,11 @@ public final class TableMetadataCache {
             @Override
             protected TableDetails doInBackground() throws Exception {
                 Connection conn = connectionManager.getConnection();
-                return metadataService.loadTableDetails(conn, schema, table);
+                // Dialeto DESTA conexao (nao um MetadataRepository fixo
+                // guardado pelo cache): duas conexoes simultaneas a bancos
+                // diferentes cada uma le metadados do jeito certo (ver bug
+                // corrigido em ComposicaoRaiz/MainWindow#metadataService).
+                return connectionManager.dialect().loadTableDetails(conn, schema, table);
             }
 
             @Override

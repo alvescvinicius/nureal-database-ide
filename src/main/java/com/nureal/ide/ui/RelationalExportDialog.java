@@ -192,7 +192,7 @@ final class RelationalExportDialog {
                 protected String doInBackground() throws Exception {
                     Connection conn = connectionManager.getConnection();
                     DatabaseDialect dialect = connectionManager.dialect();
-                    List<SchemaForeignKey> grafo = metadataCache.metadataService().loadSchemaForeignKeys(conn, schema);
+                    List<SchemaForeignKey> grafo = dialect.loadSchemaForeignKeys(conn, schema);
                     RowFetcher fetcher = new JdbcRowFetcher(conn, dialect);
                     FecharDependenciasHandler.Resultado resultado = new FecharDependenciasHandler().fechar(grafo,
                             tabela, linhasSemente, incluirFilhos, fetcher);

@@ -164,7 +164,7 @@ final class TableDdlHierarchyDialog {
                 protected String doInBackground() throws Exception {
                     Connection conn = connectionManager.getConnection();
                     DatabaseDialect dialect = connectionManager.dialect();
-                    List<SchemaForeignKey> grafo = metadataCache.metadataService().loadSchemaForeignKeys(conn, schema);
+                    List<SchemaForeignKey> grafo = dialect.loadSchemaForeignKeys(conn, schema);
                     Set<String> tabelas = new FecharTabelasHandler().fechar(grafo, tableName, incluirFilhos);
                     List<String> ordem = new OrdenarTabelasHandler().ordenar(tabelas, grafo);
                     StringBuilder sb = new StringBuilder();

@@ -1,6 +1,7 @@
 package com.nureal.ide.modulos.conexoes.infraestrutura;
 import com.nureal.ide.modulos.conexoes.dominio.contratos.ConnectionRepository;
 import com.nureal.ide.modulos.conexoes.dominio.entidades.ConnectionProfile;
+import com.nureal.ide.modulos.dialeto.dominio.entidades.ProviderType;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -37,8 +38,9 @@ class ConnectionStoreTest {
 	void salvaERecarregaPerfisPreservandoTodosOsCampos(@TempDir Path dir) throws IOException {
 		ConnectionStore store = new ConnectionStore(dir.resolve("connections.conf"), identityCipher());
 		ConnectionProfile comSenha = new ConnectionProfile("prod", "db.exemplo.com", 3306, "app", "root", "s3nha",
-				true);
-		ConnectionProfile semSenha = new ConnectionProfile("dev", "localhost", 3306, "app", "root", "", false);
+				true, ProviderType.MYSQL);
+		ConnectionProfile semSenha = new ConnectionProfile("dev", "localhost", 3306, "app", "root", "", false,
+				ProviderType.MYSQL);
 
 		store.save(List.of(comSenha, semSenha));
 		List<ConnectionProfile> reloaded = store.load();
@@ -52,7 +54,7 @@ class ConnectionStoreTest {
 	void naoGravaSenhaQuandoSavePasswordEhFalso(@TempDir Path dir) throws IOException {
 		ConnectionStore store = new ConnectionStore(dir.resolve("connections.conf"), identityCipher());
 		ConnectionProfile semSalvarSenha = new ConnectionProfile("dev", "localhost", 3306, "app", "root",
-				"digitada-na-hora", false);
+				"digitada-na-hora", false, ProviderType.MYSQL);
 
 		store.save(List.of(semSalvarSenha));
 
@@ -64,7 +66,7 @@ class ConnectionStoreTest {
 		LocalVault vault = new LocalVault(dir.resolve(".connections.key"));
 		ConnectionStore store = new ConnectionStore(dir.resolve("connections.conf"), vault);
 		ConnectionProfile profile = new ConnectionProfile("prod", "db.exemplo.com", 3306, "app", "root", "s3nha",
-				true);
+				true, ProviderType.MYSQL);
 
 		store.save(List.of(profile));
 		List<ConnectionProfile> reloaded = store.load();

@@ -7,18 +7,22 @@ import com.nureal.ide.compartilhado.designsystem.dialog.DialogShell;
 
 import com.nureal.ide.modulos.conexoes.infraestrutura.ConnectionManager;
 import com.nureal.ide.modulos.conexoes.dominio.entidades.ConnectionProfile;
-import com.nureal.ide.modulos.dialeto.infraestrutura.MySqlDialect;
+import com.nureal.ide.modulos.dialeto.dominio.entidades.ProviderType;
+import com.nureal.ide.modulos.dialeto.infraestrutura.DriverRegistry;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
+import javax.swing.JComboBox;
 import javax.swing.JDialog;
+import javax.swing.JFileChooser;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JPasswordField;
 import javax.swing.JTextField;
 import javax.swing.SwingWorker;
+import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.Component;
 import java.awt.FlowLayout;
 import java.awt.Font;
@@ -27,6 +31,7 @@ import java.awt.GridBagLayout;
 import java.awt.Insets;
 import java.awt.Window;
 import java.sql.SQLException;
+import java.util.Arrays;
 import java.util.function.Predicate;
 
 /**
@@ -60,21 +65,34 @@ public final class ConnectionEditDialog {
      *                  duas conexoes com o mesmo nome aparecem ambas como
      *                  conectadas quando so uma esta).
      */
-    public static ConnectionProfile show(Component parent, ConnectionProfile existing, Predicate<String> nameTaken) {
-        return show(parent, existing, nameTaken, null);
+    public static ConnectionProfile show(Component parent, DriverRegistry driverRegistry, ConnectionProfile existing,
+            Predicate<String> nameTaken) {
+        return show(parent, driverRegistry, existing, nameTaken, null);
     }
 
     /**
-     * Igual a {@link #show(Component, ConnectionProfile, Predicate)}, so com
-     * o titulo do dialogo customizavel — usado por
+     * Igual a {@link #show(Component, DriverRegistry, ConnectionProfile, Predicate)},
+     * so com o titulo do dialogo customizavel — usado por
      * {@code ConnectionsPanel#onDuplicate}, onde {@code existing} nao e
      * {@code null} (os campos vem preenchidos com a copia) mas o dialogo
      * NAO esta editando a conexao original, entao "Editar conexao" seria
      * enganoso. {@code titleOverride} nulo cai no titulo padrao de sempre
      * ("Nova conexao"/"Editar conexao" conforme {@code existing}).
+     *
+     * @param driverRegistry usado so pelo botao "Testar conexao" (ver
+     *                       {@link #buildTestRow}) — resolve o
+     *                       {@code DatabaseDialect} certo em vez de
+     *                       instanciar {@code MySqlDialect} direto (achado
+     *                       numa auditoria de arquitetura: era o UNICO
+     *                       outro lugar do app, alem do composition root,
+     *                       que fazia isso). Hoje so MySQL esta registrado,
+     *                       entao o comportamento e identico ao anterior —
+     *                       mas quando este formulario ganhar um seletor de
+     *                       banco, o teste ja vai resolver pelo driver
+     *                       escolhido, nao mais um hardcoded.
      */
-    public static ConnectionProfile show(Component parent, ConnectionProfile existing, Predicate<String> nameTaken,
-            String titleOverride) {
+    public static ConnectionProfile show(Component parent, DriverRegistry driverRegistry, ConnectionProfile existing,
+            Predicate<String> nameTaken, String titleOverride) {
         ConnectionProfile base = (existing != null) ? existing : ConnectionProfile.mysqlDefault();
         Window owner = (DialogUtil.owner(parent) instanceof Window w) ? w : null;
         String title = (titleOverride != null) ? titleOverride
@@ -83,12 +101,45 @@ public final class ConnectionEditDialog {
         DialogShell shell = DialogShell.create(owner, title, JDialog.ModalityType.APPLICATION_MODAL);
         JDialog dialog = shell.dialog();
 
+        ProviderType[] supported = Arrays.stream(ProviderType.values())
+                .filter(driverRegistry::isSupported)
+                .toArray(ProviderType[]::new);
+        JComboBox<ProviderType> providerCombo = new JComboBox<>(supported);
+        providerCombo.setSelectedItem(base.provider());
+        providerCombo.setRenderer((list, value, index, isSelected, cellHasFocus) -> {
+            JLabel label = new JLabel(providerLabel(value));
+            if (isSelected) {
+                label.setOpaque(true);
+                label.setBackground(list.getSelectionBackground());
+                label.setForeground(list.getSelectionForeground());
+            }
+            return label;
+        });
+
         JTextField name = new JTextField(base.name(), 22);
         JTextField host = new JTextField(base.host(), 22);
         JTextField port = new JTextField(String.valueOf(base.port()), 22);
         JTextField schema = new JTextField(base.schema(), 22);
         JTextField user = new JTextField(base.user(), 22);
         JPasswordField password = new JPasswordField(base.password(), 22);
+
+        // Ao trocar de banco, sugere a porta padrao do novo banco — so
+        // quando a porta ainda esta em um dos defaults conhecidos (nunca
+        // sobrescreve uma porta que o usuario ja customizou de proposito).
+        // SQLite nao tem porta (arquivo local, sem servidor): limpa o campo
+        // em vez de escrever um numero sem sentido — em branco, o proprio
+        // "Salvar" trata como 3306 (ver parsePortStrict), inofensivo porque
+        // SqliteDialect.buildJdbcUrl nem olha pra porta.
+        providerCombo.addActionListener(e -> {
+            ProviderType selected = (ProviderType) providerCombo.getSelectedItem();
+            String current = port.getText().trim();
+            boolean atKnownDefault = current.isEmpty()
+                    || current.equals(String.valueOf(defaultPort(ProviderType.MYSQL)))
+                    || current.equals(String.valueOf(defaultPort(ProviderType.POSTGRESQL)));
+            if (atKnownDefault) {
+                port.setText(selected == ProviderType.SQLITE ? "" : String.valueOf(defaultPort(selected)));
+            }
+        });
         // Texto corrigido: a senha (junto com o resto do arquivo de conexoes)
         // e cifrada de verdade com AES-256/GCM pelo LocalVault antes de ir
         // para o disco (ver ConnectionStore) — a rotulagem antiga
@@ -104,20 +155,65 @@ public final class ConnectionEditDialog {
         c.anchor = GridBagConstraints.WEST;
         c.fill = GridBagConstraints.HORIZONTAL;
 
+        // SQLite: "Host" vira o caminho do arquivo .db — dois botoes
+        // deixam escolher um arquivo EXISTENTE (JFileChooser em modo abrir)
+        // ou apontar pra um NOVO (modo salvar, aceita digitar um nome que
+        // ainda nao existe; o arquivo so e criado de fato quando a conexao
+        // abre pela primeira vez, o SQLite cria sozinho). So aparecem
+        // quando o banco selecionado e SQLite (ver providerCombo listener
+        // logo abaixo) — nos outros bancos "Host" continua um campo de
+        // texto livre, sem sentido escolher por um seletor de arquivo.
+        JButton browseExisting = new JButton("Selecionar...");
+        JButton browseNew = new JButton("Criar novo...");
+        browseExisting.addActionListener(e -> {
+            java.io.File chosen = chooseSqliteFile(dialog, host.getText().trim(), false);
+            if (chosen != null) {
+                host.setText(chosen.getAbsolutePath());
+            }
+        });
+        browseNew.addActionListener(e -> {
+            java.io.File chosen = chooseSqliteFile(dialog, host.getText().trim(), true);
+            if (chosen != null) {
+                host.setText(chosen.getAbsolutePath());
+            }
+        });
+        JPanel hostRow = new JPanel(new java.awt.BorderLayout(Spacing.SM, 0));
+        hostRow.setOpaque(false);
+        hostRow.add(host, java.awt.BorderLayout.CENTER);
+        JPanel sqliteButtons = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+        sqliteButtons.setOpaque(false);
+        sqliteButtons.add(browseExisting);
+        sqliteButtons.add(browseNew);
+        hostRow.add(sqliteButtons, java.awt.BorderLayout.EAST);
+
         int row = 0;
+        addRow(form, c, row++, "Banco:", providerCombo);
         addRow(form, c, row++, "Nome:", name);
-        addRow(form, c, row++, "Host:", host);
+        JLabel hostLabel = addRow(form, c, row++, hostLabelFor((ProviderType) providerCombo.getSelectedItem()),
+                hostRow);
         addRow(form, c, row++, "Porta:", port);
         addRow(form, c, row++, "Schema (vazio = listar todos):", schema);
         addRow(form, c, row++, "Usuario:", user);
         addRow(form, c, row++, "Senha:", password);
+
+        // SQLite: "Host" vira o caminho do arquivo .db (ver PostgresDialect
+        // e SqliteDialect — cada driver reinterpreta os mesmos campos do
+        // formulario do seu jeito); rotulo muda e os botoes de
+        // selecionar/criar arquivo so aparecem nesse caso.
+        Runnable applyProviderVisibility = () -> {
+            ProviderType selected = (ProviderType) providerCombo.getSelectedItem();
+            hostLabel.setText(hostLabelFor(selected));
+            sqliteButtons.setVisible(selected == ProviderType.SQLITE);
+        };
+        applyProviderVisibility.run();
+        providerCombo.addActionListener(e -> applyProviderVisibility.run());
 
         c.gridx = 1;
         c.gridy = row++;
         c.weightx = 1;
         form.add(savePassword, c);
 
-        JPanel testRow = buildTestRow(host, port, schema, user, password, dialog);
+        JPanel testRow = buildTestRow(host, port, schema, user, password, dialog, driverRegistry, providerCombo);
         c.gridx = 0;
         c.gridy = row++;
         c.gridwidth = 2;
@@ -132,7 +228,8 @@ public final class ConnectionEditDialog {
         JButton save = new JButton("Salvar");
         save.addActionListener(e -> {
             ConnectionProfile resolved = validateAndBuild(
-                    dialog, name, host, port, schema, user, password, savePassword, nameTaken);
+                    dialog, name, host, port, schema, user, password, savePassword, nameTaken,
+                    (ProviderType) providerCombo.getSelectedItem());
             if (resolved != null) {
                 result[0] = resolved;
                 dialog.dispose();
@@ -159,7 +256,7 @@ public final class ConnectionEditDialog {
      */
     private static ConnectionProfile validateAndBuild(JDialog dialog, JTextField name, JTextField host,
             JTextField port, JTextField schema, JTextField user, JPasswordField password, JCheckBox savePassword,
-            Predicate<String> nameTaken) {
+            Predicate<String> nameTaken, ProviderType provider) {
         // Limpa destaques de erro de uma tentativa anterior antes de validar
         // de novo — sem isto um campo ficava "vermelho" para sempre mesmo
         // depois do usuario corrigir.
@@ -210,17 +307,17 @@ public final class ConnectionEditDialog {
                 schema.getText().trim(),
                 user.getText().trim(),
                 new String(password.getPassword()),
-                savePassword.isSelected());
+                savePassword.isSelected(),
+                provider);
     }
 
     /**
      * Botao "Testar conexao": abre uma conexao de verdade com os dados JA
      * DIGITADOS no formulario (sem precisar salvar antes) e mostra o
      * resultado ao lado, sem fechar o dialogo — pedido explicito para
-     * conferir host/porta/usuario/senha antes de confirmar. So MySQL por
-     * enquanto (mesmo dialeto unico usado no resto do app hoje, ver
-     * MainWindow#dialect); quando entrar um segundo banco, este dialeto fixo
-     * vira um parametro escolhido pelo usuario no formulario.
+     * conferir host/porta/usuario/senha antes de confirmar. Usa o driver do
+     * banco selecionado em {@code providerCombo} no momento do clique (nao
+     * mais MySQL fixo).
      * <p>
      * Largura do rotulo de status TRAVADA em HTML (ver {@link #htmlStatus}) —
      * sem isto, o texto ("Testando conexao...", ou pior, uma mensagem de erro
@@ -235,7 +332,8 @@ public final class ConnectionEditDialog {
      * JOptionPane, ja que agora {@code dialog} e a propria janela).
      */
     private static JPanel buildTestRow(JTextField host, JTextField port, JTextField schema, JTextField user,
-            JPasswordField password, JDialog dialog) {
+            JPasswordField password, JDialog dialog, DriverRegistry driverRegistry,
+            JComboBox<ProviderType> providerCombo) {
         JButton testButton = new JButton("Testar conexao");
         JLabel testStatus = new JLabel(htmlStatus(" "));
         testStatus.setFont(testStatus.getFont().deriveFont(Font.PLAIN, 11f));
@@ -251,15 +349,16 @@ public final class ConnectionEditDialog {
             testStatus.setText(htmlStatus("Testando conexao..."));
             repack(dialog);
 
+            ProviderType selectedProvider = (ProviderType) providerCombo.getSelectedItem();
             ConnectionProfile candidate = new ConnectionProfile(
                     "test", host.getText().trim(), parsePortLenient(port), schema.getText().trim(),
-                    user.getText().trim(), new String(password.getPassword()), false);
+                    user.getText().trim(), new String(password.getPassword()), false, selectedProvider);
 
             new SwingWorker<String, Void>() {
                 @Override
                 protected String doInBackground() {
                     try {
-                        ConnectionManager.testConnection(new MySqlDialect(), candidate);
+                        ConnectionManager.testConnection(driverRegistry.driverFor(candidate.provider()), candidate);
                         return null;
                     } catch (SQLException ex) {
                         return ex.getMessage();
@@ -329,7 +428,70 @@ public final class ConnectionEditDialog {
         }
     }
 
-    private static void addRow(JPanel form, GridBagConstraints c, int row, String label, Component field) {
+    /** Rotulo amigavel do combo "Banco:" — nomes de exibicao, nao os identificadores internos do enum. */
+    private static String providerLabel(ProviderType provider) {
+        return switch (provider) {
+            case MYSQL -> "MySQL";
+            case POSTGRESQL -> "PostgreSQL";
+            case ORACLE -> "Oracle";
+            case SQLITE -> "SQLite";
+        };
+    }
+
+    /** Porta padrao de cada banco — usada so para sugerir ao trocar o combo "Banco:" (ver construcao do form). SQLite nao usa porta (0 nunca chega a aparecer no campo — ver o listener de troca de banco). */
+    private static int defaultPort(ProviderType provider) {
+        return switch (provider) {
+            case MYSQL -> 3306;
+            case POSTGRESQL -> 5432;
+            case ORACLE -> 1521;
+            case SQLITE -> 0;
+        };
+    }
+
+    /** Rotulo do campo "Host" — vira "Arquivo do banco (.db):" pro SQLite, onde o campo guarda um caminho de arquivo, nao um host de rede (ver {@code SqliteDialect#buildJdbcUrl}). */
+    private static String hostLabelFor(ProviderType provider) {
+        return provider == ProviderType.SQLITE ? "Arquivo do banco (.db):" : "Host:";
+    }
+
+    /**
+     * Seletor de arquivo pro campo "Host" quando o banco e SQLite.
+     * {@code forNewFile=false} abre em modo "escolher um arquivo
+     * EXISTENTE" ({@link JFileChooser#showOpenDialog}); {@code true} abre
+     * em modo "salvar" ({@link JFileChooser#showSaveDialog}), que aceita
+     * digitar um nome que AINDA NAO EXISTE — o arquivo em si so e criado de
+     * verdade quando a conexao abrir pela primeira vez (o proprio SQLite
+     * cria um arquivo novo e vazio ao conectar numa URL cujo caminho nao
+     * existe ainda), este dialogo so escolhe o CAMINHO. Comeca na pasta do
+     * caminho ja digitado no campo (ou na pasta do usuario, se em branco);
+     * completa a extensao {@code .db} quando o usuario digita um nome sem
+     * extensao no modo "criar novo".
+     */
+    private static java.io.File chooseSqliteFile(JDialog dialog, String currentPath, boolean forNewFile) {
+        JFileChooser fc = new JFileChooser();
+        fc.setDialogTitle(forNewFile ? "Criar novo banco SQLite" : "Selecionar banco SQLite existente");
+        fc.setFileFilter(new FileNameExtensionFilter("Banco de dados SQLite (*.db, *.sqlite, *.sqlite3)",
+                "db", "sqlite", "sqlite3", "db3"));
+        java.io.File current = (currentPath == null || currentPath.isBlank() || currentPath.equals(":memory:"))
+                ? null
+                : new java.io.File(currentPath);
+        if (current != null && current.getParentFile() != null && current.getParentFile().isDirectory()) {
+            fc.setCurrentDirectory(current.getParentFile());
+            fc.setSelectedFile(current);
+        } else {
+            fc.setCurrentDirectory(new java.io.File(System.getProperty("user.home")));
+        }
+        int result = forNewFile ? fc.showSaveDialog(dialog) : fc.showOpenDialog(dialog);
+        if (result != JFileChooser.APPROVE_OPTION) {
+            return null;
+        }
+        java.io.File chosen = fc.getSelectedFile();
+        if (forNewFile && !chosen.getName().contains(".")) {
+            chosen = new java.io.File(chosen.getParentFile(), chosen.getName() + ".db");
+        }
+        return chosen;
+    }
+
+    private static JLabel addRow(JPanel form, GridBagConstraints c, int row, String label, Component field) {
         JLabel l = new JLabel(label);
         Typography.tertiary(l);
         c.gridx = 0;
@@ -339,5 +501,6 @@ public final class ConnectionEditDialog {
         c.gridx = 1;
         c.weightx = 1;
         form.add(field, c);
+        return l;
     }
 }

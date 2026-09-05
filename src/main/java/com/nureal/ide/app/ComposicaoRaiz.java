@@ -8,14 +8,13 @@ import com.nureal.ide.modulos.conexoes.dominio.contratos.ConnectionRepository;
 import com.nureal.ide.modulos.conexoes.infraestrutura.ConnectionManager;
 import com.nureal.ide.modulos.conexoes.infraestrutura.ConnectionStore;
 import com.nureal.ide.modulos.dialeto.dominio.contratos.DatabaseDialect;
-import com.nureal.ide.modulos.dialeto.infraestrutura.MySqlDialect;
+import com.nureal.ide.modulos.dialeto.dominio.entidades.ProviderType;
+import com.nureal.ide.modulos.dialeto.infraestrutura.DriverRegistry;
 import com.nureal.ide.modulos.historico.infraestrutura.ExecutionHistoryStore;
 import com.nureal.ide.modulos.historico.infraestrutura.SavedQueryStore;
 import com.nureal.ide.modulos.historico.infraestrutura.SessionStore;
-import com.nureal.ide.modulos.metadados.dominio.contratos.MetadataRepository;
 import com.nureal.ide.modulos.metadados.infraestrutura.MetadataCache;
 import com.nureal.ide.modulos.autocomplete.infraestrutura.SqlCompletionProviderRSyntax;
-import com.nureal.ide.modulos.metadados.infraestrutura.MetadataService;
 import com.nureal.ide.ui.TableMetadataCache;
 
 /**
@@ -42,11 +41,24 @@ import com.nureal.ide.ui.TableMetadataCache;
  */
 public final class ComposicaoRaiz {
 
-	private final DatabaseDialect dialect = new MySqlDialect();
+	// Registry (nao mais "new MySqlDialect()" direto aqui): unico ponto que
+	// sabe montar um DatabaseDialect por ProviderType — ver javadoc de
+	// DriverRegistry. So MySQL esta registrado hoje (mesmo comportamento de
+	// antes, zero mudanca visivel), mas um driver novo (Postgres/Oracle/
+	// SQLite) so precisa se registrar AQUI, sem tocar em mais nenhum lugar
+	// do app.
+	private final DriverRegistry driverRegistry = new DriverRegistry();
+	private final DatabaseDialect dialect = driverRegistry.driverFor(ProviderType.MYSQL);
 	private final ConexaoAtivaPort bootstrapConnectionManager = new ConnectionManager(dialect);
-	private final MetadataRepository metadataService = new MetadataService(dialect);
 	private final MetadataCache metadataCache = new MetadataCache();
-	private final TableMetadataCache tableMetadataCache = new TableMetadataCache(metadataService);
+	// Sem MetadataRepository fixo: cada chamada resolve o DatabaseDialect da
+	// CONEXAO ativa no momento (ver MainWindow#metadataService), nao um
+	// dialeto global preso a MYSQL — do contrario, toda leitura de metadados
+	// (inclusive ao ABRIR uma conexao SQLite/Postgres) rodaria a consulta do
+	// MySQL contra o banco errado (bug real: "no such table:
+	// information_schema.COLUMNS" ao conectar num arquivo SQLite, porque
+	// este campo ainda usava sempre o MySqlDialect fixo aqui).
+	private final TableMetadataCache tableMetadataCache = new TableMetadataCache();
 	private final SqlCompletionProviderRSyntax completionProvider = new SqlCompletionProviderRSyntax(dialect.keywords());
 	private final ConnectionRepository connectionStore = new ConnectionStore();
 	private final SessionStore sessionStore = new SessionStore();
@@ -59,12 +71,12 @@ public final class ComposicaoRaiz {
 		return dialect;
 	}
 
-	public ConexaoAtivaPort bootstrapConnectionManager() {
-		return bootstrapConnectionManager;
+	public DriverRegistry driverRegistry() {
+		return driverRegistry;
 	}
 
-	public MetadataRepository metadataService() {
-		return metadataService;
+	public ConexaoAtivaPort bootstrapConnectionManager() {
+		return bootstrapConnectionManager;
 	}
 
 	public MetadataCache metadataCache() {
