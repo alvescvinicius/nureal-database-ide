@@ -5,8 +5,11 @@ import java.awt.Component;
 import java.awt.Dimension;
 
 import javax.swing.BorderFactory;
+import javax.swing.DefaultCellEditor;
 import javax.swing.JTable;
+import javax.swing.JTextField;
 import javax.swing.table.DefaultTableCellRenderer;
+import javax.swing.table.TableCellEditor;
 import javax.swing.table.TableModel;
 
 /**
@@ -66,6 +69,28 @@ public final class MetadataTableStyle {
         table.getTableHeader().setForeground(GridTheme.HEADER_FOREGROUND);
         table.getTableHeader().setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, GridTheme.HEADER_BORDER));
         table.setDefaultRenderer(Object.class, new ZebraTextRenderer());
+    }
+
+    /**
+     * Editor de texto que entra em modo de edicao no PRIMEIRO clique (nao no
+     * segundo) — {@code DefaultCellEditor} construido com {@code JTextField}
+     * vem com {@code clickCountToStart=2} por padrao (o mesmo editor usado
+     * para {@code JComboBox} ja vem com 1, e por isso a coluna "Tipo" das
+     * grades editaveis do assistente de DDL sempre pareceu normal, so as
+     * colunas de texto simples exigiam clicar duas vezes). Bug relatado pelo
+     * usuario: "clico numa celula da grade e ela nao aceita edicao" — um
+     * clique so, sem saber que precisava de dois, parece "nao faz nada".
+     * <p>
+     * Aplicar via {@code table.getColumnModel().getColumn(idx).setCellEditor(...)}
+     * nas colunas de TEXTO editaveis de qualquer tabela de metadados nova
+     * (ver {@code DdlAssistantDialog}) — colunas booleanas (checkbox) e
+     * combo box ja iniciam com 1 clique por padrao do Swing, nao precisam
+     * disto.
+     */
+    public static TableCellEditor singleClickTextEditor() {
+        DefaultCellEditor editor = new DefaultCellEditor(new JTextField());
+        editor.setClickCountToStart(1);
+        return editor;
     }
 
     /** Zebra simples (linhas pares/impares no mesmo tom da grade de resultados). */

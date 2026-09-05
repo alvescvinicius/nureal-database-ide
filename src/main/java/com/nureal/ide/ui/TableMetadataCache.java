@@ -39,6 +39,19 @@ public final class TableMetadataCache {
     }
 
     /**
+     * O {@link MetadataRepository} usado internamente por este cache — para
+     * quem so tem uma {@code ResultGrid}/{@code TableMetadataCache} a mao
+     * (sem referencia de volta a {@code MainWindow}) e precisa de uma
+     * chamada de metadados que este cache nao guarda (ex.: grafo de FK do
+     * SCHEMA inteiro, ver {@code RelationalExportDialog}) — evita passar
+     * mais um parametro por toda a cadeia {@code ResultGrid}/{@code
+     * ResultContextMenu} so para isso.
+     */
+    MetadataRepository metadataService() {
+        return metadataService;
+    }
+
+    /**
      * Descarta tudo o que ja foi carregado. Chamado apos DDL estrutural (ou
      * refresh manual do navegador de objetos): sem isto, a tela de
      * propriedades de uma tabela alterada (colunas/PK/indices/FKs) continua

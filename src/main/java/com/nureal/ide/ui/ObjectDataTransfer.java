@@ -5,6 +5,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import javax.swing.JFileChooser;
 import javax.swing.JOptionPane;
@@ -14,6 +15,8 @@ import com.nureal.ide.modulos.backupexportacao.dominio.contratos.BackupPort;
 import com.nureal.ide.modulos.backupexportacao.infraestrutura.MySqlDumpRunner;
 import com.nureal.ide.modulos.backupexportacao.dominio.CsvUtil;
 import com.nureal.ide.modulos.metadados.dominio.entidades.ColumnInfo;
+import com.nureal.ide.modulos.metadados.dominio.entidades.TableDetails;
+import com.nureal.ide.modulos.populador.infraestrutura.ForeignKeySampler;
 
 /**
  * Backup/restauracao (mysqldump) e importacao de CSV — extraido do
@@ -249,6 +252,50 @@ final class ObjectDataTransfer {
                     onErr.accept(cause instanceof Exception e2 ? e2 : ex);
                 } catch (Exception ex) {
                     onErr.accept(ex);
+                }
+            }
+        }.execute();
+    }
+
+    /**
+     * "Popular tabela...": carrega estrutura+amostra de FK ANTES de abrir o
+     * dialogo — mesmo padrao de {@code ObjectDdlActions#alterTable} (o
+     * SwingWorker busca o que precisa, o dialogo so aparece com os dados
+     * prontos, sem precisar carregar nada em segundo plano DEPOIS de
+     * aberto).
+     */
+    void populateTable(ObjectExplorerController.ObjNode obj) {
+        if (owner.activeWorkspace() == null || !owner.activeWorkspace().mgr.isConnected()
+                || owner.currentSchema() == null) {
+            owner.statusBar().setText(" Abra um esquema antes de popular uma tabela.");
+            return;
+        }
+        Conexao ws = owner.activeWorkspace();
+        String schemaName = owner.currentSchema().name();
+        String tableName = obj.name();
+        owner.statusBar().setText(" Carregando estrutura de \"" + tableName + "\"...");
+        new SwingWorker<Object[], Void>() {
+            @Override
+            protected Object[] doInBackground() throws Exception {
+                Connection conn = ws.mgr.getConnection();
+                TableDetails details = owner.metadataService().loadTableDetails(conn, schemaName, tableName);
+                Map<String, List<Object>> amostrasFk = ForeignKeySampler.amostrar(conn, owner.dialect(),
+                        details.foreignKeys());
+                return new Object[] { details, amostrasFk };
+            }
+
+            @Override
+            @SuppressWarnings("unchecked")
+            protected void done() {
+                try {
+                    Object[] result = get();
+                    TableDetails details = (TableDetails) result[0];
+                    Map<String, List<Object>> amostrasFk = (Map<String, List<Object>>) result[1];
+                    owner.statusBar().setText(" Pronto.");
+                    TablePopulatorDialog.open(owner, ws, schemaName, tableName, details, amostrasFk);
+                } catch (Exception ex) {
+                    owner.showError("Falha ao carregar estrutura da tabela", ex);
+                    owner.statusBar().setText(" Falha ao carregar estrutura da tabela.");
                 }
             }
         }.execute();

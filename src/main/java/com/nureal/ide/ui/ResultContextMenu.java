@@ -45,11 +45,22 @@ final class ResultContextMenu {
 
     static void install(JTable table, ColumnSorter sorter, ColumnHeaderRenderer.MetadataSource metadataSource,
             FilterController filter, Runnable exportExcel) {
-        install(table, sorter, metadataSource, filter, exportExcel, null);
+        install(table, sorter, metadataSource, filter, exportExcel, null, null);
     }
 
     static void install(JTable table, ColumnSorter sorter, ColumnHeaderRenderer.MetadataSource metadataSource,
             FilterController filter, Runnable exportExcel, FkOriginHandler fkOrigin) {
+        install(table, sorter, metadataSource, filter, exportExcel, fkOrigin, null);
+    }
+
+    /**
+     * @param relationalExport "Exportar com dependencias (INSERT)..." (ver
+     *                         {@code RelationalExportDialog}) — {@code null}
+     *                         quando o chamador nao tem conexao/schema a mao
+     *                         pra oferecer essa opcao (item some do menu).
+     */
+    static void install(JTable table, ColumnSorter sorter, ColumnHeaderRenderer.MetadataSource metadataSource,
+            FilterController filter, Runnable exportExcel, FkOriginHandler fkOrigin, Runnable relationalExport) {
         table.addMouseListener(new MouseAdapter() {
             @Override
             public void mousePressed(MouseEvent e) {
@@ -70,7 +81,7 @@ final class ResultContextMenu {
                 if (row >= 0 && col >= 0 && !table.isCellSelected(row, col)) {
                     table.changeSelection(row, col, false, false);
                 }
-                buildMenu(table, sorter, metadataSource, filter, exportExcel, row, col, fkOrigin)
+                buildMenu(table, sorter, metadataSource, filter, exportExcel, row, col, fkOrigin, relationalExport)
                         .show(table, e.getX(), e.getY());
             }
         });
@@ -87,6 +98,12 @@ final class ResultContextMenu {
     static void installOnRowGutter(javax.swing.JList<String> gutter, JTable table, ColumnSorter sorter,
             ColumnHeaderRenderer.MetadataSource metadataSource, FilterController filter, Runnable exportExcel,
             SelectionManager selection) {
+        installOnRowGutter(gutter, table, sorter, metadataSource, filter, exportExcel, selection, null);
+    }
+
+    static void installOnRowGutter(javax.swing.JList<String> gutter, JTable table, ColumnSorter sorter,
+            ColumnHeaderRenderer.MetadataSource metadataSource, FilterController filter, Runnable exportExcel,
+            SelectionManager selection, Runnable relationalExport) {
         gutter.addMouseListener(new MouseAdapter() {
             @Override
             public void mousePressed(MouseEvent e) {
@@ -106,7 +123,7 @@ final class ResultContextMenu {
                 if (row >= 0 && !table.isRowSelected(row)) {
                     selection.selectRow(row, false, false);
                 }
-                buildMenu(table, sorter, metadataSource, filter, exportExcel, row, -1, null)
+                buildMenu(table, sorter, metadataSource, filter, exportExcel, row, -1, null, relationalExport)
                         .show(gutter, e.getX(), e.getY());
             }
         });
@@ -121,6 +138,12 @@ final class ResultContextMenu {
      */
     static void installOnCorner(javax.swing.JComponent corner, JTable table, ColumnSorter sorter,
             ColumnHeaderRenderer.MetadataSource metadataSource, FilterController filter, Runnable exportExcel) {
+        installOnCorner(corner, table, sorter, metadataSource, filter, exportExcel, null);
+    }
+
+    static void installOnCorner(javax.swing.JComponent corner, JTable table, ColumnSorter sorter,
+            ColumnHeaderRenderer.MetadataSource metadataSource, FilterController filter, Runnable exportExcel,
+            Runnable relationalExport) {
         corner.addMouseListener(new MouseAdapter() {
             @Override
             public void mousePressed(MouseEvent e) {
@@ -139,7 +162,7 @@ final class ResultContextMenu {
                 if (table.getRowCount() > 0 && table.getSelectedRowCount() < table.getRowCount()) {
                     table.selectAll();
                 }
-                buildMenu(table, sorter, metadataSource, filter, exportExcel, -1, -1, null)
+                buildMenu(table, sorter, metadataSource, filter, exportExcel, -1, -1, null, relationalExport)
                         .show(corner, e.getX(), e.getY());
             }
         });
@@ -147,7 +170,7 @@ final class ResultContextMenu {
 
     private static JPopupMenu buildMenu(JTable table, ColumnSorter sorter,
             ColumnHeaderRenderer.MetadataSource metadataSource, FilterController filter,
-            Runnable exportExcel, int row, int col, FkOriginHandler fkOrigin) {
+            Runnable exportExcel, int row, int col, FkOriginHandler fkOrigin, Runnable relationalExport) {
         JPopupMenu menu = new JPopupMenu();
 
         // "Copiar" (atalho direto, o mais usado) fica solto no topo; as
@@ -170,6 +193,15 @@ final class ResultContextMenu {
         exportMenu.add(item("Excel...", exportExcel));
         exportMenu.add(item("CSV...", () -> exportToFile(table, "csv")));
         exportMenu.add(item("JSON...", () -> exportToFile(table, "json")));
+        if (relationalExport != null) {
+            exportMenu.addSeparator();
+            // So faz sentido com pelo menos 1 linha selecionada (ver
+            // RelationalExportDialog — parte das linhas selecionadas pra
+            // fechar as dependencias de FK a partir delas).
+            JMenuItem relExportItem = item("Com dependencias (INSERT)...", relationalExport);
+            relExportItem.setEnabled(table.getSelectedRowCount() > 0);
+            exportMenu.add(relExportItem);
+        }
         menu.add(exportMenu);
         menu.addSeparator();
 

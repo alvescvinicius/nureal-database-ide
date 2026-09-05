@@ -134,6 +134,17 @@ public interface DatabaseDialect {
     String quoteIdentifier(String ident);
 
     /**
+     * Amostra ALEATORIA de ate {@code limit} valores de {@code column} numa
+     * tabela — usado pelo Populador de Tabelas para sortear valores de FK
+     * ja existentes na tabela pai (nunca cria linha nova nela, ver
+     * {@code modulos.populador}). Identificadores ja devem sair envolvidos
+     * em {@link #quoteIdentifier} pela implementacao; sem parametro (?),
+     * ja que tabela/coluna nunca sao entrada de usuario livre neste fluxo
+     * (vem de metadados do proprio schema).
+     */
+    String randomSampleQuery(String table, String column, int limit);
+
+    /**
      * Comando para criar um novo esquema (banco). {@code name} ja deve vir
      * validado/limpo pelo chamador (ver {@code MainWindow#createSchema}) — o
      * identificador e apenas envolvido em aspas seguras via

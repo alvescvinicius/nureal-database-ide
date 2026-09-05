@@ -133,8 +133,23 @@ final class ObjectTreeCellRenderer extends DefaultTreeCellRenderer {
      * selecao — usado so pela linha do schema, que precisa saber sua propria
      * largura em {@link #paintComponent} pra desenhar a setinha na ponta
      * direita (ver {@link #SCHEMA_SWITCH_ICON_SIZE}).
+     * <p>
+     * {@code setPreferredSize(null)} SEMPRE primeiro, antes de ler
+     * {@link #getPreferredSize()}: este renderer e uma UNICA instancia
+     * reaproveitada para TODAS as linhas da arvore (padrao normal de
+     * {@code TreeCellRenderer}) — uma chamada anterior de
+     * {@code setPreferredSize(new Dimension(...))} (linha de baixo) FIXA
+     * esse valor explicito no componente, e {@code getPreferredSize()}
+     * continua devolvendo ele intacto em QUALQUER linha seguinte, mesmo com
+     * texto diferente/maior, ate alguem limpar o override — sem isto, a
+     * largura "natural" de uma linha com nome comprido nunca era medida de
+     * verdade (ficava presa na largura da ULTIMA linha que tinha passado por
+     * aqui antes dela), truncando o texto com "..." mesmo com espaco de
+     * sobra pra crescer — bug relatado pelo usuario com captura de tela
+     * (nomes de tabela cortados na arvore de Objetos).
      */
     private void applyRowBackground(JTree tree, boolean selected, boolean stretchWidth, int row) {
+        setPreferredSize(null);
         Color bg = backgroundFor(selected, tree, row);
         if (bg == null) {
             setOpaque(false);

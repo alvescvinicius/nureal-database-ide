@@ -23,6 +23,7 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -86,6 +87,35 @@ final class ResultsAreaController {
 	private List<QueryResult> lastResults = new ArrayList<>();
 	private final Map<SqlEditorPane, List<QueryResult>> resultsByTab = new HashMap<>();
 	private final List<SqlExecutionEngine.ResultCursor> openCursors = new ArrayList<>();
+	/**
+	 * Callback que atualiza o contador "N linhas carregadas" da
+	 * {@link ResultStatusBar} de CADA resultado — guardado aqui (nao so
+	 * local a {@link #buildGridPanel}) pra {@link #exportAfterEnsuringLoaded}/
+	 * {@link #loadAllSequentially} conseguirem repassar pro {@link #loadAll}
+	 * mesmo sendo chamados de fora do escopo onde a grade foi montada (menu
+	 * de contexto da aba, "Exportar todos"). Sem isto, o "carregar tudo"
+	 * disparado por um export rodava do mesmo jeito, so que com um
+	 * {@code Runnable} vazio no lugar — o contador da barra de status
+	 * ficava PARADO durante a carga inteira (bug relatado pelo usuario:
+	 * "não mostrou que estava carregando, os números não mudavam no
+	 * contador"), apesar da grade em si ir preenchendo normalmente por
+	 * baixo (o {@code TableModel} atualiza sozinho, independente deste
+	 * callback). Identidade (nao {@code equals()}) de proposito: mesma
+	 * instancia de {@link QueryResult} associada sempre ao MESMO callback,
+	 * mesmo que o valor dos campos coincida por acaso com outro resultado.
+	 */
+	private final Map<QueryResult, Runnable> statusRefreshByResult = new IdentityHashMap<>();
+	/**
+	 * Cursores com um {@link #loadAll} JA EM ANDAMENTO agora — impede um
+	 * segundo {@link #loadAll} concorrente do MESMO cursor (ex.: usuario
+	 * clica "Carregar tudo" na barra de status e, quase ao mesmo tempo,
+	 * confirma "carregar tudo antes de exportar" no dialogo de
+	 * {@link #exportAfterEnsuringLoaded}) — duas leituras do MESMO
+	 * {@code ResultSet}/{@code Statement} em threads diferentes ao mesmo
+	 * tempo corromperiam as duas (mesma restricao ja documentada em
+	 * {@code ConnectionManager}/{@link #loadAllSequentially}).
+	 */
+	private final Set<SqlExecutionEngine.ResultCursor> loadingCursors = new HashSet<>();
 
 	ResultsAreaController(MainWindow owner) {
 		this.owner = owner;
@@ -182,21 +212,24 @@ final class ResultsAreaController {
 	}
 
 	/** Empilha o conteudo dos resultados e um overlay de "carregando" por cima. */
-	/** Margem (px) do card flutuante "Executando..." ate o canto da area de resultados — ver {@link #overlayStack}. */
+	/** Margem MINIMA (px) do card flutuante "Executando..." ate a borda da area de resultados — ver {@link #overlayStack}. */
 	private static final int EXECUTING_CARD_MARGIN_PX = 16;
 
 	/**
 	 * Empilha o conteudo dos resultados com o indicador "Executando..." POR
-	 * CIMA, mas so do TAMANHO PROPRIO dele (canto inferior direito), nao mais
-	 * cobrindo a area de resultados inteira — antes disto, rodar uma
-	 * instrucao bloqueava clique em QUALQUER coisa na area de resultados
-	 * (outras abas de resultado ja prontas, botoes do rodape da grade, etc.),
-	 * nao so na consulta que estava rodando de fato (bug relatado pelo
-	 * usuario: "cobre a area toda, nao so a consulta atual"). Como o card
-	 * agora so ocupa o proprio tamanho preferido (nao mais a tela inteira),
-	 * cliques fora dele chegam direto no conteudo por tras — sem precisar de
-	 * nenhum "bloqueio" de mouse explicito (ver {@link #buildResultsOverlay},
-	 * que tinha um {@code MouseAdapter} vazio so pra isso, removido).
+	 * CIMA, mas so do TAMANHO PROPRIO dele — CENTRALIZADO na area de
+	 * resultados (pedido explicito do usuario: "deveria ficar centralizado
+	 * no resultados, nao no canto"; antes ficava fixo no canto inferior
+	 * direito), nao mais cobrindo a area de resultados inteira — antes
+	 * DISTO (revisao anterior), rodar uma instrucao bloqueava clique em
+	 * QUALQUER coisa na area de resultados (outras abas de resultado ja
+	 * prontas, botoes do rodape da grade, etc.), nao so na consulta que
+	 * estava rodando de fato (bug relatado pelo usuario: "cobre a area
+	 * toda, nao so a consulta atual"). Como o card so ocupa o proprio
+	 * tamanho preferido (nao a tela inteira), cliques fora dele chegam
+	 * direto no conteudo por tras — sem precisar de nenhum "bloqueio" de
+	 * mouse explicito (ver {@link #buildResultsOverlay}, que tinha um
+	 * {@code MouseAdapter} vazio so pra isso, removido).
 	 */
 	private JComponent overlayStack(JComponent content) {
 		resultsOverlay = buildResultsOverlay();
@@ -207,8 +240,8 @@ final class ResultsAreaController {
 			public void doLayout() {
 				content.setBounds(0, 0, getWidth(), getHeight());
 				Dimension pref = resultsOverlay.getPreferredSize();
-				int x = Math.max(EXECUTING_CARD_MARGIN_PX, getWidth() - pref.width - EXECUTING_CARD_MARGIN_PX);
-				int y = Math.max(EXECUTING_CARD_MARGIN_PX, getHeight() - pref.height - EXECUTING_CARD_MARGIN_PX);
+				int x = Math.max(EXECUTING_CARD_MARGIN_PX, (getWidth() - pref.width) / 2);
+				int y = Math.max(EXECUTING_CARD_MARGIN_PX, (getHeight() - pref.height) / 2);
 				resultsOverlay.setBounds(x, y, pref.width, pref.height);
 			}
 		};
@@ -406,6 +439,7 @@ final class ResultsAreaController {
 			return;
 		}
 		for (QueryResult r : results) {
+			statusRefreshByResult.remove(r);
 			SqlExecutionEngine.ResultCursor cursor = r.cursor();
 			if (cursor != null && !cursor.exhausted) {
 				cursor.exhausted = true;
@@ -440,6 +474,10 @@ final class ResultsAreaController {
 		grid.keepSelectionOnFocusTo(resultStatusBar.asComponent());
 		Runnable refresh = () -> resultStatusBar.refresh(r.model().getRowCount(), r.execMs(), r.fetchMs(),
 				r.cursor() != null && !r.cursor().exhausted);
+		// Guardado pra #exportAfterEnsuringLoaded/#loadAllSequentially
+		// conseguirem repassar pro #loadAll mesmo chamando de fora deste
+		// metodo — ver javadoc de #statusRefreshByResult.
+		statusRefreshByResult.put(r, refresh);
 		// Um UNICO "ocupado" compartilhado entre paginacao (auto-scroll/
 		// "carregar tudo") e a contagem exata (ver #showExactTotal) — as duas
 		// leem do MESMO Statement/Connection deste resultado (ver
@@ -494,8 +532,9 @@ final class ResultsAreaController {
 		resultStatusBar.onShowExactTotal(() -> showExactTotal(r, resultStatusBar, busy));
 		resultStatusBar.onExportThis(() -> exportResult(r));
 		resultStatusBar.onExportAll(this::exportAll);
-		resultStatusBar.onExportCsv(() -> exportResultCsv(grid.table(), r.title()));
-		resultStatusBar.onExportJson(() -> exportResultJson(grid.table(), r.title()));
+		resultStatusBar.onExportCsv(() -> exportAfterEnsuringLoaded(r, () -> exportResultCsv(grid.table(), r.title())));
+		resultStatusBar.onExportJson(
+				() -> exportAfterEnsuringLoaded(r, () -> exportResultJson(grid.table(), r.title())));
 		grid.onSelectionSummary(resultStatusBar::updateSelectionSummary);
 		refresh.run();
 
@@ -891,8 +930,31 @@ final class ResultsAreaController {
 	 * tamanho de UM bloco.
 	 */
 	private SwingWorker<Void, Void> loadAll(QueryResult r, Runnable refresh) {
+		return loadAll(r, refresh, null);
+	}
+
+	/**
+	 * Mesma coisa que {@link #loadAll(QueryResult, Runnable)}, mas com um
+	 * callback extra {@code onFinished} — rodado no fim de {@code done()}
+	 * (cancelado, com erro ou concluido, sempre), DEPOIS de {@code refresh}.
+	 * Usado por {@link #exportAfterEnsuringLoaded} pra so exportar DEPOIS
+	 * que o carregamento completo (pedido pelo usuario antes de exportar)
+	 * de fato terminar — {@code null} quando ninguem precisa saber (uso
+	 * normal do botao "Carregar tudo", ver o outro overload).
+	 */
+	private SwingWorker<Void, Void> loadAll(QueryResult r, Runnable refresh, Runnable onFinished) {
 		SqlExecutionEngine.ResultCursor c = r.cursor();
-		if (c == null || c.exhausted) {
+		if (c == null || c.exhausted || !loadingCursors.add(c)) {
+			// !loadingCursors.add(c): ja tinha um "carregar tudo" deste MESMO
+			// cursor em andamento (ver javadoc de #loadingCursors) — nao
+			// inicia uma segunda leitura concorrente. onFinished ainda roda
+			// (ex.: o export nao pode ficar esperando pra sempre), mas o
+			// resultado exportado pode nao estar 100% completo neste caso
+			// raro de dois gatilhos quase simultaneos — aceito em troca de
+			// nunca corromper o Statement/ResultSet compartilhado.
+			if (onFinished != null) {
+				onFinished.run();
+			}
 			return null;
 		}
 		owner.statusBar().setText(" Carregando todas as linhas...");
@@ -948,7 +1010,15 @@ final class ResultsAreaController {
 				c.exhausted = true;
 				c.close();
 				openCursors.remove(c);
+				loadingCursors.remove(c);
 				if (!stillOpen) {
+					// Aba fechada durante o carregamento: mesmo assim avisa
+					// quem estava esperando (ver #exportAfterEnsuringLoaded) —
+					// sem isto, um "sim, carregar tudo antes de exportar"
+					// nunca terminaria se a aba fosse fechada no meio.
+					if (onFinished != null) {
+						onFinished.run();
+					}
 					return;
 				}
 				if (cancelled) {
@@ -964,6 +1034,9 @@ final class ResultsAreaController {
 					}
 				}
 				refresh.run();
+				if (onFinished != null) {
+					onFinished.run();
+				}
 			}
 		};
 		worker.execute();
@@ -1006,13 +1079,61 @@ final class ResultsAreaController {
 					"Exportar para Excel", JOptionPane.INFORMATION_MESSAGE);
 			return;
 		}
-		File file = owner.chooseSaveFile(r.title());
-		if (file != null) {
-			List<ExcelExporter.TableSheet> sheets = new ArrayList<>();
-			sheets.add(new ExcelExporter.TableSheet(r.title(), r.model()));
-			sheets.add(instructionsSheet(List.of(r)));
-			owner.doExport(sheets, file);
+		exportAfterEnsuringLoaded(r, () -> {
+			File file = owner.chooseSaveFile(r.title());
+			if (file != null) {
+				List<ExcelExporter.TableSheet> sheets = new ArrayList<>();
+				sheets.add(new ExcelExporter.TableSheet(r.title(), r.model()));
+				sheets.add(instructionsSheet(List.of(r)));
+				owner.doExport(sheets, file);
+			}
+		});
+	}
+
+	/**
+	 * Se {@code r} ainda tiver linhas nao carregadas (cursor de paginacao
+	 * aberto — ver {@link SqlExecutionEngine.ResultCursor}), pergunta ANTES
+	 * de exportar se o usuario quer o resultado COMPLETO — pedido explicito
+	 * do usuario: "quando eu for exportar um resultado que não tiver sido
+	 * carregado totalmente no grid perguntar se quero exportar o resultado
+	 * completo... se sim exportar todos os resultados carregados". Sem
+	 * isto, exportar um resultado grande (paginado) so levava as primeiras
+	 * paginas ja carregadas na tela, sem nenhum aviso de que faltava
+	 * linha.
+	 * <p>
+	 * "Sim" reusa {@link #loadAll} (mesmo caminho do botao "Carregar tudo"
+	 * da barra de status do resultado) e so chama {@code doExport} quando
+	 * TERMINAR (concluido, cancelado ou com erro — ver o {@code onFinished}
+	 * de {@link #loadAll(QueryResult, Runnable, Runnable)}, exporta o que
+	 * tiver conseguido carregar ate ali). "Nao" exporta so o que ja estava
+	 * carregado, sem perguntar de novo. Ja totalmente carregado (cursor
+	 * nulo/esgotado): exporta direto, sem perguntar nada.
+	 */
+	private void exportAfterEnsuringLoaded(QueryResult r, Runnable doExport) {
+		SqlExecutionEngine.ResultCursor cursor = r.cursor();
+		if (cursor == null || cursor.exhausted) {
+			doExport.run();
+			return;
 		}
+		int choice = JOptionPane.showConfirmDialog(owner,
+				"Este resultado ainda nao foi totalmente carregado (" + r.model().getRowCount()
+						+ " linha(s) ate agora).\n\nExportar o resultado COMPLETO? Isso carrega todas as linhas "
+						+ "restantes antes de exportar (pode demorar em resultados grandes).",
+				"Exportar resultado", JOptionPane.YES_NO_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE);
+		if (choice == JOptionPane.CANCEL_OPTION || choice == JOptionPane.CLOSED_OPTION) {
+			return;
+		}
+		if (choice == JOptionPane.NO_OPTION) {
+			doExport.run(); // so o que ja estava carregado, sem carregar o resto
+			return;
+		}
+		loadAll(r, refreshFor(r), doExport);
+	}
+
+	/** {@code refresh} de verdade da {@link ResultStatusBar} de {@code r}, se a grade ainda existir — ver {@link #statusRefreshByResult}. */
+	private Runnable refreshFor(QueryResult r) {
+		Runnable refresh = statusRefreshByResult.get(r);
+		return refresh != null ? refresh : () -> { };
 	}
 
 	/**
@@ -1074,16 +1195,65 @@ final class ResultsAreaController {
 					"Exportar para Excel", JOptionPane.INFORMATION_MESSAGE);
 			return;
 		}
-		File file = owner.chooseSaveFile(r.title());
-		if (file != null) {
-			List<ExcelExporter.TableSheet> sheets = new ArrayList<>();
-			sheets.add(new ExcelExporter.TableSheet(r.title(), r.model()));
-			sheets.add(instructionsSheet(List.of(r)));
-			owner.doExport(sheets, file);
-		}
+		exportAfterEnsuringLoaded(r, () -> {
+			File file = owner.chooseSaveFile(r.title());
+			if (file != null) {
+				List<ExcelExporter.TableSheet> sheets = new ArrayList<>();
+				sheets.add(new ExcelExporter.TableSheet(r.title(), r.model()));
+				sheets.add(instructionsSheet(List.of(r)));
+				owner.doExport(sheets, file);
+			}
+		});
 	}
 
 	private void exportAll() {
+		List<QueryResult> pending = new ArrayList<>();
+		for (QueryResult r : lastResults) {
+			if (r.model() != null && r.cursor() != null && !r.cursor().exhausted) {
+				pending.add(r);
+			}
+		}
+		if (pending.isEmpty()) {
+			doExportAll();
+			return;
+		}
+		int choice = JOptionPane.showConfirmDialog(owner,
+				pending.size() + " resultado(s) desta lista ainda nao foram totalmente carregados.\n\n"
+						+ "Exportar TODOS completos? Isso carrega as linhas restantes de cada um antes de "
+						+ "exportar (pode demorar em resultados grandes).",
+				"Exportar todos", JOptionPane.YES_NO_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE);
+		if (choice == JOptionPane.CANCEL_OPTION || choice == JOptionPane.CLOSED_OPTION) {
+			return;
+		}
+		if (choice == JOptionPane.NO_OPTION) {
+			doExportAll(); // so o que ja estava carregado em cada aba, sem carregar o resto
+			return;
+		}
+		loadAllSequentially(pending, 0, this::doExportAll);
+	}
+
+	/**
+	 * Carrega, UM DE CADA VEZ (nao em paralelo), o restante de cada
+	 * resultado pendente de {@code #exportAll} — varios cursores desta
+	 * lista costumam compartilhar a MESMA {@link Connection} do terminal
+	 * (todas as instrucoes de uma execucao rodam na conexao do terminal —
+	 * ver {@code MainWindow#terminalConnection}), e JDBC nao e seguro para
+	 * uso concorrente na mesma conexao (mesma restricao ja documentada em
+	 * {@code ConnectionManager}) — ler dois cursores dela ao MESMO tempo em
+	 * threads diferentes corromperia os dois. Ao esgotar a lista, roda
+	 * {@code onAllDone} (exporta de fato).
+	 */
+	private void loadAllSequentially(List<QueryResult> pending, int index, Runnable onAllDone) {
+		if (index >= pending.size()) {
+			onAllDone.run();
+			return;
+		}
+		QueryResult r = pending.get(index);
+		loadAll(r, refreshFor(r), () -> loadAllSequentially(pending, index + 1, onAllDone));
+	}
+
+	/** Monta e salva de fato o Excel com todas as abas — ver {@link #exportAll}. */
+	private void doExportAll() {
 		List<ExcelExporter.TableSheet> sheets = new ArrayList<>();
 		for (QueryResult r : lastResults) {
 			if (r.model() != null) {

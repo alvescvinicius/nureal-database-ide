@@ -16,12 +16,17 @@ import java.awt.Desktop;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
 import java.awt.Point;
+import java.awt.RenderingHints;
 import java.awt.Window;
 import java.awt.event.ActionEvent;
+import java.awt.event.ComponentAdapter;
+import java.awt.event.ComponentEvent;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
@@ -45,10 +50,11 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CancellationException;
 import java.util.function.BiConsumer;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 import javax.swing.AbstractAction;
 import javax.swing.BorderFactory;
-import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.ButtonGroup;
 import javax.swing.DefaultListCellRenderer;
@@ -339,6 +345,8 @@ public class MainWindow extends JFrame {
 	private static final class TerminalExecution {
 		final SwingWorker<List<QueryResult>, Void> worker;
 		volatile Statement statement;
+		/** Marcado por {@link #executeWithReconnect} quando esta execucao precisou reconectar no meio — ver seu javadoc de done() em {@link #runStatements}. */
+		volatile boolean reconnected;
 
 		TerminalExecution(SwingWorker<List<QueryResult>, Void> worker) {
 			this.worker = worker;
@@ -924,50 +932,82 @@ public class MainWindow extends JFrame {
 	// ---------- Barras ----------
 
 	/**
-	 * Todo o conteudo da barra (Executar..Salvar, conexao, busca+navegacao+
-	 * icones) vive num UNICO bloco (ver {@link #buildToolbarContentBlock})
-	 * que fica CENTRALIZADO na barra inteira, com um espacador elastico de
-	 * cada lado — pedido explicito do usuario apos ver a barra maximizada:
-	 * "as opcoes ficam nos cantos, elas deveriam estar centralizadas...
-	 * funcionalidades da esquerda | conexoes | funcionalidades da
-	 * direita... espaco sobrando" (nos dois cantos, nao no meio). Os dois
-	 * espacadores tem peso IGUAL (weightx=1.0), entao a sobra de espaco em
-	 * janelas largas/maximizadas vai IGUALMENTE pros dois lados — o bloco
-	 * inteiro fica no meio de verdade, nao so "perto" do meio.
+	 * Largura MAXIMA (px, ja escalada por zoom/compacto — ver {@link #scaledPx})
+	 * que a pilula de conexao pode atingir no meio da barra, ver
+	 * {@link #resizeConnectionPill}. Sem um teto, um monitor desktop bem
+	 * largo esticaria a pilula quase pela LARGURA TODA da barra — a maior
+	 * parte dela vazia (so o nome/usuario ficam a esquerda dentro dela, ver
+	 * {@link ConnectionStatusCard}), o que foge do "premium"/proporcionado
+	 * que o resto do Design System pede (ver DESIGN_SYSTEM.md secao 4). O
+	 * piso equivalente ja existe do lado oposto: {@link ConnectionStatusCard#MIN_WIDTH_PX}.
+	 */
+	private static final int CONNECTION_PILL_MAX_WIDTH = 560;
+
+	/**
+	 * {@code | Executar..Salvar | Conexao (expansivel, com teto) | Busca+
+	 * navegacao+icones | } — grupo de acoes fixo na PONTA ESQUERDA, icones
+	 * utilitarios fixos na PONTA DIREITA, e a pilula de conexao no meio
+	 * ocupando o espaco sobrando entre os dois — layout pedido explicito do
+	 * usuario com referencia visual (wireframe: icones nas pontas, seletor
+	 * de conexao largo no centro).
 	 * <p>
-	 * Isto NAO reabre o bug antigo ("Executar sumindo em janela estreita",
-	 * ja relatado antes): o bloco em si e uma UNICA coluna de peso ZERO no
-	 * GridBagLayout — o algoritmo so tenta encolhe-la depois de encolher os
-	 * DOIS espacadores ate o minimo (zero) primeiro, entao ela so perde
-	 * espaco quando a janela fica mais estreita que a largura MINIMA do
-	 * bloco inteiro (bem raro agora que Formatar/Explicar/Salvar/navegacao
-	 * viraram icones — ver #addRunFormatExplainButtons/#addSaveButton).
-	 * Nesse caso extremo, o bloco (FlowLayout por dentro) corta pela
-	 * DIREITA primeiro (icones de navegacao), nunca escondendo Executar
-	 * (o primeiro filho, mais a esquerda).
+	 * Antes disto o bloco inteiro (3 grupos com FlowLayout) ficava
+	 * CENTRALIZADO na barra com um espacador elastico IGUAL de cada lado
+	 * (pedido antigo, agora substituido por este). "Executar" continua
+	 * protegido de sumir em janela estreita pelo mesmo motivo estrutural
+	 * de antes: e o primeiro grupo, peso ZERO, nunca encolhido pelo
+	 * GridBagLayout antes da coluna do meio (que tem peso e pode encolher
+	 * ate seu minimo primeiro).
+	 * <p>
+	 * A coluna do meio NAO usa {@code fill=HORIZONTAL} (testado manualmente
+	 * fora do app: {@code GridBagLayout} ignora {@code getMaximumSize()}
+	 * quando o fill esta ativo, esticando o componente pra largura inteira
+	 * da coluna mesmo com um teto definido) — em vez disso,
+	 * {@link #resizeConnectionPill} recalcula a largura desejada da pilula a
+	 * CADA resize da barra (fill=NONE, largura vem de
+	 * {@code setPreferredSize} manual), dentro de
+	 * [{@link ConnectionStatusCard#MIN_WIDTH_PX}, {@link #CONNECTION_PILL_MAX_WIDTH}].
+	 * Isso cobre tanto desktop largo (pilula para de crescer no teto, sobra
+	 * vira respiro visual) quanto notebook estreito (pilula encolhe ate o
+	 * piso antes de qualquer grupo de icones perder espaco).
 	 */
 	private JComponent buildToolbar() {
 		JPanel mainBar = new JPanel(new GridBagLayout());
 		mainBar.setOpaque(false);
-		mainBar.setBorder(BorderFactory.createEmptyBorder(Spacing.SM, 0, Spacing.SM, Spacing.MD));
+		mainBar.setBorder(BorderFactory.createEmptyBorder(Spacing.SM, Spacing.MD, Spacing.SM, Spacing.MD));
+
+		JComponent leftGroup = buildCoreActionsGroup();
+		JComponent connectionBar = buildConnectionBar();
+		JComponent rightGroup = buildTrailingGroup();
 
 		GridBagConstraints gbc = new GridBagConstraints();
 		gbc.gridy = 0;
 		gbc.weighty = 1.0;
 		gbc.fill = GridBagConstraints.NONE;
-		gbc.anchor = GridBagConstraints.CENTER;
+		gbc.anchor = GridBagConstraints.WEST;
 
 		gbc.gridx = 0;
-		gbc.weightx = 1.0;
-		mainBar.add(Box.createHorizontalGlue(), gbc);
+		gbc.weightx = 0.0;
+		mainBar.add(leftGroup, gbc);
 
 		gbc.gridx = 1;
-		gbc.weightx = 0.0;
-		mainBar.add(buildToolbarContentBlock(), gbc);
+		gbc.weightx = 1.0;
+		gbc.anchor = GridBagConstraints.CENTER;
+		gbc.insets = new Insets(0, Spacing.MD, 0, Spacing.MD);
+		mainBar.add(connectionBar, gbc);
 
 		gbc.gridx = 2;
-		gbc.weightx = 1.0;
-		mainBar.add(Box.createHorizontalGlue(), gbc);
+		gbc.weightx = 0.0;
+		gbc.insets = new Insets(0, 0, 0, 0);
+		gbc.anchor = GridBagConstraints.EAST;
+		mainBar.add(rightGroup, gbc);
+
+		mainBar.addComponentListener(new ComponentAdapter() {
+			@Override
+			public void componentResized(ComponentEvent e) {
+				resizeConnectionPill(mainBar, leftGroup, connectionBar, rightGroup);
+			}
+		});
 
 		toolbarBar = mainBar;
 		// initWorkspaces() ja rodou (ver buildEditorArea) quando chegamos aqui,
@@ -978,26 +1018,30 @@ public class MainWindow extends JFrame {
 	}
 
 	/**
-	 * {@code | Executar..Salvar | Conexao | Busca+navegacao+icones | } — os
-	 * 3 grupos lado a lado, com o MESMO respiro (Spacing.MD) entre eles,
-	 * ver {@link #buildToolbar} pra como o bloco inteiro e centralizado.
-	 * Gap MD aqui (entre GRUPOS distintos) vs. Gap SM dentro de cada grupo
-	 * (ver #addRunFormatExplainButtons/#buildTrailingGroup) — pedido
-	 * explicito do usuario ("uniformização de distância e alinhamento dos
-	 * icones... deixem padronizados, não permita desalinhamento"): so 2
-	 * valores de espacamento no total, cada um usado SEMPRE no mesmo nivel
-	 * (entre grupos vs. dentro de um grupo), nunca misturado.
+	 * Recalcula a largura PREFERIDA da pilula de conexao (nao a de
+	 * {@code mainBar} inteira) — chamado a cada {@code componentResized} da
+	 * barra (ver {@link #buildToolbar}), cobrindo tanto o resize manual da
+	 * janela quanto a troca inicial de "nao mostrada" pra "mostrada"
+	 * (dispara resize tambem). So aplica {@code setPreferredSize}+
+	 * {@code revalidate} quando o alvo MUDA — evita revalidar a barra
+	 * inteira sem necessidade a cada pixel de resize.
 	 */
-	private JPanel buildToolbarContentBlock() {
-		JPanel block = new JPanel(new FlowLayout(FlowLayout.CENTER, Spacing.MD, 0));
-		block.setOpaque(false);
-		block.add(buildCoreActionsGroup());
-		block.add(buildConnectionBar());
-		block.add(buildTrailingGroup());
-		return block;
+	private void resizeConnectionPill(JPanel mainBar, JComponent leftGroup, JComponent connectionBar,
+			JComponent rightGroup) {
+		Insets barInsets = mainBar.getInsets();
+		int available = mainBar.getWidth() - barInsets.left - barInsets.right
+				- leftGroup.getPreferredSize().width - rightGroup.getPreferredSize().width
+				- (2 * Spacing.MD);
+		int target = Math.max(ConnectionStatusCard.MIN_WIDTH_PX,
+				Math.min(scaledPx(CONNECTION_PILL_MAX_WIDTH), available));
+		Dimension current = connectionBar.getPreferredSize();
+		if (current.width != target) {
+			connectionBar.setPreferredSize(new Dimension(target, current.height));
+			mainBar.revalidate();
+		}
 	}
 
-	/** Executar/Formatar/Explicar/Salvar — mesmo gap uniforme (Spacing.SM) entre CADA botao, ver javadoc de {@link #buildToolbarContentBlock}. */
+	/** Executar/Formatar/Explicar/Salvar — mesmo gap uniforme (Spacing.SM) entre CADA botao, ver javadoc de {@link #buildToolbar}. */
 	private JComponent buildCoreActionsGroup() {
 		JPanel group = new JPanel(new GridBagLayout());
 		group.setOpaque(false);
@@ -1031,11 +1075,28 @@ public class MainWindow extends JFrame {
 	 * usava Spacing.XS por dentro: duas inconsistencias diferentes na
 	 * MESMA fileira de icones, corrigidas aqui numa fileira so — pedido
 	 * explicito do usuario: "não permita desalinhamento").
+	 * <p>
+	 * Ordem dos 3 icones utilitarios (tema/resultados/layout) alinhada ao
+	 * wireframe de referencia (sol · paineis · engrenagem, da esquerda pra
+	 * direita) — busca continua primeiro, por nao ter equivalente no
+	 * wireframe (so um rascunho de proporcao, nao uma lista exaustiva de
+	 * funcionalidades).
 	 */
 	private JPanel buildTrailingGroup() {
 		JPanel trailing = new JPanel(new FlowLayout(FlowLayout.LEFT, Spacing.SM, 0));
 		trailing.setOpaque(false);
 		trailing.add(buildSearchIconButton());
+
+		// Icone inicial mostra a ACAO do botao (pra ONDE ele muda o tema), nao
+		// o tema atual — app arranca no tema escuro (ver App#main), entao o
+		// botao comeca oferecendo "mudar para claro" (icone de sol). O TIPO do
+		// icone muda conforme o tema (sol/lua), entao continua sendo
+		// resetado explicitamente em toggleTheme() — so a COR (MUTED_TEXT)
+		// precisava do fix generico, ja coberta por iconButton aqui tambem.
+		themeButton = Buttons.iconButton(IconType.THEME_LIGHT, 16, () -> GridTheme.MUTED_TEXT);
+		themeButton.setToolTipText("Alternar tema claro/escuro");
+		themeButton.addActionListener(e -> toggleTheme());
+		trailing.add(themeButton);
 
 		// Buttons.iconButton ja aplica styleIconButton E prende o icone a
 		// GridTheme.MUTED_TEXT (ver seu javadoc) — antes estes botoes eram
@@ -1060,17 +1121,6 @@ public class MainWindow extends JFrame {
 		layoutButton.setToolTipText("Layout, zoom e modo compacto");
 		layoutButton.addActionListener(e -> buildLayoutMenu().show(layoutButton, 0, layoutButton.getHeight()));
 		trailing.add(layoutButton);
-
-		// Icone inicial mostra a ACAO do botao (pra ONDE ele muda o tema), nao
-		// o tema atual — app arranca no tema escuro (ver App#main), entao o
-		// botao comeca oferecendo "mudar para claro" (icone de sol). O TIPO do
-		// icone muda conforme o tema (sol/lua), entao continua sendo
-		// resetado explicitamente em toggleTheme() — so a COR (MUTED_TEXT)
-		// precisava do fix generico, ja coberta por iconButton aqui tambem.
-		themeButton = Buttons.iconButton(IconType.THEME_LIGHT, 16, () -> GridTheme.MUTED_TEXT);
-		themeButton.setToolTipText("Alternar tema claro/escuro");
-		themeButton.addActionListener(e -> toggleTheme());
-		trailing.add(themeButton);
 
 		return trailing;
 	}
@@ -2030,11 +2080,14 @@ public class MainWindow extends JFrame {
 	 * da barra de acoes ao lado do "Salvar", depois topo fixo da coluna da
 	 * sidebar (acima de "Objetos", alinhada com "Executar" acima das abas
 	 * do editor — "dois cabecalhos independentes") — e agora de volta pra
-	 * DENTRO da barra de acoes, desta vez no CENTRO dela (pedido explicito
-	 * do usuario: "conexoes precisa ir para o centro da toolbar"), ver
-	 * {@link #buildToolbar} pra como o centro e calculado (dois
-	 * espacadores elasticos, um de cada lado). Chamada de dentro de
-	 * {@link #buildToolbar()}, DEPOIS de {@link #buildLeftSide()} ja ter
+	 * DENTRO da barra de acoes, no CENTRO dela (pedido explicito do
+	 * usuario: "conexoes precisa ir para o centro da toolbar"), e desde a
+	 * revisao de layout com wireframe ("icones nas pontas, seletor largo no
+	 * centro") a pilula EXPANDE pra ocupar todo o espaco sobrando entre os
+	 * dois grupos de icones fixos — ver {@link #buildToolbar} pra como a
+	 * coluna do meio recebe {@code weightx=1.0}/{@code fill=HORIZONTAL}.
+	 * Chamada de dentro de {@link #buildToolbar()}, DEPOIS de
+	 * {@link #buildLeftSide()} ja ter
 	 * rodado (precisa de {@link #connectionsPanel} existente pro botao "+
 	 * Nova conexao" e pra seta abrir "Conexoes salvas" — ver
 	 * {@link #showConnectionsPopup}).
@@ -2249,6 +2302,18 @@ public class MainWindow extends JFrame {
 	private final class AnchoredPopup {
 		private JDialog window;
 		private long closedAt;
+		/**
+		 * Ultimo tamanho que o USUARIO escolheu arrastando o grip (ver
+		 * {@link #buildResizeGrip}), lembrado so nesta sessao (mesmo
+		 * principio de {@link #chatDockLoc}, nunca gravado em disco) —
+		 * pedido explicito do usuario apos ver nomes de tabela truncados
+		 * sem conseguir alargar o popup ("precisa melhorar a
+		 * visualizacao, redimensionamento, responsividade"). {@code null}
+		 * ate a primeira vez que o usuario arrasta o grip; ate la o popup
+		 * usa so o {@code setPreferredSize} que o chamador ja aplicava
+		 * (ver {@code #showObjectsPopup} e equivalentes).
+		 */
+		private Dimension userResizedSize;
 
 		boolean isOpen() {
 			return window != null && window.isShowing();
@@ -2306,7 +2371,16 @@ public class MainWindow extends JFrame {
 			popup.getRootPane().setWindowDecorationStyle(JRootPane.NONE);
 			popup.setLayout(new BorderLayout());
 			popup.add(content, BorderLayout.CENTER);
+			popup.add(buildResizeGrip(popup), BorderLayout.SOUTH);
 			popup.pack();
+			// So aplica um tamanho diferente do empacotado (que reflete o
+			// setPreferredSize de cada chamador — ver #showObjectsPopup e
+			// equivalentes) se o usuario ja tiver arrastado o grip antes
+			// nesta sessao — a primeira abertura sempre usa o padrao de
+			// cada painel.
+			if (userResizedSize != null) {
+				popup.setSize(userResizedSize);
+			}
 
 			Point anchorLoc = anchor.getLocationOnScreen();
 			if (placement == Placement.RIGHT) {
@@ -2339,6 +2413,9 @@ public class MainWindow extends JFrame {
 					if (window == popup) {
 						window = null;
 					}
+					// Lembra o tamanho ATUAL (arrastado ou nao) pra proxima
+					// abertura desta sessao — ver javadoc de userResizedSize.
+					userResizedSize = popup.getSize();
 					// O painel volta a nao ter pai nenhum ate a proxima
 					// abertura — remove-lo explicitamente evita mante-lo
 					// preso a uma janela ja descartada.
@@ -2354,6 +2431,62 @@ public class MainWindow extends JFrame {
 			if (window != null) {
 				window.dispose();
 			}
+		}
+
+		/**
+		 * Faixa fina no rodape do popup com um "grip" diagonal no canto
+		 * inferior direito (cursor de redimensionar, arrastavel) — o
+		 * {@code JDialog} e {@code setUndecorated(true)} (ver {@link #toggle}),
+		 * entao nao tem nenhuma borda nativa pra o usuario arrastar; sem
+		 * este grip o popup ficava PRESO no {@code setPreferredSize} que
+		 * cada chamador aplicava, mesmo quando o conteudo (ex.: nome de
+		 * tabela comprido na arvore de Objetos) precisava de mais espaco.
+		 */
+		private JComponent buildResizeGrip(JDialog popup) {
+			JComponent grip = new JComponent() {
+				private static final long serialVersionUID = 1L;
+
+				@Override
+				protected void paintComponent(Graphics g) {
+					Graphics2D g2 = (Graphics2D) g.create();
+					g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+					g2.setColor(GridTheme.MUTED_TEXT);
+					for (int i = 1; i <= 3; i++) {
+						int off = i * 4;
+						g2.drawLine(getWidth() - off, getHeight() - 2, getWidth() - 2, getHeight() - off);
+					}
+					g2.dispose();
+				}
+			};
+			grip.setPreferredSize(new Dimension(scaledPx(16), scaledPx(16)));
+			grip.setOpaque(false);
+			grip.setCursor(Cursor.getPredefinedCursor(Cursor.SE_RESIZE_CURSOR));
+			grip.setToolTipText("Arraste para redimensionar");
+
+			Point[] pressAnchor = new Point[1];
+			Dimension[] pressSize = new Dimension[1];
+			MouseAdapter dragHandler = new MouseAdapter() {
+				@Override
+				public void mousePressed(MouseEvent e) {
+					pressAnchor[0] = e.getLocationOnScreen();
+					pressSize[0] = popup.getSize();
+				}
+
+				@Override
+				public void mouseDragged(MouseEvent e) {
+					Point now = e.getLocationOnScreen();
+					int largura = Math.max(scaledPx(220), pressSize[0].width + (now.x - pressAnchor[0].x));
+					int altura = Math.max(scaledPx(200), pressSize[0].height + (now.y - pressAnchor[0].y));
+					popup.setSize(largura, altura);
+				}
+			};
+			grip.addMouseListener(dragHandler);
+			grip.addMouseMotionListener(dragHandler);
+
+			JPanel stripe = new JPanel(new FlowLayout(FlowLayout.RIGHT, 2, 0));
+			stripe.setOpaque(false);
+			stripe.add(grip);
+			return stripe;
 		}
 	}
 
@@ -4501,9 +4634,13 @@ public class MainWindow extends JFrame {
 					// "principal"): desde que a execucao passou a rodar numa
 					// conexao dedicada por terminal (ver #terminalConnection),
 					// trocar so a principal deixaria esta aba rodando no
-					// esquema errado.
-					terminalConnection(editor).setCatalog(schemaName);
-					return null;
+					// esquema errado. withReconnect: mesma reconexao
+					// transparente de #executeWithReconnect, pra uma conexao
+					// morta nao virar erro logo na troca de esquema.
+					return withReconnect(editor, NEVER_CANCELLED, conn -> {
+						conn.setCatalog(schemaName);
+						return null;
+					});
 				}
 
 				@Override
@@ -4522,9 +4659,13 @@ public class MainWindow extends JFrame {
 		new SwingWorker<SchemaInfo, Void>() {
 			@Override
 			protected SchemaInfo doInBackground() throws Exception {
-				Connection conn = terminalConnection(editor); // conexao DESTE terminal, nao a principal
-				conn.setCatalog(schemaName); // define o banco padrao (USE schema)
-				return metadataService.loadSchema(conn, schemaName);
+				// withReconnect: mesma reconexao transparente de
+				// #executeWithReconnect — conexao DESTE terminal, nao a
+				// principal (ver comentario equivalente acima).
+				return withReconnect(editor, NEVER_CANCELLED, conn -> {
+					conn.setCatalog(schemaName); // define o banco padrao (USE schema)
+					return metadataService.loadSchema(conn, schemaName);
+				});
 			}
 
 			@Override
@@ -4615,6 +4756,96 @@ public class MainWindow extends JFrame {
 		}
 	}
 
+	/**
+	 * Confere se {@code conn} morreu DE VERDADE (nao so uma excecao qualquer
+	 * na execucao) — usado por {@link #executeWithReconnect} pra decidir se
+	 * vale a pena reconectar e tentar de novo, ou se o erro e da propria
+	 * instrucao (sintaxe invalida, violacao de constraint etc., onde
+	 * reconectar so repetiria o MESMO erro). {@code Connection#isClosed()}
+	 * sozinho NAO detecta isso — so reflete um {@code close()} local
+	 * explicito, nao um socket derrubado pelo servidor (idle timeout, queda
+	 * de rede) — por isso {@code #terminalConnection} confiava nele e
+	 * devolvia uma conexao morta sem perceber. {@code isValid(int)} de fato
+	 * pinga o servidor (timeout curto, 2s, ja que isto roda em background —
+	 * ver os dois chamadores de {@link #executeWithReconnect}).
+	 */
+	private static boolean isConnectionLost(Connection conn) {
+		try {
+			return conn.isClosed() || !conn.isValid(2);
+		} catch (SQLException ex) {
+			return true;
+		}
+	}
+
+	/**
+	 * Acao contra uma {@link Connection} de terminal que pode falhar por ela
+	 * ter morrido — ver {@link #withReconnect}.
+	 */
+	@FunctionalInterface
+	private interface TerminalConnectionAction<T> {
+		T run(Connection conn) throws SQLException;
+	}
+
+	/**
+	 * Roda {@code action} na conexao deste terminal e, se ela tiver morrido
+	 * no meio (servidor derrubou por timeout/rede — ver
+	 * {@link #isConnectionLost}), reconecta uma unica vez de forma
+	 * TRANSPARENTE (fecha a conexao morta, empresta uma nova do pool via
+	 * {@link #terminalConnection}, roda a MESMA acao de novo na conexao
+	 * nova) em vez de propagar o erro — pedido explicito do usuario:
+	 * "quando uma conexao desconecta e rodo uma instrucao ela deveria
+	 * reconectar automaticamente sem eu tomar erro". A conexao nova fica
+	 * guardada em {@link #terminalConnections} normalmente, entao a proxima
+	 * acao desta aba ja reusa ela sem precisar reconectar de novo — cobre
+	 * tambem o "depois de executar reconectar sozinho" do pedido original.
+	 * Usado tanto por {@link #executeWithReconnect} (rodar as instrucoes)
+	 * quanto por {@link #switchCatalogThenRun} (trocar de esquema antes de
+	 * rodar) — os dois pontos desta janela que seguram e reusam a conexao
+	 * de um terminal entre chamadas.
+	 * <p>
+	 * So reconecta quando {@link #isConnectionLost} confirma a conexao
+	 * morta — uma acao que falhou por um motivo NORMAL (SQL invalido, FK
+	 * violada, esquema inexistente etc.) continua propagando o erro como
+	 * sempre, sem repetir (reconectar nao mudaria o resultado, so rodaria a
+	 * mesma acao invalida duas vezes). {@code isCancelled} (quando a acao
+	 * suporta cancelamento — ver {@link #executeWithReconnect}) tambem
+	 * impede a nova tentativa se o usuario ja cancelou nesse meio tempo.
+	 */
+	private <T> T withReconnect(SqlEditorPane editor, Supplier<Boolean> isCancelled,
+			TerminalConnectionAction<T> action) throws SQLException {
+		Connection conn = terminalConnection(editor);
+		try {
+			return action.run(conn);
+		} catch (SQLException ex) {
+			if (isCancelled.get() || !isConnectionLost(conn)) {
+				throw ex;
+			}
+			closeTerminalConnection(editor);
+			Connection fresh = terminalConnection(editor);
+			TerminalExecution exec = terminalExecutions.get(editor);
+			if (exec != null) {
+				exec.reconnected = true;
+			}
+			return action.run(fresh);
+		}
+	}
+
+	/** Roda {@code statements} nesta aba com reconexao transparente — ver {@link #withReconnect}. */
+	private List<QueryResult> executeWithReconnect(SqlEditorPane editor, List<String> statements,
+			Supplier<Boolean> isCancelled) throws SQLException {
+		Consumer<Statement> onStatementChange = st -> {
+			TerminalExecution exec = terminalExecutions.get(editor);
+			if (exec != null) {
+				exec.statement = st;
+			}
+		};
+		return withReconnect(editor, isCancelled,
+				conn -> SqlExecutionEngine.executeStatements(conn, statements, isCancelled, onStatementChange));
+	}
+
+	/** Nunca cancelavel — usado por {@link #withReconnect} nos chamadores sem SwingWorker cancelavel (ex.: {@link #switchCatalogThenRun}). */
+	private static final Supplier<Boolean> NEVER_CANCELLED = () -> false;
+
 	private void runStatements(SqlEditorPane editor) {
 		final List<String> statements = statementsToRun(editor);
 		if (statements == null) {
@@ -4625,22 +4856,24 @@ public class MainWindow extends JFrame {
 		SwingWorker<List<QueryResult>, Void> worker = new SwingWorker<>() {
 			@Override
 			protected List<QueryResult> doInBackground() throws SQLException {
-				return SqlExecutionEngine.executeStatements(terminalConnection(editor), statements,
-						this::isCancelled, st -> {
-							TerminalExecution exec = terminalExecutions.get(editor);
-							if (exec != null) {
-								exec.statement = st;
-							}
-						});
+				return executeWithReconnect(editor, statements, this::isCancelled);
 			}
 
 			@Override
 			protected void done() {
-				terminalExecutions.remove(editor);
+				TerminalExecution exec = terminalExecutions.remove(editor);
 				refreshRunButtonState();
 				refreshExecutingOverlay();
 				try {
 					handleStatementResults(editor, statements, get());
+					// Reconexao transparente (ver #executeWithReconnect):
+					// a instrucao rodou normalmente, mas avisa discretamente
+					// que a conexao tinha caido e foi renovada sozinha — sem
+					// isto pareceria magica (ou um bug de demora) o usuario
+					// nunca saber que a conexao antiga morreu no meio.
+					if (exec != null && exec.reconnected) {
+						statusBar.setText(" Conexao havia caido — reconectado automaticamente. Pronto.");
+					}
 				} catch (CancellationException ce) {
 					statusBar.setText(" Execucao cancelada.");
 				} catch (Exception ex) {

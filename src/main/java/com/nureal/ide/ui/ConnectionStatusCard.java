@@ -51,7 +51,8 @@ import com.nureal.ide.compartilhado.designsystem.NTheme;
  * um card mais rico com selos, depois uma barra esticada pela largura
  * inteira da janela, depois um pill centralizado numa linha propria, depois
  * embutida na barra de acoes do editor, depois topo fixo da sidebar — hoje
- * vive no CENTRO da barra de acoes (ver {@code MainWindow#buildToolbarContentBlock}).
+ * vive no CENTRO da barra de acoes, ESTICANDO para ocupar todo o espaco entre
+ * os grupos de icones fixos nas pontas (ver {@code MainWindow#buildToolbar}).
  * Continua sem inventar dado nenhum (ex.: uma referencia visual sugeriu em
  * algum momento um selo de charset, que o app nao consulta em lugar nenhum
  * hoje — ficou de fora, ver {@link #render}).
@@ -72,7 +73,7 @@ final class ConnectionStatusCard extends JPanel {
 	 * truncar, ver o resto do javadoc da classe) — este e so um PISO, nunca
 	 * um teto.
 	 */
-	private static final int MIN_WIDTH_PX = 260;
+	static final int MIN_WIDTH_PX = 260;
 
 	private enum State {
 		DISCONNECTED, CONNECTING, CONNECTED

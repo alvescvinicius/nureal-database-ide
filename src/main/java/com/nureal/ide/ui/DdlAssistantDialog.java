@@ -274,6 +274,13 @@ final class DdlAssistantDialog {
             newColumnsTable = MetadataTableStyle.createStyledTable(columnsModel);
             JTable table = newColumnsTable; // nome curto local, mesmo estilo do resto do metodo
             table.getColumnModel().getColumn(1).setCellEditor(new DefaultCellEditor(new JComboBox<>(TYPES)));
+            // Nome/Tamanho/Default/Comentario: mesmo editor de 1 clique da
+            // grade "Colunas atuais" (ver comentario equivalente em
+            // #buildExistingColumnsPanel) — mesma correcao, mesma grade de
+            // texto simples.
+            for (int col : new int[] { 0, 2, 6, 7 }) {
+                table.getColumnModel().getColumn(col).setCellEditor(MetadataTableStyle.singleClickTextEditor());
+            }
             table.putClientProperty("terminateEditOnFocusLost", Boolean.TRUE);
             // So agora as duas grades/modelos existem (a de "Colunas atuais" e
             // opcional, so no modo alterar) — o clipboard precisa dos dois pra
@@ -331,6 +338,15 @@ final class DdlAssistantDialog {
             existingColumnsTable = MetadataTableStyle.createStyledTable(existingColumnsModel);
             existingColumnsTable.getColumnModel().getColumn(1)
                     .setCellEditor(new DefaultCellEditor(new JComboBox<>(TYPES)));
+            // Tamanho/Default/Comentario: texto simples, precisam do editor de
+            // 1 clique (ver MetadataTableStyle#singleClickTextEditor) — sem
+            // isto exigiam 2 cliques (padrao do Swing pra JTextField), o que
+            // o usuario relatou como "clico na celula e ela nao aceita
+            // edicao" (o 1o clique so selecionava, sem abrir pra digitar).
+            for (int col : new int[] { 2, 6, 7 }) {
+                existingColumnsTable.getColumnModel().getColumn(col)
+                        .setCellEditor(MetadataTableStyle.singleClickTextEditor());
+            }
             existingColumnsTable.putClientProperty("terminateEditOnFocusLost", Boolean.TRUE);
             JScrollPane existingScroll = new JScrollPane(existingColumnsTable);
             existingScroll.setPreferredSize(new Dimension(880, 140));

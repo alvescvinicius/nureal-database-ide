@@ -270,7 +270,17 @@ final class ResultGrid extends JPanel {
             FkInspectorWindow.open(DialogUtil.owner(table), connectionManager, schema, metadataCache, scale,
                     colMeta.foreignKey(), localValues);
         };
-        ResultContextMenu.install(table, sorter, metadataSource, filterController, exportExcel, fkOrigin);
+        // "Exportar com dependencias (INSERT)...": so oferecido quando ha
+        // conexao/schema/cache de metadados a mao (sempre o caso pra um
+        // resultado de verdade — nulo so em cenarios de teste/preview sem
+        // conexao). Le a selecao ATUAL na hora do clique (nao na hora de
+        // montar este Runnable), ver RelationalExportDialog#open.
+        Runnable relationalExport = (connectionManager != null && schema != null)
+                ? () -> RelationalExportDialog.open(DialogUtil.owner(table), connectionManager, schema, metadataCache,
+                        table)
+                : null;
+        ResultContextMenu.install(table, sorter, metadataSource, filterController, exportExcel, fkOrigin,
+                relationalExport);
         // Mesmo fkOrigin do menu de contexto, so que disparado pelo icone de
         // FK pintado na propria celula (ver AbstractTypedCellRenderer/
         // SelectionManager#installFkOriginHandler) — pedido explicito do
@@ -283,7 +293,8 @@ final class ResultGrid extends JPanel {
             }
         });
         ResultHeaderContextMenu.install(table, header, sorter, metadataSource, filterController, this::persistLayout);
-        ResultContextMenu.installOnCorner(corner, table, sorter, metadataSource, filterController, exportExcel);
+        ResultContextMenu.installOnCorner(corner, table, sorter, metadataSource, filterController, exportExcel,
+                relationalExport);
 
         header.addMouseListener(new MouseAdapter() {
             @Override
@@ -296,7 +307,7 @@ final class ResultGrid extends JPanel {
         JScrollPane scroll = new JScrollPane(table);
         javax.swing.JList<String> rowGutter = RowNumberGutter.build(table, model, selection);
         ResultContextMenu.installOnRowGutter(rowGutter, table, sorter, metadataSource, filterController, exportExcel,
-                selection);
+                selection, relationalExport);
         scroll.setRowHeaderView(rowGutter);
         scroll.setCorner(JScrollPane.UPPER_LEFT_CORNER, corner);
         this.scrollPane = scroll;

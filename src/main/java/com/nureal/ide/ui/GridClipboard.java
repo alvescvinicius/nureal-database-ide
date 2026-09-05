@@ -263,7 +263,7 @@ final class GridClipboard {
      * devolve {@code null}: melhor perguntar do que arriscar gerar um
      * INSERT/UPDATE para a tabela errada.
      */
-    private static String detectSourceTable(JTable t) {
+    static String detectSourceTable(JTable t) {
         if (!(t.getModel() instanceof ResultTableModel model)) {
             return null;
         }

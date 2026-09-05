@@ -108,7 +108,36 @@ final class ObjectExplorerController {
 	// ---------- Construcao do painel ----------
 
 	JComponent buildObjectBrowser() {
-		objectTree = new JTree(new DefaultTreeModel(new DefaultMutableTreeNode("Sem conexao")));
+		objectTree = new JTree(new DefaultTreeModel(new DefaultMutableTreeNode("Sem conexao"))) {
+			private static final long serialVersionUID = 1L;
+
+			/**
+			 * Nome COMPLETO do no sob o mouse — pedido explicito do usuario
+			 * apos ver nomes de tabela truncados com "..." no popup de
+			 * Objetos, sem conseguir ler o resto ("precisa melhorar a
+			 * visualizacao"). Complementa (nao substitui) o redimensionamento
+			 * manual do popup (ver {@code MainWindow.AnchoredPopup#buildResizeGrip}):
+			 * mesmo popup largo o bastante na maioria das vezes, um nome
+			 * MUITO comprido ainda pode truncar — o tooltip sempre resolve,
+			 * sem depender do usuario lembrar de arrastar o grip.
+			 */
+			@Override
+			public String getToolTipText(MouseEvent e) {
+				if (e == null) {
+					return null;
+				}
+				TreePath path = getPathForLocation(e.getX(), e.getY());
+				if (path == null) {
+					return null;
+				}
+				Object last = path.getLastPathComponent();
+				if (last instanceof DefaultMutableTreeNode node && node.getUserObject() instanceof ObjNode obj) {
+					return obj.display();
+				}
+				return String.valueOf(last);
+			}
+		};
+		javax.swing.ToolTipManager.sharedInstance().registerComponent(objectTree);
 		objectTree.setRootVisible(true);
 		objectTree.setShowsRootHandles(false);
 		objectTree.putClientProperty("JTree.paintSelection", false);
@@ -968,6 +997,9 @@ final class ObjectExplorerController {
 			JMenuItem importCsvItem = new JMenuItem("Importar CSV...");
 			importCsvItem.addActionListener(a -> dataTransfer.importCsv(obj));
 			menu.add(importCsvItem);
+			JMenuItem populateItem = new JMenuItem("Popular tabela...");
+			populateItem.addActionListener(a -> dataTransfer.populateTable(obj));
+			menu.add(populateItem);
 			menu.addSeparator();
 			menu.add(buildTableMaintenanceMenu(obj));
 		}

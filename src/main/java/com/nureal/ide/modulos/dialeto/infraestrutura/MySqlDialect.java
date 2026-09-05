@@ -121,6 +121,13 @@ public class MySqlDialect implements DatabaseDialect {
         return "`" + ident.replace("`", "``") + "`";
     }
 
+    /** {@code ORDER BY RAND()}: aceitavel para o tamanho de amostra do Populador (dezenas/centenas), nao usado em tabelas gigantes de producao sem limite. */
+    @Override
+    public String randomSampleQuery(String table, String column, int limit) {
+        return "SELECT " + quoteIdentifier(column) + " FROM " + quoteIdentifier(table)
+                + " ORDER BY RAND() LIMIT " + limit;
+    }
+
     @Override
     public String createSchemaStatement(String name) {
         return "CREATE DATABASE " + quoteIdentifier(name);
