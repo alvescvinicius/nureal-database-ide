@@ -364,14 +364,32 @@ final class ResultStatusBar {
         exactTotalButton.setVisible(hasMore && lastKnownTotal == null);
     }
 
+    /**
+     * Separador de milhar (ponto, padrao PT-BR) SO na tela — pedido explicito
+     * do usuario apos ver "10000000 linha(s)" dificil de ler de relance.
+     * Nunca usado para copiar/exportar (ver {@link GridClipboard}/{@link
+     * ExcelExporter}, que continuam lendo o {@link java.math.BigDecimal}/
+     * {@code long} cru): se este rotulo algum dia ganhar "clique para
+     * copiar" (como {@link #selectionSummary} ja tem para a soma), o valor
+     * copiado tem que ser o numero puro, sem o ponto de milhar — decimais,
+     * quando houver, sempre com "." (nunca ",", que quebraria colar em SQL/
+     * Excel — mesmo motivo documentado em {@link #formatSum}).
+     */
+    private static final java.text.NumberFormat COUNT_FORMAT = java.text.NumberFormat
+            .getIntegerInstance(new java.util.Locale("pt", "BR"));
+
+    private static String formatCount(long n) {
+        return COUNT_FORMAT.format(n);
+    }
+
     /** Recompoe o texto da contagem a partir do ultimo {@link #refresh} + {@link #lastKnownTotal}, se houver. */
     private void refreshInfoText() {
         String countPart = (lastKnownTotal != null)
-                ? lastRowCount + " de " + lastKnownTotal + " linha(s)"
-                : lastRowCount + (lastHasMore ? " linhas carregadas" : " linha(s)");
+                ? formatCount(lastRowCount) + " de " + formatCount(lastKnownTotal) + " linha(s)"
+                : formatCount(lastRowCount) + (lastHasMore ? " linhas carregadas" : " linha(s)");
         info.setText(countPart
-                + "   ·   execucao " + lastExecMs + " ms"
-                + "   ·   busca " + lastFetchMs + " ms");
+                + "   ·   execucao " + formatCount(lastExecMs) + " ms"
+                + "   ·   busca " + formatCount(lastFetchMs) + " ms");
     }
 
     /**
@@ -395,12 +413,12 @@ final class ResultStatusBar {
             selectionSummary.setCursor(Cursor.getDefaultCursor());
             return;
         }
-        StringBuilder text = new StringBuilder(stats.cellCount() + " selecionada(s)");
+        StringBuilder text = new StringBuilder(formatCount(stats.cellCount()) + " selecionada(s)");
         if (stats.sum() != null) {
-            text.append("   ·   Soma: ").append(formatSum(stats.sum()));
-            text.append("   ·   Media: ").append(formatSum(stats.average()));
-            text.append("   ·   Min: ").append(formatSum(stats.min()));
-            text.append("   ·   Max: ").append(formatSum(stats.max()));
+            text.append("   ·   Soma: ").append(formatSumDisplay(stats.sum()));
+            text.append("   ·   Media: ").append(formatSumDisplay(stats.average()));
+            text.append("   ·   Min: ").append(formatSumDisplay(stats.min()));
+            text.append("   ·   Max: ").append(formatSumDisplay(stats.max()));
             selectionSummary.setToolTipText("Clique para copiar a soma");
             selectionSummary.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         } else {
@@ -438,6 +456,23 @@ final class ResultStatusBar {
         // stripTrailingZeros() pode devolver notacao cientifica para
         // inteiros grandes (ex.: 1E+2) — toPlainString() sempre expande.
         return stripped.toPlainString();
+    }
+
+    /**
+     * Mesma logica de {@link #formatSum} (sem casas decimais artificiais),
+     * so com separador de milhar (PT-BR, ponto) pra leitura — pedido
+     * explicito do usuario apos ver "5000050000" dificil de ler de relance
+     * (mesmo motivo/solucao ja aplicados a {@link #formatCount}). SO pra
+     * TELA: {@link #copySum} continua copiando {@link #formatSum} (sem
+     * pontuacao nenhuma) pra area de transferencia.
+     */
+    private static String formatSumDisplay(java.math.BigDecimal sum) {
+        java.math.BigDecimal stripped = sum.stripTrailingZeros();
+        int scale = Math.max(0, stripped.scale());
+        java.text.NumberFormat nf = java.text.NumberFormat.getNumberInstance(new java.util.Locale("pt", "BR"));
+        nf.setMinimumFractionDigits(scale);
+        nf.setMaximumFractionDigits(scale);
+        return nf.format(stripped);
     }
 
     /** Texto sem fundo/borda de botao, cor de link, cursor de mao — usado por {@link #loadAllButton}/{@link #exactTotalButton}. */

@@ -1878,7 +1878,19 @@ public class SqlEditorPane extends JPanel {
      * fixo (~200px sempre reservados na barra) e abre o find/replace
      * completo direto, sem duplicar nenhuma logica de busca nova.
      */
+    /**
+     * Alterna (nao so abre): clicar de novo no MESMO icone com a barra ja
+     * aberta agora FECHA ela, em vez de nao fazer nada (so refocar o campo
+     * "Localizar") — pedido explicito do usuario, mesmo comportamento de
+     * "clicar de novo fecha" que os outros popups ancorados da toolbar ja
+     * tem (Objetos/Historico/SQLs/Salvas, ver
+     * {@code MainWindow.AnchoredPopup#toggle}).
+     */
     void openFindReplace() {
+        if (findPopup != null && findPopup.isShowing()) {
+            hideFindBar();
+            return;
+        }
         showFindBar(false);
     }
 

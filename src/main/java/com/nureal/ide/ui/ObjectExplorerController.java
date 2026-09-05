@@ -7,7 +7,9 @@ import com.nureal.ide.compartilhado.designsystem.Spacing;
 
 import java.awt.BorderLayout;
 import java.awt.Component;
+import java.awt.Dialog;
 import java.awt.FlowLayout;
+import java.awt.Window;
 import java.awt.event.ActionEvent;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
@@ -46,6 +48,7 @@ import javax.swing.JTextArea;
 import javax.swing.JTree;
 import javax.swing.KeyStroke;
 import javax.swing.SwingWorker;
+import javax.swing.WindowConstants;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.TableColumn;
 import javax.swing.tree.DefaultMutableTreeNode;
@@ -53,6 +56,7 @@ import javax.swing.tree.DefaultTreeModel;
 import javax.swing.tree.TreePath;
 
 import com.nureal.ide.core.log.AppLogger;
+import com.nureal.ide.modulos.dialeto.dominio.contratos.DatabaseDialect;
 import com.nureal.ide.modulos.metadados.dominio.entidades.ColumnDetail;
 import com.nureal.ide.modulos.metadados.dominio.entidades.ColumnInfo;
 import com.nureal.ide.modulos.metadados.dominio.entidades.DbUserInfo;
@@ -98,6 +102,15 @@ final class ObjectExplorerController {
 
 	private final ObjectDataTransfer dataTransfer;
 	private final ObjectDdlActions ddlActions;
+
+	/**
+	 * Janela DECORADA (titulo, redimensionavel, arrastavel) que hospeda
+	 * {@link #objectBrowserPanel} quando "destacado" — ver
+	 * {@link #detachToFloatingWindow()}. {@code null} ate a primeira vez
+	 * que o usuario clica no botao de destacar; reaproveitada (nao
+	 * recriada) em toggles seguintes, ate o usuario fechar (X) de verdade.
+	 */
+	private JDialog floatingWindow;
 
 	ObjectExplorerController(MainWindow owner) {
 		this.owner = owner;
@@ -194,7 +207,13 @@ final class ObjectExplorerController {
 		objectSearch.setEnabled(false);
 		objectSearch.onTextChange(this::applyObjectFilter);
 
-		JButton switchSchemaButton = Buttons.iconButton(IconType.DATABASE, 13, () -> GridTheme.MUTED_TEXT);
+		// CHEVRON_LEFT (nao mais DATABASE): pedido explicito do usuario — a
+		// acao de verdade e "voltar" pra lista de esquemas da conexao (ver
+		// #switchSchema, que zera o esquema atual e mostra o seletor), nao
+		// "ver detalhes do banco"; MESMO icone ja usado pra essa ideia na
+		// seta desenhada na linha do schema (ver
+		// ObjectTreeCellRenderer#paintComponent/SCHEMA_SWITCH_ICON_SIZE).
+		JButton switchSchemaButton = Buttons.iconButton(IconType.CHEVRON_LEFT, 13, () -> GridTheme.MUTED_TEXT);
 		switchSchemaButton.setToolTipText("Trocar esquema / ver todos os esquemas");
 		switchSchemaButton.addActionListener(e -> switchSchema());
 
@@ -205,6 +224,20 @@ final class ObjectExplorerController {
 		JButton createSchemaButton = Buttons.iconButton(IconType.NEW, 13, () -> GridTheme.MUTED_TEXT);
 		createSchemaButton.setToolTipText("Criar esquema...");
 		createSchemaButton.addActionListener(e -> createSchema());
+
+		// "Destacar em janela": pedido explicito do usuario ("poderia abrir
+		// uma janela independente que posso mover para qualquer local ou
+		// deixar aberta so [presa a] main window") — ao contrario do popup
+		// ancorado (fecha sozinho ao perder foco, preso logo abaixo do
+		// icone do rail), esta janela e DECORADA de verdade (titulo,
+		// redimensionavel, arrastavel pra qualquer monitor) e so fecha
+		// quando o usuario clicar no X dela — ver #detachToFloatingWindow.
+		JButton detachButton = Buttons.iconButton(IconType.EXPAND, 13, () -> GridTheme.MUTED_TEXT);
+		detachButton.setToolTipText("Abrir em janela separada (arrastavel, fica aberta)");
+		detachButton.addActionListener(e -> {
+			owner.closeObjectsPopup();
+			detachToFloatingWindow();
+		});
 
 		// Titulo "OBJETOS" DE VOLTA aqui — a justificativa antiga (o rotulo
 		// da propria aba da sidebar ja dizia "Objetos", repetir seria
@@ -224,6 +257,7 @@ final class ObjectExplorerController {
 		headerIcons.add(switchSchemaButton);
 		headerIcons.add(refreshObjectsButton);
 		headerIcons.add(createSchemaButton);
+		headerIcons.add(detachButton);
 
 		// Busca + icones NA MESMA LINHA (nao mais busca embaixo dos icones)
 		// — pedido explicito do usuario: "barra de busca poderia ser menos
@@ -267,6 +301,52 @@ final class ObjectExplorerController {
 		if (objectBrowserPanel != null) {
 			objectBrowserPanel.setBorder(BorderFactory.createEmptyBorder(outer, outer, outer, outer));
 		}
+	}
+
+	// ---------- Janela flutuante ("destacar") ----------
+
+	/** {@code true} enquanto a arvore estiver numa janela PROPRIA (nao no popup ancorado) — ver {@link #detachToFloatingWindow()}. */
+	boolean isFloating() {
+		return floatingWindow != null && floatingWindow.isShowing();
+	}
+
+	/** Traz a janela flutuante pra frente — chamado por {@code MainWindow#showObjectsPopup} quando {@link #isFloating()} ja e verdade (clicar de novo no rail nao deveria abrir o popup ancorado por cima). */
+	void bringFloatingToFront() {
+		if (floatingWindow != null) {
+			floatingWindow.toFront();
+			floatingWindow.requestFocus();
+		}
+	}
+
+	/**
+	 * Move {@link #objectBrowserPanel} do popup ancorado (ja fechado pelo
+	 * chamador, ver {@code MainWindow#closeObjectsPopup}) pra uma janela
+	 * DECORADA de verdade — {@code Dialog.ModalityType.MODELESS} (nao
+	 * bloqueia o resto do app), redimensionavel, com titulo/botao de
+	 * fechar nativos do sistema operacional. Ao contrario do popup
+	 * ancorado ({@code MainWindow.AnchoredPopup}), NAO fecha sozinha ao
+	 * perder foco — exatamente o pedido do usuario ("deixar aberta" e
+	 * "mover para qualquer local"). Reaproveita a MESMA instancia de
+	 * janela em toggles seguintes (so o {@code setVisible}/tamanho mudam);
+	 * so recria se o usuario ja tiver fechado ela de vez (X nativo).
+	 */
+	void detachToFloatingWindow() {
+		Window ownerWindow = (Window) owner;
+		if (floatingWindow == null) {
+			floatingWindow = new JDialog(ownerWindow, "Objetos", Dialog.ModalityType.MODELESS);
+			floatingWindow.setDefaultCloseOperation(WindowConstants.HIDE_ON_CLOSE);
+			floatingWindow.setSize(360, 560);
+		}
+		// Sem setPreferredSize fixo aqui (diferente do popup ancorado): uma
+		// janela DE VERDADE ja tem seu proprio tamanho/redimensionamento
+		// nativo, nao precisa do piso artificial que o popup usava.
+		objectBrowserPanel.setPreferredSize(null);
+		floatingWindow.setContentPane(objectBrowserPanel);
+		if (!floatingWindow.isShowing()) {
+			floatingWindow.setLocationRelativeTo(ownerWindow);
+		}
+		floatingWindow.setVisible(true);
+		floatingWindow.toFront();
 	}
 
 	// ---------- Populacao / filtro da arvore ----------
@@ -984,6 +1064,12 @@ final class ObjectExplorerController {
 				generateDelete.addActionListener(a -> generateDelete(obj));
 				menu.add(generateDelete);
 				menu.add(buildGenerateJoinItem(obj));
+				JMenuItem generateDdl = new JMenuItem("Gerar DDL");
+				generateDdl.addActionListener(a -> generateDdl(obj));
+				menu.add(generateDdl);
+				JMenuItem generateDdlHierarchy = new JMenuItem("Gerar DDL com hierarquia...");
+				generateDdlHierarchy.addActionListener(a -> generateDdlHierarchy(obj));
+				menu.add(generateDdlHierarchy);
 			}
 		}
 		if (obj.type() == NodeType.TABLE) {
@@ -1549,6 +1635,65 @@ final class ObjectExplorerController {
 			}
 		}
 		return cols;
+	}
+
+	/** {@code SHOW CREATE TABLE} de uma tabela — reaproveitado por {@link #generateDdl}/{@link #generateDdlHierarchy} e por {@link TableDdlHierarchyDialog}. */
+	static String fetchTableDdl(Connection conn, DatabaseDialect dialect, String table) throws SQLException {
+		String sql = dialect.definitionQuery("TABLE", table);
+		try (Statement st = conn.createStatement(); ResultSet rs = st.executeQuery(sql)) {
+			if (rs.next()) {
+				int idx = pickDefinitionColumn(rs.getMetaData());
+				String def = rs.getString(idx);
+				return (def != null) ? def : "-- (sem definicao)";
+			}
+			return "-- (sem definicao)";
+		}
+	}
+
+	/** "Gerar DDL": {@code SHOW CREATE TABLE} SO desta tabela, direto na aba do editor — mesmo padrao sincrono de {@link #generateSelect}/etc., so que a definicao vem do banco (async por baixo). */
+	private void generateDdl(ObjNode obj) {
+		if (!owner.connectionManager().isConnected()) {
+			owner.statusBar().setText(" Conecte-se antes de gerar o DDL.");
+			return;
+		}
+		owner.statusBar().setText(" Carregando DDL de \"" + obj.name() + "\"...");
+		new SwingWorker<String, Void>() {
+			@Override
+			protected String doInBackground() throws Exception {
+				Connection conn = owner.connectionManager().getConnection();
+				return fetchTableDdl(conn, owner.dialect(), obj.name());
+			}
+
+			@Override
+			protected void done() {
+				try {
+					String ddl = get();
+					openGeneratedSqlTab("DDL " + obj.name(), ddl.stripTrailing() + ";\n",
+							" DDL gerado na aba atual do editor.");
+				} catch (Exception ex) {
+					owner.showError("Falha ao gerar DDL", ex);
+					owner.statusBar().setText(" Falha ao gerar DDL.");
+				}
+			}
+		}.execute();
+	}
+
+	/**
+	 * "Gerar DDL com hierarquia...": abre {@link TableDdlHierarchyDialog}
+	 * (grafo de FK + ordenacao topologica, mesmo padrao do "Exportar com
+	 * dependencias" da grade de resultados — pedido explicito do usuario:
+	 * "assim como nos exports de inserts"). {@code onSendToEditor} repassa
+	 * pro MESMO caminho sincrono de {@link #openGeneratedSqlTab} usado pelos
+	 * outros "Gerar..." — o dialogo em si nao sabe nada de abas/editor.
+	 */
+	private void generateDdlHierarchy(ObjNode obj) {
+		if (!owner.connectionManager().isConnected() || owner.currentSchema() == null) {
+			owner.statusBar().setText(" Abra um esquema antes de gerar DDL com hierarquia.");
+			return;
+		}
+		TableDdlHierarchyDialog.open(owner, owner.connectionManager(), owner.currentSchema().name(),
+				owner.tableMetadataCache(), obj.name(),
+				sql -> openGeneratedSqlTab("DDL " + obj.name(), sql, " DDL com hierarquia gerado na aba atual do editor."));
 	}
 
 	private static String prettyKind(String kind) {

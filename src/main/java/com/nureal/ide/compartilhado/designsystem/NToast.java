@@ -1,9 +1,11 @@
 package com.nureal.ide.compartilhado.designsystem;
 
 import java.awt.Color;
+import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
+import java.awt.Point;
 import java.awt.RenderingHints;
 
 import javax.swing.BorderFactory;
@@ -36,9 +38,21 @@ public final class NToast {
     private final JLabel bubbleLabel;
     private final JPanel layer;
     private final Timer hideTimer;
+    /**
+     * Area preferida pra CENTRALIZAR o toast (ex.: a area de resultados) —
+     * {@code null} cai no canto inferior central da JANELA INTEIRA (padrao
+     * antigo). Pedido explicito do usuario: o toast ancorado no rodape da
+     * janela inteira ficava bem em cima dos links "Carregar todas as linhas
+     * restantes"/"Ver total exato" da grade, bloqueando o clique neles
+     * exatamente na janela de tempo em que apareciam (logo apos rodar uma
+     * consulta) — mesmo motivo/solucao ja aplicados ao card "Executando
+     * consulta..." (ver {@code ResultsAreaController#overlayStack}).
+     */
+    private final Component anchor;
 
-    private NToast(JFrame frame) {
+    private NToast(JFrame frame, Component anchor) {
         this.frame = frame;
+        this.anchor = anchor;
 
         bubbleLabel = new JLabel();
         bubbleLabel.setForeground(Color.WHITE);
@@ -81,7 +95,19 @@ public final class NToast {
      * resto da janela fora dessa janela de tempo.
      */
     public static NToast attach(JFrame frame, JLabel messageSource) {
-        NToast toast = new NToast(frame);
+        return attach(frame, messageSource, null);
+    }
+
+    /**
+     * Igual a {@link #attach(JFrame, JLabel)}, mas centralizando a bolha
+     * dentro de {@code anchor} (ex.: a area de resultados) em vez do canto
+     * inferior da janela inteira — ver javadoc de {@link #anchor}.
+     * {@code anchor} pode ser {@code null} (mesmo comportamento antigo) ou
+     * ficar temporariamente invisivel/fora de tela (ver {@link #show}, cai
+     * pro comportamento antigo nesse caso).
+     */
+    public static NToast attach(JFrame frame, JLabel messageSource, Component anchor) {
+        NToast toast = new NToast(frame, anchor);
         frame.setGlassPane(toast.layer);
         messageSource.addPropertyChangeListener("text", evt -> {
             String text = messageSource.getText();
@@ -98,8 +124,19 @@ public final class NToast {
         int maxWidth = Math.max(200, frame.getWidth() - 80);
         int width = Math.min(pref.width, maxWidth);
         int height = pref.height;
-        int x = Math.max(16, (frame.getWidth() - width) / 2);
-        int y = Math.max(16, frame.getHeight() - height - 24);
+        int x;
+        int y;
+        if (anchor != null && anchor.isShowing()) {
+            // Centro de "anchor" convertido pras coordenadas do glass pane
+            // (que cobre a JANELA inteira) — o toast fica no meio da area
+            // de resultados, nunca em cima dos links do rodape dela.
+            Point anchorOrigin = SwingUtilities.convertPoint(anchor, 0, 0, layer);
+            x = anchorOrigin.x + Math.max(0, (anchor.getWidth() - width) / 2);
+            y = anchorOrigin.y + Math.max(0, (anchor.getHeight() - height) / 2);
+        } else {
+            x = Math.max(16, (frame.getWidth() - width) / 2);
+            y = Math.max(16, frame.getHeight() - height - 24);
+        }
         bubble.setBounds(x, y, width, height);
         bubble.setVisible(true);
         layer.setVisible(true);

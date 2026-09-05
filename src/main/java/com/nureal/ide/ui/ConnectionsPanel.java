@@ -336,6 +336,9 @@ public class ConnectionsPanel extends JPanel {
         JMenuItem edit = new JMenuItem("Editar...");
         edit.setIcon(Icons.get(IconType.EDIT, 15, GridTheme.HEADER_FOREGROUND));
         edit.addActionListener(a -> onEdit());
+        JMenuItem duplicate = new JMenuItem("Duplicar");
+        duplicate.setIcon(Icons.get(IconType.COPY, 15, GridTheme.HEADER_FOREGROUND));
+        duplicate.addActionListener(a -> onDuplicate());
         JMenuItem delete = new JMenuItem("Excluir");
         delete.setIcon(Icons.get(IconType.DELETE, 15, GridTheme.HEADER_FOREGROUND));
         delete.addActionListener(a -> onDelete());
@@ -343,6 +346,7 @@ public class ConnectionsPanel extends JPanel {
         menu.add(disconnect);
         menu.addSeparator();
         menu.add(edit);
+        menu.add(duplicate);
         menu.add(delete);
         menu.show(list, point.x, point.y);
     }
@@ -531,6 +535,47 @@ public class ConnectionsPanel extends JPanel {
             applyFilter();
             list.setSelectedValue(edited, true);
         }
+    }
+
+    /**
+     * "Duplicar": copia host/porta/schema/usuario/senha da conexao
+     * selecionada pra uma nova, so com o NOME diferente (unico campo
+     * obrigatoriamente distinto — mesmo criterio ja usado em
+     * {@code DdlColumnRowClipboard#pasteAsNewColumn}) — pedido explicito do
+     * usuario. Util pra criar uma variante de uma conexao ja configurada
+     * (ex.: mesmo host, schema diferente) sem preencher tudo de novo.
+     * Abre direto pronta pra editar (nao so salva uma copia muda): o nome
+     * sugerido ("X (copia)", incrementando se ja existir) quase sempre
+     * precisa ser ajustado, e schema/host tambem sao o motivo mais comum de
+     * duplicar em vez de criar do zero.
+     */
+    private void onDuplicate() {
+        ConnectionProfile selected = list.getSelectedValue();
+        if (selected == null) {
+            return;
+        }
+        String newName = nextAvailableCopyName(selected.name());
+        ConnectionProfile draft = new ConnectionProfile(newName, selected.host(), selected.port(), selected.schema(),
+                selected.user(), selected.password(), selected.savePassword());
+        ConnectionProfile created = ConnectionEditDialog.show(dialogOwner(), draft, name -> nameTaken(name, null),
+                "Duplicar conexao");
+        if (created != null) {
+            all.add(created);
+            persist();
+            applyFilter();
+            list.setSelectedValue(created, true);
+        }
+    }
+
+    /** "X (copia)", "X (copia 2)", "X (copia 3)"... — primeiro nome livre pra {@link #onDuplicate()}. */
+    private String nextAvailableCopyName(String baseName) {
+        String candidate = baseName + " (copia)";
+        int n = 2;
+        while (nameTaken(candidate, null)) {
+            candidate = baseName + " (copia " + n + ")";
+            n++;
+        }
+        return candidate;
     }
 
     /**

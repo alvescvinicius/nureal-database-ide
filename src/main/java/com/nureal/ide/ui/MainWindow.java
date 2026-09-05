@@ -924,7 +924,11 @@ public class MainWindow extends JFrame {
 		// (antigo connStatusLabel do rodape) mudou pro ConnectionStatusCard
 		// fixo da sidebar (ver buildLeftSide), sem duplicar em lugar nenhum.
 		setDisconnectedState();
-		NToast.attach(this, statusBar);
+		// Centralizado na area de resultados (nao no rodape da janela
+		// inteira) — pedido explicito do usuario: o toast bloqueava os
+		// links "Carregar todas as linhas restantes"/"Ver total exato" da
+		// grade, ancorado bem em cima deles logo apos rodar uma consulta.
+		NToast.attach(this, statusBar, resultsArea);
 
 		applyDensityToPanels();
 	}
@@ -940,8 +944,12 @@ public class MainWindow extends JFrame {
 	 * {@link ConnectionStatusCard}), o que foge do "premium"/proporcionado
 	 * que o resto do Design System pede (ver DESIGN_SYSTEM.md secao 4). O
 	 * piso equivalente ja existe do lado oposto: {@link ConnectionStatusCard#MIN_WIDTH_PX}.
+	 * <p>
+	 * Valor AUMENTADO de 560 pra 760 — pedido explicito do usuario apos ver
+	 * a pilula pequena demais numa janela larga, com vao vazio grande dos
+	 * dois lados ("a barra de conexoes deveria ter um tamanho melhor").
 	 */
-	private static final int CONNECTION_PILL_MAX_WIDTH = 560;
+	private static final int CONNECTION_PILL_MAX_WIDTH = 760;
 
 	/**
 	 * {@code | Executar..Salvar | Conexao (expansivel, com teto) | Busca+
@@ -2061,6 +2069,41 @@ public class MainWindow extends JFrame {
 			chatWindow.setSchemaLabel(chatSchemaLabel());
 		}
 		refreshSqlEditorsCount();
+		refreshConnectionTabDots();
+	}
+
+	/**
+	 * Mesma cor de identidade por conexao ({@link #colorForWorkspace}) que
+	 * ja colore o dot de cada aba de SCRIPT (ver o loop logo acima) —
+	 * pedido explicito do usuario: "as bolinhas das abas ficaram [coloridas
+	 * pela identidade da conexao] mas a da conexao nao acompanhou". Ao
+	 * contrario do loop de {@code editorTabs} (que so mostra o workspace
+	 * ATIVO, um dot so repetido em todas as abas dele), aqui cada aba da
+	 * tira de CONEXAO e um workspace DIFERENTE — o dot de cada uma reflete
+	 * o proprio estado dela (conectando/conectada/desconectada), nao o do
+	 * workspace ativo.
+	 */
+	private void refreshConnectionTabDots() {
+		for (int i = 0; i < connectionTabs.getTabCount(); i++) {
+			Component c = connectionTabs.getComponentAt(i);
+			if (c == connectionPlusTab) {
+				continue;
+			}
+			Conexao w = workspaceForPanel(c);
+			if (w == null || w.profile() == null) {
+				connectionTabs.setIconAt(i, ConnectionsPanel.statusDot(new Color(0xC4C9D1)));
+				continue;
+			}
+			Icon dot;
+			if (w.name().equals(connectingWorkspaceName)) {
+				dot = ConnectionsPanel.statusDot(GridTheme.HEADER_HIGHLIGHT_BORDER);
+			} else if (w.mgr().isConnected()) {
+				dot = ConnectionsPanel.statusDot(colorForWorkspace(w.name()));
+			} else {
+				dot = ConnectionsPanel.statusDot(new Color(0xC4C9D1));
+			}
+			connectionTabs.setIconAt(i, dot);
+		}
 	}
 
 	/** "Esquema: X" pro badge do topo do Chat (ver ChatPanel), ou rotulo neutro sem conexao/esquema. */
@@ -2135,7 +2178,18 @@ public class MainWindow extends JFrame {
 		// de #buildToolbar, precisa dele ja existente pra achar seu dono de
 		// dialogos, ver ConnectionsPanel#setOwnerWindow, e pro botao "+
 		// Nova conexao").
-		connectionsPanel = new ConnectionsPanel(connectionStore, this::connectTo, this::disconnectFrom);
+		// Fecha o popup "Conexoes salvas" logo apos pedir a conexao (nao
+		// espera terminar) — pedido explicito do usuario: duplo-clique numa
+		// conexao deveria fechar a janela em seguida, em vez de ficar
+		// aberta por cima enquanto conecta (o status da conexao ja aparece
+		// em outro lugar — dot da conexao, toast — sem precisar do popup
+		// continuar visivel). Se #connectTo precisar pedir senha antes
+		// (dialogo modal sincrono), o popup so fecha DEPOIS desse dialogo
+		// ser respondido, nunca antes.
+		connectionsPanel = new ConnectionsPanel(connectionStore, p -> {
+			connectTo(p);
+			connectionsPopup.close();
+		}, this::disconnectFrom);
 		connectionsPanel.setOwnerWindow(this);
 		connectionsPanel.setRowHeight(scaledPx(resultRowHeightBasePx()));
 		// Tamanho do popup recalculado a cada abertura (ver #showConnectionsPopup),
@@ -2235,7 +2289,12 @@ public class MainWindow extends JFrame {
 				.addItem("sqls", IconType.EDIT, "SQLs")
 				.addItem("favoritos", IconType.FAVORITE, "Favoritos")
 				.addItem("historico", IconType.HISTORY, "Historico")
-				.addItem("ia", IconType.CHAT, "IA")
+				// "ia" removido do rail de proposito — pedido explicito do
+				// usuario: "quero desativar a opcao de abrir o chat de ia
+				// porque nao esta pronto". So tira o PONTO DE ENTRADA (este
+				// item + o case "ia" abaixo, ver #onRailItemSelected) — o
+				// modulo com.nureal.ide.modulos.iachat continua intacto,
+				// so reabilitar aqui quando o recurso estiver pronto.
 				.addItem("backup", IconType.BACKUP, "Backup")
 				.addItem("usuarios", IconType.USERS, "Usuarios")
 				.addItem("mais", IconType.MORE, "Mais");
@@ -2255,11 +2314,19 @@ public class MainWindow extends JFrame {
 	private void onRailItemSelected(String id) {
 		JComponent anchor = iconRail.anchorFor(id);
 		switch (id) {
-			case "objetos" -> showObjectsPopup(anchor);
-			case "sqls" -> showSqlEditorsPopup(anchor);
-			case "favoritos" -> showSavedQueriesPopup(anchor);
-			case "historico" -> showHistoryPopup(anchor);
-			case "ia" -> openAiChat();
+			// Objetos/SQLs/Favoritos/Historico SEMPRE ancoram no icone de
+			// "Objetos" (nao no proprio icone clicado) — pedido explicito do
+			// usuario: "devem abrir da mesma forma... e na mesma posicao e
+			// tamanho inicial pra ficar padronizado e com menos movimento".
+			// Antes, cada um abria alinhado ao PROPRIO icone (posicoes
+			// diferentes na coluna do rail), entao o popup "pulava" de
+			// altura toda vez que o usuario trocava de item — com todos
+			// ancorados no mesmo ponto fixo, so a LARGURA/altura do
+			// conteudo muda, a POSICAO na tela fica sempre a mesma.
+			case "objetos" -> showObjectsPopup(iconRail.anchorFor("objetos"));
+			case "sqls" -> showSqlEditorsPopup(iconRail.anchorFor("objetos"));
+			case "favoritos" -> showSavedQueriesPopup(iconRail.anchorFor("objetos"));
+			case "historico" -> showHistoryPopup(iconRail.anchorFor("objetos"));
 			case "backup" -> objectExplorer.openBackupRestore();
 			case "usuarios" -> objectExplorer.openUserManagement();
 			case "mais" -> {
@@ -2384,7 +2451,18 @@ public class MainWindow extends JFrame {
 
 			Point anchorLoc = anchor.getLocationOnScreen();
 			if (placement == Placement.RIGHT) {
-				popup.setLocation(anchorLoc.x + anchor.getWidth(), anchorLoc.y);
+				// "RIGHT" quer dizer "pro lado de FORA do rail", nao
+				// literalmente direita — com o rail movido pra direita da
+				// janela (ver #sidebarOnRight/#buildLeftSide), abrir pra
+				// direita jogaria o popup pra FORA da tela (ou por cima de
+				// outro monitor). Pedido explicito do usuario: "quando a
+				// barra de navegacao estiver na direita, as janelas devem
+				// abrir para esquerda" — mesmo principio de menu de
+				// contexto que vira de lado perto da borda da tela, so que
+				// decidido pela posicao do RAIL (fixa), nao calculado a
+				// cada abertura.
+				int x = sidebarOnRight ? (anchorLoc.x - popup.getWidth()) : (anchorLoc.x + anchor.getWidth());
+				popup.setLocation(x, anchorLoc.y);
 			} else {
 				popup.setLocation(anchorLoc.x, anchorLoc.y + anchor.getHeight());
 			}
@@ -2750,6 +2828,17 @@ public class MainWindow extends JFrame {
 
 	private JComponent buildEditorArea() {
 		connectionTabs = new JTabbedPane();
+		// Fundo levemente distinto (mesmo tom de "chrome" ja usado em barras
+		// estruturais do app, ver SqlEditorPane#buildBreadcrumbBar) — pedido
+		// explicito do usuario: as abas de SCRIPT (editorTabs, dentro de
+		// cada Conexao#ownPanel) ficavam com o MESMO peso visual da tira de
+		// CONEXAO logo acima, parecendo duas tiras de abas irmas/soltas em
+		// vez de "script fica dentro/abaixo da conexao". Reaplicado em
+		// #toggleTheme (setBackground explicito nao e UIResource, entao
+		// FlatLaf.updateUI() nao o atualiza sozinho ao trocar de tema —
+		// mesma familia de cuidado ja documentada em ConnectionStatusCard/
+		// ObjectTreeCellRenderer).
+		refreshConnectionTabsChrome();
 		// Mesmo motivo do editorTabs (ver #newTerminalTabsPane): uma unica
 		// linha de abas, com rolagem, nunca empilhada em varias linhas.
 		connectionTabs.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
@@ -2836,6 +2925,13 @@ public class MainWindow extends JFrame {
 		panel.setBorder(BorderFactory.createEmptyBorder(0, 0, 4, 0));
 		panel.add(connectionTabs, BorderLayout.CENTER);
 		return panel;
+	}
+
+	/** Reaplica o fundo "chrome" da tira de abas de conexao — ver comentario em {@link #buildEditorArea} e chamador em {@link #toggleTheme}. */
+	private void refreshConnectionTabsChrome() {
+		if (connectionTabs != null) {
+			connectionTabs.setBackground(GridTheme.HEADER_BACKGROUND);
+		}
 	}
 
 	/** A {@link Conexao} dona do painel de nivel superior informado (ver {@code Conexao#ownPanel}), ou {@code null}. */
@@ -3972,6 +4068,7 @@ public class MainWindow extends JFrame {
 		// com a cor GridTheme do tema anterior ate a proxima mudanca de
 		// estado de conexao.
 		connectionCard.refreshTheme();
+		refreshConnectionTabsChrome();
 		// ConnectionsPanel/HistoryPanel/SavedQueriesPanel/sqlEditorsPanel (os
 		// 4 conteudos dos popups de navegacao, ver AnchoredPopup) so ficam
 		// dentro de uma janela de verdade ENQUANTO o proprio popup esta
@@ -5000,7 +5097,7 @@ public class MainWindow extends JFrame {
 		if (editor == currentEditor()) {
 			resultsController.showResults(results);
 		}
-		if (ranStructuralDdl(statements, results)) {
+		if (ranStructuralDdl(statements)) {
 			if (currentSchema() != null) {
 				objectExplorer.refreshObjectTree(false);
 			} else if (activeWorkspace != null && activeWorkspace.mgr.isConnected()) {
@@ -5152,30 +5249,72 @@ public class MainWindow extends JFrame {
 	 * mecanismo (compartilhado com Conexoes/SQLs/Salvas/Objetos).
 	 */
 	private void showHistoryPopup(JComponent anchor) {
-		historyPanel.setPreferredSize(new Dimension(scaledPx(340), scaledPx(420)));
+		historyPanel.setPreferredSize(defaultNavPopupSize());
 		historyPanel.setBorder(BorderFactory.createLineBorder(GridTheme.HEADER_BORDER, 1, true));
 		historyPopup.toggle(anchor, historyPanel, Placement.RIGHT);
 	}
 
 	/** Abre {@link #sqlEditorsPanel} (atalho "+ nova aba" + lista das abas de SQL abertas) num painel flutuante ancorado a direita do item "SQLs" do rail — ver {@link AnchoredPopup}. */
 	private void showSqlEditorsPopup(JComponent anchor) {
-		sqlEditorsPanel.setPreferredSize(new Dimension(scaledPx(280), scaledPx(360)));
+		sqlEditorsPanel.setPreferredSize(defaultNavPopupSize());
 		sqlEditorsPanel.setBorder(BorderFactory.createLineBorder(GridTheme.HEADER_BORDER, 1, true));
 		sqlEditorsPopup.toggle(anchor, sqlEditorsPanel, Placement.RIGHT);
 	}
 
 	/** Abre {@link #savedQueriesPanel} num painel flutuante ancorado a direita do item "Favoritos" do rail — ver {@link AnchoredPopup}. */
 	private void showSavedQueriesPopup(JComponent anchor) {
-		savedQueriesPanel.setPreferredSize(new Dimension(scaledPx(340), scaledPx(420)));
+		savedQueriesPanel.setPreferredSize(defaultNavPopupSize());
 		savedQueriesPanel.setBorder(BorderFactory.createLineBorder(GridTheme.HEADER_BORDER, 1, true));
 		savedQueriesPopup.toggle(anchor, savedQueriesPanel, Placement.RIGHT);
 	}
 
-	/** Abre {@link #objectsBrowserPanel} (arvore de Objetos) num painel flutuante ancorado a direita do item "Objetos" do rail — ver {@link AnchoredPopup}. */
+	/**
+	 * Abre {@link #objectsBrowserPanel} (arvore de Objetos) num painel
+	 * flutuante ancorado a direita do item "Objetos" do rail — ver
+	 * {@link AnchoredPopup}. Se o usuario ja tiver "destacado" a arvore numa
+	 * janela propria (ver {@link ObjectExplorerController#detachToFloatingWindow()},
+	 * botao de destacar dentro do proprio painel), clicar de novo no rail so
+	 * traz essa janela pra frente — nao reabre o popup ancorado por cima
+	 * dela (o conteudo ja esta la, nao aqui).
+	 */
 	private void showObjectsPopup(JComponent anchor) {
-		objectsBrowserPanel.setPreferredSize(new Dimension(scaledPx(320), scaledPx(480)));
+		if (objectExplorer.isFloating()) {
+			objectExplorer.bringFloatingToFront();
+			return;
+		}
+		objectsBrowserPanel.setPreferredSize(defaultNavPopupSize());
 		objectsBrowserPanel.setBorder(BorderFactory.createLineBorder(GridTheme.HEADER_BORDER, 1, true));
 		objectsPopup.toggle(anchor, objectsBrowserPanel, Placement.RIGHT);
+	}
+
+	/**
+	 * Tamanho PADRAO de TODOS os popups de navegacao ancorados no rail
+	 * (Objetos/SQLs/Favoritos/Historico) — MESMO calculo pros 4, nao mais
+	 * um numero solto por painel (Objetos 320x480, SQLs 280x360, Favoritos/
+	 * Historico 340x420, cada um historicamente ajustado sem nenhum
+	 * criterio em comum) — pedido explicito do usuario: "padronize o
+	 * tamanho de todas as janelas de navegacao como objetos, sqls,
+	 * historico etc". Responsivo ao tamanho da JANELA (nao fixo): um
+	 * schema/lista grande de qualquer um desses paineis se beneficia do
+	 * mesmo espaco generoso, e a MESMA janela redimensionada precisa dar o
+	 * mesmo espaco pra qualquer um deles, nao só pro que por acaso ganhou o
+	 * numero maior no passado. {@code Conexoes} (ver
+	 * {@link #showConnectionsPopup}) fica DE FORA de proposito — o dela
+	 * imita a largura do proprio card de conexao (pedido explicito
+	 * anterior, documentado la), um caso visual diferente, nao
+	 * "esquecido". Continua sendo so o PADRAO: o usuario ainda pode
+	 * arrastar o grip (ver {@code AnchoredPopup#buildResizeGrip}) pra
+	 * qualquer tamanho, lembrado por popup pelo resto da sessao.
+	 */
+	private Dimension defaultNavPopupSize() {
+		int width = Math.min(scaledPx(440), Math.max(scaledPx(320), getWidth() * 3 / 10));
+		int height = Math.min(scaledPx(680), Math.max(scaledPx(480), getHeight() * 7 / 10));
+		return new Dimension(width, height);
+	}
+
+	/** Fecha o popup ancorado de Objetos (se aberto) — chamado por {@link ObjectExplorerController#detachToFloatingWindow()} antes de mover o painel pra janela propria. */
+	void closeObjectsPopup() {
+		objectsPopup.close();
 	}
 
 	/**
@@ -5255,16 +5394,30 @@ public class MainWindow extends JFrame {
 	}
 
 	/**
-	 * Verdadeiro se alguma das instrucoes EXECUTADAS COM SUCESSO (sem erro) era DDL
-	 * estrutural — caso em que o navegador de objetos precisa ser recarregado. A
-	 * lista de resultados pode ser menor que a de instrucoes quando a execucao
-	 * parou num erro ou foi cancelada no meio.
+	 * Verdadeiro se alguma das instrucoes do lote era DDL estrutural — caso
+	 * em que o navegador de objetos precisa ser recarregado.
+	 * <p>
+	 * Varre {@code statements} INTEIRO, nao mais pareado por indice com
+	 * {@code results}: {@link SqlExecutionEngine#executeStatements} junta
+	 * TODAS as instrucoes sem ResultSet (INSERT/UPDATE/DELETE/DDL) numa
+	 * UNICA entrada "Comandos (N)" no FINAL de {@code results} — assim que
+	 * o lote tem mais de uma instrucao sem SELECT, {@code results} fica bem
+	 * menor que {@code statements} e o INDICE de uma delas para de bater
+	 * com o indice do resultado combinado. Um lote como "UPDATE a; UPDATE
+	 * b; CREATE TABLE c" (3 instrucoes, 1 resultado combinado) so
+	 * verificava {@code statements.get(0)} (o UPDATE, nao DDL) e nunca
+	 * chegava a olhar o CREATE TABLE — bug relatado pelo usuario: "ao
+	 * executar qualquer instrucao DDL EM QUALQUER MOMENTO [do script], a
+	 * lista de objetos deve ser atualizada" (so funcionava por coincidencia
+	 * quando a DDL calhava de estar bem no INICIO do lote). Custo aceito:
+	 * uma DDL que existia no texto mas falhou ANTES de rodar (erro numa
+	 * instrucao anterior interrompe o lote) ainda pode disparar um refresh
+	 * — inofensivo (so recarrega metadados iguais aos de antes), bem mais
+	 * barato que o oposto (deixar o navegador desatualizado de verdade).
 	 */
-	private static boolean ranStructuralDdl(List<String> statements, List<QueryResult> results) {
-		int n = Math.min(statements.size(), results.size());
-		for (int i = 0; i < n; i++) {
-			QueryResult r = results.get(i);
-			if (!r.error() && SqlRiskAnalyzer.isStructuralChange(statements.get(i))) {
+	private static boolean ranStructuralDdl(List<String> statements) {
+		for (String sql : statements) {
+			if (SqlRiskAnalyzer.isStructuralChange(sql)) {
 				return true;
 			}
 		}

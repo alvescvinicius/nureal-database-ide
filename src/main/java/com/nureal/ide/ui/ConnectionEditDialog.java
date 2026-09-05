@@ -61,9 +61,24 @@ public final class ConnectionEditDialog {
      *                  conectadas quando so uma esta).
      */
     public static ConnectionProfile show(Component parent, ConnectionProfile existing, Predicate<String> nameTaken) {
+        return show(parent, existing, nameTaken, null);
+    }
+
+    /**
+     * Igual a {@link #show(Component, ConnectionProfile, Predicate)}, so com
+     * o titulo do dialogo customizavel — usado por
+     * {@code ConnectionsPanel#onDuplicate}, onde {@code existing} nao e
+     * {@code null} (os campos vem preenchidos com a copia) mas o dialogo
+     * NAO esta editando a conexao original, entao "Editar conexao" seria
+     * enganoso. {@code titleOverride} nulo cai no titulo padrao de sempre
+     * ("Nova conexao"/"Editar conexao" conforme {@code existing}).
+     */
+    public static ConnectionProfile show(Component parent, ConnectionProfile existing, Predicate<String> nameTaken,
+            String titleOverride) {
         ConnectionProfile base = (existing != null) ? existing : ConnectionProfile.mysqlDefault();
         Window owner = (DialogUtil.owner(parent) instanceof Window w) ? w : null;
-        String title = (existing == null) ? "Nova conexao" : "Editar conexao";
+        String title = (titleOverride != null) ? titleOverride
+                : (existing == null) ? "Nova conexao" : "Editar conexao";
 
         DialogShell shell = DialogShell.create(owner, title, JDialog.ModalityType.APPLICATION_MODAL);
         JDialog dialog = shell.dialog();
